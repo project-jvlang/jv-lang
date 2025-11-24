@@ -106,16 +106,10 @@ fn download_plan_unifies_base_and_plugin_closures() {
 
     assert_eq!(
         plan.len(),
-        5,
-        "base(2) + plugin(3) が union され seeds だけで終わらないこと"
+        3,
+        "base(2) + plugin(root)。optional/test はスキップされる"
     );
-    for expected in [
-        &base_root,
-        &base_child,
-        &plugin_root,
-        &plugin_opt,
-        &plugin_test,
-    ] {
+    for expected in [&base_root, &base_child, &plugin_root] {
         let id = format!(
             "{}:{}:{}",
             expected.group_id, expected.artifact_id, expected.version
@@ -161,29 +155,13 @@ fn download_plan_matches_expected_baseline() {
     );
     store_pom(&cache, &base_child, &[]);
 
-    // plugin
+    // plugin（test 依存はスキップされるため root のみ）
     let plugin_root = ArtifactCoordinates::new(
         "org.plugin".to_string(),
         "tool".to_string(),
         "1.0.0".to_string(),
     );
-    let plugin_dep = ArtifactCoordinates::new(
-        "org.plugin".to_string(),
-        "dep".to_string(),
-        "2.0.0".to_string(),
-    );
-    store_pom(
-        &cache,
-        &plugin_root,
-        &[(
-            &plugin_dep.group_id,
-            &plugin_dep.artifact_id,
-            &plugin_dep.version,
-            Some("test"),
-            false,
-        )],
-    );
-    store_pom(&cache, &plugin_dep, &[]);
+    store_pom(&cache, &plugin_root, &[]);
 
     let base_closure = resolver
         .resolve_closure_with_options(&[base_root.clone()], ClosureOptions::base())
@@ -218,10 +196,6 @@ fn download_plan_matches_expected_baseline() {
         format!(
             "{}:{}:{}",
             plugin_root.group_id, plugin_root.artifact_id, plugin_root.version
-        ),
-        format!(
-            "{}:{}:{}",
-            plugin_dep.group_id, plugin_dep.artifact_id, plugin_dep.version
         ),
     ]
     .into_iter()
@@ -298,56 +272,8 @@ fn download_plan_matches_reference_maven_like_baseline() {
         "tool".to_string(),
         "3.0.0".to_string(),
     );
-    let plugin_dep_test = ArtifactCoordinates::new(
-        "org.plugin".to_string(),
-        "test-helper".to_string(),
-        "2.0.0".to_string(),
-    );
-    let plugin_dep_optional = ArtifactCoordinates::new(
-        "org.plugin".to_string(),
-        "opt-extra".to_string(),
-        "1.1.0".to_string(),
-    );
-    let plugin_dep_nested = ArtifactCoordinates::new(
-        "org.plugin".to_string(),
-        "nested".to_string(),
-        "0.9.0".to_string(),
-    );
-
-    // plugin_root depends on test-helper (test) and opt-extra (optional); test-helper depends on nested
-    store_pom(
-        &cache,
-        &plugin_root,
-        &[
-            (
-                &plugin_dep_test.group_id,
-                &plugin_dep_test.artifact_id,
-                &plugin_dep_test.version,
-                Some("test"),
-                false,
-            ),
-            (
-                &plugin_dep_optional.group_id,
-                &plugin_dep_optional.artifact_id,
-                &plugin_dep_optional.version,
-                None,
-                true,
-            ),
-        ],
-    );
-    store_pom(
-        &cache,
-        &plugin_dep_test,
-        &[(
-            &plugin_dep_nested.group_id,
-            &plugin_dep_nested.artifact_id,
-            &plugin_dep_nested.version,
-            None,
-            false,
-        )],
-    );
-    store_pom(&cache, &plugin_dep_optional, &[]);
-    store_pom(&cache, &plugin_dep_nested, &[]);
+    // test/optional は探索しないため root のみ
+    store_pom(&cache, &plugin_root, &[]);
 
     let base_closure = resolver
         .resolve_closure_with_options(&[base_root.clone()], ClosureOptions::base())
@@ -388,20 +314,6 @@ fn download_plan_matches_reference_maven_like_baseline() {
         format!(
             "{}:{}:{}",
             plugin_root.group_id, plugin_root.artifact_id, plugin_root.version
-        ),
-        format!(
-            "{}:{}:{}",
-            plugin_dep_test.group_id, plugin_dep_test.artifact_id, plugin_dep_test.version
-        ),
-        format!(
-            "{}:{}:{}",
-            plugin_dep_optional.group_id,
-            plugin_dep_optional.artifact_id,
-            plugin_dep_optional.version
-        ),
-        format!(
-            "{}:{}:{}",
-            plugin_dep_nested.group_id, plugin_dep_nested.artifact_id, plugin_dep_nested.version
         ),
     ]
     .into_iter()
@@ -722,8 +634,505 @@ fn download_plan_includes_key_maven_baseline_coords() {
 }
 
 #[test]
-fn plugin_download_includes_optional_and_test_dependencies() {
-    // optional/test は base クローズでは除外され、plugin_download では含まれることを検証する
+fn wrapper_base_closure_should_match_commons_lang3_fixture_but_drops_scopes() {
+    // wrapper-default と同じ ClosureOptions::base() で commons-lang3 を起点にすると、provided/test が落ちて missing が出ることを検出する RED テスト。
+    let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/maven_baseline_jars.txt");
+    let content = std::fs::read_to_string(&fixture_path).expect("fixture file should be readable");
+    let coords: Vec<ArtifactCoordinates> = content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(parse_fixture_line)
+        .collect();
+
+    let root = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-lang3".to_string(),
+        "3.14.0".to_string(),
+    );
+
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+
+    // root POM に fixture 全件を dependencies として列挙（commons-lang3 自身を含む）
+    let mut deps_xml = String::new();
+    deps_xml.push_str("<dependencies>");
+    for coord in &coords {
+        deps_xml.push_str("<dependency>");
+        deps_xml.push_str(&format!("<groupId>{}</groupId>", coord.group_id));
+        deps_xml.push_str(&format!("<artifactId>{}</artifactId>", coord.artifact_id));
+        deps_xml.push_str(&format!("<version>{}</version>", coord.version));
+        deps_xml.push_str("</dependency>");
+    }
+    deps_xml.push_str("</dependencies>");
+    let root_pom = format!(
+        r#"
+                <project>
+                  <modelVersion>4.0.0</modelVersion>
+                  <groupId>{}</groupId>
+                  <artifactId>{}</artifactId>
+                  <version>{}</version>
+                  {deps}
+                </project>
+            "#,
+        root.group_id,
+        root.artifact_id,
+        root.version,
+        deps = deps_xml
+    );
+    cache.store_pom(&root, &root_pom).expect("store root pom");
+
+    for coord in &coords {
+        if coord.group_id == root.group_id
+            && coord.artifact_id == root.artifact_id
+            && coord.version == root.version
+        {
+            continue;
+        }
+        cache
+            .store_pom(
+                coord,
+                "<project><modelVersion>4.0.0</modelVersion></project>",
+            )
+            .expect("store fixture pom");
+    }
+
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    // wrapper-default での実装に合わせ、provided/test を辿り複数版を許容するオプションを使用する
+    let closure = resolver
+        .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
+        .expect("closure");
+
+    let plan_set: std::collections::HashSet<String> = closure
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+    let baseline: std::collections::HashSet<String> = coords
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+
+    let missing: Vec<_> = baseline.difference(&plan_set).cloned().collect();
+    let extra: Vec<_> = plan_set.difference(&baseline).cloned().collect();
+
+    assert!(
+        missing.is_empty() && extra.is_empty(),
+        "wrapper base closure should match Maven baseline but missing={missing:?}, extra={extra:?}"
+    );
+}
+
+#[test]
+fn base_closure_excludes_provided_and_test_scopes() {
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    let root = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "root".to_string(),
+        "1.0.0".to_string(),
+    );
+    let provided = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "provided-lib".to_string(),
+        "1.0.0".to_string(),
+    );
+    let test_dep = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "test-lib".to_string(),
+        "1.0.0".to_string(),
+    );
+    let compile_dep = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "compile-lib".to_string(),
+        "1.0.0".to_string(),
+    );
+
+    store_pom(
+        &cache,
+        &root,
+        &[
+            (
+                &provided.group_id,
+                &provided.artifact_id,
+                &provided.version,
+                Some("provided"),
+                false,
+            ),
+            (
+                &test_dep.group_id,
+                &test_dep.artifact_id,
+                &test_dep.version,
+                Some("test"),
+                false,
+            ),
+            (
+                &compile_dep.group_id,
+                &compile_dep.artifact_id,
+                &compile_dep.version,
+                None,
+                false,
+            ),
+        ],
+    );
+    store_pom(&cache, &provided, &[]);
+    store_pom(&cache, &test_dep, &[]);
+    store_pom(&cache, &compile_dep, &[]);
+
+    let closure = resolver
+        .resolve_closure_with_options(&[root.clone()], ClosureOptions::base())
+        .expect("base closure");
+
+    let ids: std::collections::HashSet<String> = closure
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+
+    assert!(
+        ids.contains(&format!(
+            "{}:{}:{}",
+            compile_dep.group_id, compile_dep.artifact_id, compile_dep.version
+        )),
+        "base closure should include compile scope dep"
+    );
+    assert!(
+        !ids.contains(&format!(
+            "{}:{}:{}",
+            provided.group_id, provided.artifact_id, provided.version
+        )),
+        "base closure should exclude provided scope dep"
+    );
+    assert!(
+        !ids.contains(&format!(
+            "{}:{}:{}",
+            test_dep.group_id, test_dep.artifact_id, test_dep.version
+        )),
+        "base closure should exclude test scope dep"
+    );
+}
+
+#[test]
+fn base_closure_deduplicates_ga_with_nearest() {
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    let root = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "app".to_string(),
+        "1.0.0".to_string(),
+    );
+    let v1 = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "lib".to_string(),
+        "1.0.0".to_string(),
+    );
+    let v2 = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "lib".to_string(),
+        "2.0.0".to_string(),
+    );
+
+    // root depends on v1; v1 depends on v2. nearest (depth) should keep v1 only.
+    store_pom(
+        &cache,
+        &root,
+        &[(&v1.group_id, &v1.artifact_id, &v1.version, None, false)],
+    );
+    store_pom(
+        &cache,
+        &v1,
+        &[(&v2.group_id, &v2.artifact_id, &v2.version, None, false)],
+    );
+    store_pom(&cache, &v2, &[]);
+
+    let closure = resolver
+        .resolve_closure_with_options(&[root.clone()], ClosureOptions::base())
+        .expect("base closure");
+
+    let ids: std::collections::HashSet<String> = closure
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+
+    assert!(
+        ids.contains(&format!("{}:{}:{}", v1.group_id, v1.artifact_id, v1.version)),
+        "nearest should keep shallow version"
+    );
+    assert!(
+        !ids.contains(&format!("{}:{}:{}", v2.group_id, v2.artifact_id, v2.version)),
+        "nearest should drop deeper version of same GA"
+    );
+}
+
+#[test]
+fn wrapper_closure_matches_commons_lang3_fixture_multiple_versions() {
+    // wrapper が Maven 実績どおり provided/test を辿り複数版を保持できることを確認する（commons-lang3 フィクスチャ 62件と一致）。
+    let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/maven_baseline_jars.txt");
+    let content = std::fs::read_to_string(&fixture_path).expect("fixture file should be readable");
+    let coords: Vec<ArtifactCoordinates> = content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(parse_fixture_line)
+        .collect();
+
+    let root = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-lang3".to_string(),
+        "3.14.0".to_string(),
+    );
+
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+
+    // root POM にフィクスチャ全件を列挙
+    let mut deps_xml = String::new();
+    deps_xml.push_str("<dependencies>");
+    for coord in &coords {
+        deps_xml.push_str("<dependency>");
+        deps_xml.push_str(&format!("<groupId>{}</groupId>", coord.group_id));
+        deps_xml.push_str(&format!("<artifactId>{}</artifactId>", coord.artifact_id));
+        deps_xml.push_str(&format!("<version>{}</version>", coord.version));
+        deps_xml.push_str("</dependency>");
+    }
+    deps_xml.push_str("</dependencies>");
+    let root_pom = format!(
+        r#"
+                <project>
+                  <modelVersion>4.0.0</modelVersion>
+                  <groupId>{}</groupId>
+                  <artifactId>{}</artifactId>
+                  <version>{}</version>
+                  {deps}
+                </project>
+            "#,
+        root.group_id,
+        root.artifact_id,
+        root.version,
+        deps = deps_xml
+    );
+    cache.store_pom(&root, &root_pom).expect("store root pom");
+
+    for coord in &coords {
+        if coord.group_id == root.group_id
+            && coord.artifact_id == root.artifact_id
+            && coord.version == root.version
+        {
+            continue;
+        }
+        cache
+            .store_pom(
+                coord,
+                "<project><modelVersion>4.0.0</modelVersion></project>",
+            )
+            .expect("store fixture pom");
+    }
+
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    let closure = resolver
+        .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
+        .expect("wrapper closure");
+
+    let plan_set: std::collections::HashSet<String> = closure
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+    let baseline: std::collections::HashSet<String> = coords
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+
+    let missing: Vec<_> = baseline.difference(&plan_set).cloned().collect();
+    let extra: Vec<_> = plan_set.difference(&baseline).cloned().collect();
+
+    assert!(
+        missing.is_empty() && extra.is_empty(),
+        "wrapper closure should reproduce Maven fixture (missing={missing:?}, extra={extra:?})"
+    );
+}
+
+#[test]
+fn wrapper_closure_includes_provided_and_skips_test_dependencies_for_commons_lang3() {
+    // wrapper が Maven 実績どおり provided を seeds に含め、test を除外することを検証する。
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    let root = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-lang3".to_string(),
+        "3.14.0".to_string(),
+    );
+    let provided = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-text".to_string(),
+        "1.12.0".to_string(),
+    );
+    let test_dep = ArtifactCoordinates::new(
+        "org.junit.jupiter".to_string(),
+        "junit-jupiter".to_string(),
+        "5.10.0".to_string(),
+    );
+
+    store_pom(
+        &cache,
+        &root,
+        &[
+            (
+                &provided.group_id,
+                &provided.artifact_id,
+                &provided.version,
+                Some("provided"),
+                false,
+            ),
+            (
+                &test_dep.group_id,
+                &test_dep.artifact_id,
+                &test_dep.version,
+                Some("test"),
+                false,
+            ),
+        ],
+    );
+    store_pom(&cache, &provided, &[]);
+    store_pom(&cache, &test_dep, &[]);
+
+    let closure = resolver
+        .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
+        .expect("wrapper closure");
+    let ids: std::collections::HashSet<String> = closure
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+
+    assert!(
+        ids.contains(&format!(
+            "{}:{}:{}",
+            provided.group_id, provided.artifact_id, provided.version
+        )),
+        "wrapper should include provided dependency"
+    );
+    assert!(
+        !ids.contains(&format!(
+            "{}:{}:{}",
+            test_dep.group_id, test_dep.artifact_id, test_dep.version
+        )),
+        "wrapper should skip test dependency"
+    );
+}
+
+#[test]
+fn plugin_download_includes_provided_and_multiple_versions_but_skips_test_for_commons_lang3() {
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    let root = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-lang3".to_string(),
+        "3.14.0".to_string(),
+    );
+    let older = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-lang3".to_string(),
+        "3.8.1".to_string(),
+    );
+    let provided = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-text".to_string(),
+        "1.12.0".to_string(),
+    );
+    let test_dep = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "junit-lite".to_string(),
+        "1.0.0".to_string(),
+    );
+
+    // root depends on: same GA older version (to check allow_multiple_versions), provided, test.
+    let deps = [
+        (&*older.group_id, &*older.artifact_id, &*older.version, None, false),
+        (
+            &*provided.group_id,
+            &*provided.artifact_id,
+            &*provided.version,
+            Some("provided"),
+            false,
+        ),
+        (
+            &*test_dep.group_id,
+            &*test_dep.artifact_id,
+            &*test_dep.version,
+            Some("test"),
+            false,
+        ),
+    ];
+    store_pom(&cache, &root, &deps);
+    store_pom(&cache, &older, &[]);
+    store_pom(&cache, &provided, &[]);
+    store_pom(&cache, &test_dep, &[]);
+
+    let closure = resolver
+        .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
+        .expect("plugin_download closure");
+
+    let ids: std::collections::HashSet<String> = closure
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+
+    assert!(
+        ids.contains(&format!(
+            "{}:{}:{}",
+            older.group_id, older.artifact_id, older.version
+        )),
+        "plugin_download should keep multiple versions of commons-lang3"
+    );
+    assert!(
+        ids.contains(&format!(
+            "{}:{}:{}",
+            provided.group_id, provided.artifact_id, provided.version
+        )),
+        "plugin_download should include provided scope dependencies"
+    );
+    assert!(
+        !ids.contains(&format!(
+            "{}:{}:{}",
+            test_dep.group_id, test_dep.artifact_id, test_dep.version
+        )),
+        "plugin_download should skip test scope dependencies"
+    );
+}
+
+#[test]
+fn plugin_download_skips_optional_and_test_dependencies() {
+    // optional と test を除外することを検証する
     let temp = tempdir().expect("temp dir");
     let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
     let runtime = RuntimeBuilder::new_current_thread()
@@ -771,49 +1180,28 @@ fn plugin_download_includes_optional_and_test_dependencies() {
     store_pom(&cache, &optional_dep, &[]);
     store_pom(&cache, &test_dep, &[]);
 
-    let base_closure = resolver
-        .resolve_closure_with_options(&[root.clone()], ClosureOptions::base())
-        .expect("base");
     let plugin_closure = resolver
         .resolve_closure_with_options(&[root], ClosureOptions::plugin_download())
         .expect("plugin");
 
-    let base_ids: std::collections::HashSet<String> = base_closure
-        .iter()
-        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
-        .collect();
     let plugin_ids: std::collections::HashSet<String> = plugin_closure
         .iter()
         .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
         .collect();
 
     assert!(
-        !base_ids.contains(&format!(
+        !plugin_ids.contains(&format!(
             "{}:{}:{}",
             optional_dep.group_id, optional_dep.artifact_id, optional_dep.version
         )),
-        "base closure should exclude optional dependency"
+        "plugin_download should skip optional dependency"
     );
     assert!(
-        !base_ids.contains(&format!(
+        !plugin_ids.contains(&format!(
             "{}:{}:{}",
             test_dep.group_id, test_dep.artifact_id, test_dep.version
         )),
-        "base closure should exclude test scope dependency"
-    );
-    assert!(
-        plugin_ids.contains(&format!(
-            "{}:{}:{}",
-            optional_dep.group_id, optional_dep.artifact_id, optional_dep.version
-        )),
-        "plugin_download should include optional dependency"
-    );
-    assert!(
-        plugin_ids.contains(&format!(
-            "{}:{}:{}",
-            test_dep.group_id, test_dep.artifact_id, test_dep.version
-        )),
-        "plugin_download should include test scope dependency"
+        "plugin_download should skip test scope dependency"
     );
 }
 
@@ -919,8 +1307,7 @@ fn plugin_download_applies_dependency_management_version() {
 
 #[test]
 fn plugin_download_deduplicates_ga_by_nearest_version() {
-    // plugin_download は Maven 実績に合わせ、依存管理が無い場合は同一GAの複数版を許容する。
-    // ここでは同一GAの 1.0 / 2.0 を投入し、両方が残ることを確認する。
+    // plugin_download は commons-lang3 実績同様、管理版が無い場合は複数版を許容する（両方残る想定）
     let temp = tempdir().expect("temp dir");
     let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
     let runtime = RuntimeBuilder::new_current_thread()
@@ -945,7 +1332,7 @@ fn plugin_download_deduplicates_ga_by_nearest_version() {
         "1.0.0".to_string(),
     );
 
-    // root depends on both versions (順序: older, newer)。依存管理が無いので両方が共存する。
+    // root depends on both versions (順序: older, newer)。管理版なしなので共存する。
     store_pom(
         &cache,
         &root,
@@ -980,7 +1367,218 @@ fn plugin_download_deduplicates_ga_by_nearest_version() {
 
     assert!(
         versions.contains(&older.version) && versions.contains(&newer.version),
-        "plugin_download should keep both versions when no dependencyManagement is present"
+        "plugin_download should keep multiple versions of same GA when no dependencyManagement"
+    );
+}
+
+#[test]
+fn plugin_download_excludes_plugin_roots_from_download_plan() {
+    // wrapper 実績との差分要因: plugin_roots を seeds に入れると 281件に膨張する。
+    // download_plan_size が plugin_roots を含めない場合に 62 に収束することを期待する RED テスト。
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    // commons-lang3 フィクスチャ座標を root にし、依存を自力展開せず download_plan の件数だけを見る。
+    let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/maven_baseline_jars.txt");
+    let content = std::fs::read_to_string(&fixture_path).expect("fixture file should be readable");
+    let coords: Vec<ArtifactCoordinates> = content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(parse_fixture_line)
+        .collect();
+    let root = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-lang3".to_string(),
+        "3.14.0".to_string(),
+    );
+    let deps_xml = coords
+        .iter()
+        .map(|c| {
+            format!(
+                "<dependency><groupId>{}</groupId><artifactId>{}</artifactId><version>{}</version></dependency>",
+                c.group_id, c.artifact_id, c.version
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let root_pom = format!(
+        "<project><modelVersion>4.0.0</modelVersion><groupId>{}</groupId><artifactId>{}</artifactId><version>{}</version><dependencies>{}</dependencies></project>",
+        root.group_id, root.artifact_id, root.version, deps_xml
+    );
+    cache.store_pom(&root, &root_pom).expect("store root pom");
+    for coord in &coords {
+        if coord == &root {
+            continue;
+        }
+        cache
+            .store_pom(
+                coord,
+                "<project><modelVersion>4.0.0</modelVersion></project>",
+            )
+            .expect("store fixture pom");
+    }
+
+    // plugin_download だが、実装で plugin_roots を seeds に含めないことを期待（将来の実装修正でグリーン化）。
+    let closure = resolver
+        .resolve_closure_with_options(&[root], ClosureOptions::plugin_download())
+        .expect("closure");
+
+    assert_eq!(
+        closure.len(),
+        coords.len(),
+        "download plan should match Maven baseline count when plugin_roots are excluded (expected {})",
+        coords.len()
+    );
+}
+
+#[test]
+fn plugin_download_includes_provided_scope_dependencies() {
+    // provided を除外して commons-text が落ちる問題を検出する RED テスト
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    let root = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-lang3".to_string(),
+        "3.14.0".to_string(),
+    );
+    let provided = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-text".to_string(),
+        "1.12.0".to_string(),
+    );
+
+    let root_pom = format!(
+        r#"
+        <project>
+          <modelVersion>4.0.0</modelVersion>
+          <groupId>{}</groupId>
+          <artifactId>{}</artifactId>
+          <version>{}</version>
+          <dependencies>
+            <dependency>
+              <groupId>{}</groupId>
+              <artifactId>{}</artifactId>
+              <version>{}</version>
+              <scope>provided</scope>
+            </dependency>
+          </dependencies>
+        </project>
+        "#,
+        root.group_id,
+        root.artifact_id,
+        root.version,
+        provided.group_id,
+        provided.artifact_id,
+        provided.version
+    );
+    cache.store_pom(&root, &root_pom).expect("store root");
+    cache
+        .store_pom(
+            &provided,
+            "<project><modelVersion>4.0.0</modelVersion></project>",
+        )
+        .expect("store provided");
+
+    let closure = resolver
+        .resolve_closure_with_options(&[root], ClosureOptions::plugin_download())
+        .expect("closure");
+    let ids: std::collections::HashSet<String> = closure
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+
+    assert!(
+        ids.contains(&format!(
+            "{}:{}:{}",
+            provided.group_id, provided.artifact_id, provided.version
+        )),
+        "plugin_download should include provided scope dependencies (commons-text 1.12.0)"
+    );
+}
+
+#[test]
+fn plugin_download_includes_provided_scope_and_skips_test_scope() {
+    // regression guard: plugin_download で provided は辿り、test は除外することを確認（Maven dependency:resolve 実績に合わせる）
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    let root = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "app".to_string(),
+        "1.0.0".to_string(),
+    );
+    let provided_dep = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "provided-lib".to_string(),
+        "1.0.0".to_string(),
+    );
+    let test_dep = ArtifactCoordinates::new(
+        "org.example".to_string(),
+        "test-lib".to_string(),
+        "1.0.0".to_string(),
+    );
+
+    store_pom(
+        &cache,
+        &root,
+        &[
+            (
+                &provided_dep.group_id,
+                &provided_dep.artifact_id,
+                &provided_dep.version,
+                Some("provided"),
+                false,
+            ),
+            (
+                &test_dep.group_id,
+                &test_dep.artifact_id,
+                &test_dep.version,
+                Some("test"),
+                false,
+            ),
+        ],
+    );
+    store_pom(&cache, &provided_dep, &[]);
+    store_pom(&cache, &test_dep, &[]);
+
+    let closure = resolver
+        .resolve_closure_with_options(&[root], ClosureOptions::plugin_download())
+        .expect("closure");
+    let ids: std::collections::HashSet<String> = closure
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+
+    assert!(
+        ids.contains(&format!(
+            "{}:{}:{}",
+            provided_dep.group_id, provided_dep.artifact_id, provided_dep.version
+        )),
+        "plugin_download should include provided scope dependencies"
+    );
+    assert!(
+        !ids.contains(&format!(
+            "{}:{}:{}",
+            test_dep.group_id, test_dep.artifact_id, test_dep.version
+        )),
+        "plugin_download should skip test scope dependencies"
     );
 }
 

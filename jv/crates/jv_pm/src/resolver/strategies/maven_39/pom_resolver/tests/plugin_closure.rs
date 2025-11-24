@@ -5,7 +5,7 @@ use tempfile::tempdir;
 use tokio::runtime::Builder as RuntimeBuilder;
 
 #[test]
-fn plugin_closure_expands_transitives_with_optional_and_test_scopes() {
+fn plugin_closure_excludes_optional_and_test_scopes() {
     let temp = tempdir().expect("temp dir");
     let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
     let runtime = RuntimeBuilder::new_current_thread()
@@ -82,22 +82,22 @@ fn plugin_closure_expands_transitives_with_optional_and_test_scopes() {
         "main dependency should be expanded"
     );
     assert!(
-        names.contains(&format!(
+        !names.contains(&format!(
             "{}:{}:{}",
             dep_opt.group_id, dep_opt.artifact_id, dep_opt.version
         )),
-        "optional dependency should be included for plugin download"
+        "optional dependency should be skipped for plugin download"
     );
     assert!(
-        names.contains(&format!(
+        !names.contains(&format!(
             "{}:{}:{}",
             dep_test.group_id, dep_test.artifact_id, dep_test.version
         )),
-        "test-scope dependency should be included for plugin download"
+        "test-scope dependency should be skipped for plugin download"
     );
     assert!(
-        names.len() >= 4,
-        "closure should include root plus transitive dependencies"
+        names.len() >= 2,
+        "closure should include root plus main dependency (optional/test are skipped)"
     );
 }
 

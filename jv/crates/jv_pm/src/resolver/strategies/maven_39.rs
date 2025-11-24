@@ -4,7 +4,6 @@ use crate::registry::{
     ArtifactCoordinates, ArtifactResource, ChecksumAlgorithm, ChecksumVerifiedJar, MavenRegistry,
     RegistryError,
 };
-use crate::repository::defaults::maven_standard_plugins;
 use crate::resolver::{
     DependencyProvider, DependencyScope, Manifest, MavenResolverContext, RequestedDependency,
     ResolutionDiagnostic, ResolutionSource, ResolutionStats, ResolvedDependencies,
@@ -762,59 +761,77 @@ impl ResolverStrategy for MavenCompat39Strategy {
         let jar_downloader =
             MavenJarDownloader::new(ctx.local_repository.clone(), registries.clone());
         let provider = self.build_provider(options.maven_context.as_ref());
-        // Wrapperモードでは base_dependencies を唯一のルートに固定し、追加のプラグイン由来ルート混入を防ぐ。
-        let direct = if !ctx.base_dependencies.is_empty() {
-            ctx.base_dependencies.clone()
+        // Wrapperモードでは base_dependencies を最優先で seeds にする。空なら pom.xml から取得。
+        let base_only = !ctx.base_dependencies.is_empty();
+        let mut direct = if base_only {
+            let mut deps = ctx.base_dependencies.clone();
+            // wrapper-default でも pom.xml 由来の直接依存を seeds に含める（Maven dependency:resolve に揃える）
+            let mut pom_direct = provider.direct_dependencies();
+            if !pom_direct.is_empty() {
+                deps.append(&mut pom_direct);
+            }
+            deps
         } else {
             provider.direct_dependencies()
         };
-        eprintln!(
-            "[maven-compat-debug] direct_dependencies={} (base_only={}) base_dep_names=[{}]",
-            direct.len(),
-            !ctx.base_dependencies.is_empty(),
-            ctx.base_dependencies
-                .iter()
-                .map(|d| d.name.clone())
-                .collect::<Vec<_>>()
-                .join(",")
-        );
 
         let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), registries.clone());
 
         let mut roots = Vec::new();
         let mut base_names: HashSet<String> = HashSet::new();
         let mut seen: HashSet<(String, String, Option<String>)> = HashSet::new();
-        for dep in &direct {
-            if let Some((group, artifact)) = dep.name.split_once(':') {
-                let ver = dep.requirement.clone();
-                let coords = ArtifactCoordinates::new(group.to_string(), artifact.to_string(), ver);
-                base_names.insert(format!("{group}:{artifact}"));
-                let key = (
-                    coords.group_id.clone(),
-                    coords.artifact_id.clone(),
-                    coords.classifier.clone(),
-                );
-                if seen.insert(key) {
-                    roots.push(coords);
+        fn collect_roots(
+            deps: &[RequestedDependency],
+            roots: &mut Vec<ArtifactCoordinates>,
+            base_names: &mut HashSet<String>,
+            seen: &mut HashSet<(String, String, Option<String>)>,
+        ) {
+            for dep in deps {
+                if let Some((group, artifact)) = dep.name.split_once(':') {
+                    let ver = dep.requirement.clone();
+                    let coords =
+                        ArtifactCoordinates::new(group.to_string(), artifact.to_string(), ver);
+                    base_names.insert(format!("{group}:{artifact}"));
+                    let key = (
+                        coords.group_id.clone(),
+                        coords.artifact_id.clone(),
+                        coords.classifier.clone(),
+                    );
+                    if seen.insert(key) {
+                        roots.push(coords);
+                    }
                 }
             }
         }
-        let mut plugin_roots = Vec::new();
-        for plugin in maven_standard_plugins() {
-            let coords = ArtifactCoordinates::new(
-                plugin.group_id.clone(),
-                plugin.artifact_id.clone(),
-                plugin.version.clone(),
-            );
-            let key = (
-                coords.group_id.clone(),
-                coords.artifact_id.clone(),
-                coords.classifier.clone(),
-            );
-            if seen.insert(key) {
-                plugin_roots.push(coords);
+        collect_roots(&direct, &mut roots, &mut base_names, &mut seen);
+
+        if roots.is_empty() {
+            let pom_direct = provider.direct_dependencies();
+            if !pom_direct.is_empty() {
+                eprintln!(
+                    "[maven-compat-debug] roots empty; falling back to pom.xml direct_dependencies ({} items)",
+                    pom_direct.len()
+                );
+                direct = pom_direct;
+                base_names.clear();
+                seen.clear();
+                roots.clear();
+                collect_roots(&direct, &mut roots, &mut base_names, &mut seen);
             }
         }
+
+        eprintln!(
+            "[maven-compat-debug] direct_dependencies={} (base_only={}) base_dep_names=[{}]",
+            direct.len(),
+            base_only,
+            direct
+                .iter()
+                .map(|d| d.name.clone())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let plugin_roots: Vec<ArtifactCoordinates> = Vec::new();
+        // plugin_roots は Maven dependency:resolve 実績には含まれないため seeds に含めない
         if roots.len() != direct.len() {
             eprintln!(
                 "[maven-compat-debug] roots_dedup_mismatch roots={} direct={} (duplicates dropped)",
@@ -826,27 +843,20 @@ impl ResolverStrategy for MavenCompat39Strategy {
             .iter()
             .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
             .collect();
-        let plugin_summary: Vec<String> = plugin_roots
-            .iter()
-            .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
-            .collect();
         eprintln!(
             "[maven-compat-debug] roots_list=[{}] plugin_roots=[{}]",
             base_summary.join(","),
-            plugin_summary.join(",")
+            ""
         );
+        // Maven dependency:resolve 実績に合わせ、wrapper seeds では provided/test を辿り、同一GAの複数版も保持する。
         let base_closure = resolver
-            .resolve_closure_with_options(&roots, ClosureOptions::base())
+            .resolve_closure_with_options(&roots, ClosureOptions::plugin_download())
             .map_err(|error| ResolverError::Conflict {
                 dependency: "resolver".into(),
                 details: error.to_string(),
             })?;
-        let plugin_closure = resolver
-            .resolve_closure_with_options(&plugin_roots, ClosureOptions::plugin_download())
-            .map_err(|error| ResolverError::Conflict {
-                dependency: "resolver".into(),
-                details: error.to_string(),
-            })?;
+        // plugin_roots を seeds に含めないため closure も空
+        let plugin_closure: Vec<ArtifactCoordinates> = Vec::new();
 
         let mut download_plan: Vec<ArtifactCoordinates> = Vec::new();
         let mut seen_download = HashSet::new();
@@ -1336,34 +1346,35 @@ mod pom_resolver {
         KeepAll,
     }
 
-    pub struct ClosureOptions {
-        include_optional: bool,
-        /// When false, only compile/runtime scopes are traversed. When true, provided/test are also
-        /// followed.
-        allow_all_scopes: bool,
-        /// When true, multiple versions of the same GA(+classifier) are kept (plugin/tooling paths
-        /// can legitimately require different versions simultaneously).
-        allow_multiple_versions: bool,
-        conflict_strategy: ConflictStrategy,
-    }
+pub struct ClosureOptions {
+    include_optional: bool,
+    include_provided: bool,
+    include_test: bool,
+    /// When true, multiple versions of the same GA(+classifier) are kept (plugin/tooling paths
+    /// can legitimately require different versions simultaneously).
+    allow_multiple_versions: bool,
+    conflict_strategy: ConflictStrategy,
+}
 
     impl ClosureOptions {
         pub fn base() -> Self {
             Self {
                 include_optional: false,
-                allow_all_scopes: false,
+                include_provided: false,
+                include_test: false,
                 allow_multiple_versions: false,
                 conflict_strategy: ConflictStrategy::Nearest,
             }
         }
 
-        /// Plugin/tooling 用のダウンロード展開。provided/test/optional を含め、複数バージョン共存を許容する。
+        /// Wrapper/plugin 用のダウンロード展開。provided を含め、test/optional は除外し、複数バージョン共存を許容する。
         pub fn plugin_download() -> Self {
             Self {
-                include_optional: true,
-                allow_all_scopes: true,
-                // Maven dependency:resolve 実績（commons-lang3 基準）では同一GAでも複数版が併存するため、
-                // plugin_download では複数版の共存を許容し、依存管理がある場合のみ正規化する。
+                // Maven dependency:resolve 実績では provided を含める。optional/test は除外。
+                include_optional: false,
+                include_provided: true,
+                include_test: false,
+                // 同一GAの複数版（例: commons-lang3 3.14.0/3.8.1）が共存するため複数版を許容する。
                 allow_multiple_versions: true,
                 conflict_strategy: ConflictStrategy::KeepAll,
             }
@@ -1372,7 +1383,8 @@ mod pom_resolver {
         pub fn newest_conflict() -> Self {
             Self {
                 include_optional: false,
-                allow_all_scopes: false,
+                include_provided: false,
+                include_test: false,
                 allow_multiple_versions: false,
                 conflict_strategy: ConflictStrategy::Newest,
             }
@@ -1381,7 +1393,8 @@ mod pom_resolver {
         pub fn oldest_conflict() -> Self {
             Self {
                 include_optional: false,
-                allow_all_scopes: false,
+                include_provided: false,
+                include_test: false,
                 allow_multiple_versions: false,
                 conflict_strategy: ConflictStrategy::Oldest,
             }
@@ -1390,7 +1403,8 @@ mod pom_resolver {
         pub fn farthest_conflict() -> Self {
             Self {
                 include_optional: false,
-                allow_all_scopes: false,
+                include_provided: false,
+                include_test: false,
                 allow_multiple_versions: false,
                 conflict_strategy: ConflictStrategy::Farthest,
             }
@@ -1428,7 +1442,8 @@ mod pom_resolver {
             options: ClosureOptions,
         ) -> Result<Vec<ArtifactCoordinates>, WrapperError> {
             let include_optional = options.include_optional;
-            let allow_all_scopes = options.allow_all_scopes;
+            let include_provided = options.include_provided;
+            let include_test = options.include_test;
             let allow_multiple_versions = options.allow_multiple_versions;
             let conflict_strategy = options.conflict_strategy;
             let mut scope_counts: HashMap<String, usize> = HashMap::new();
@@ -1511,18 +1526,19 @@ mod pom_resolver {
                             )
                         })
                         .collect();
-                    eprintln!(
-                        "[maven-compat-debug] pom_deps coords={}:{}:{} depth={} count={} allow_all_scopes={} include_optional={} allow_multi={} samples=[{}]",
-                        coords.group_id,
-                        coords.artifact_id,
-                        coords.version,
-                        depth,
-                        effective.dependencies.len(),
-                        allow_all_scopes,
-                        include_optional,
-                        allow_multiple_versions,
-                        samples.join(",")
-                    );
+                eprintln!(
+                    "[maven-compat-debug] pom_deps coords={}:{}:{} depth={} count={} allow_provided={} allow_test={} include_optional={} allow_multi={} samples=[{}]",
+                    coords.group_id,
+                    coords.artifact_id,
+                    coords.version,
+                    depth,
+                    effective.dependencies.len(),
+                    include_provided,
+                    include_test,
+                    include_optional,
+                    allow_multiple_versions,
+                    samples.join(",")
+                );
                     pom_log_emitted += 1;
                 }
 
@@ -1540,21 +1556,26 @@ mod pom_resolver {
                         );
                         continue;
                     }
-                    if !allow_all_scopes {
-                        if !matches!(
-                            dependency.scope.as_deref(),
-                            None | Some("compile") | Some("runtime")
-                        ) {
-                            skipped_scope += 1;
-                            eprintln!(
-                                "[maven-compat-debug] skip_scope coords={}:{}:{} scope={:?}",
-                                dependency.coordinates.group_id,
-                                dependency.coordinates.artifact_id,
-                                dependency.coordinates.version,
-                                dependency.scope
-                            );
-                            continue;
-                        }
+                    let scope = dependency.scope.as_deref();
+                    let allowed_scope = match scope {
+                        None | Some("compile") | Some("runtime") => true,
+                        Some("provided") => include_provided,
+                        Some("system") => include_provided,
+                        Some("test") => include_test,
+                        Some(_) => include_test,
+                    };
+                    if !allowed_scope {
+                        skipped_scope += 1;
+                        eprintln!(
+                            "[maven-compat-debug] skip_scope coords={}:{}:{} scope={:?} include_provided={} include_test={}",
+                            dependency.coordinates.group_id,
+                            dependency.coordinates.artifact_id,
+                            dependency.coordinates.version,
+                            dependency.scope,
+                            include_provided,
+                            include_test
+                        );
+                        continue;
                     }
                     if is_excluded(&dependency.coordinates, &exclusions) {
                         continue;
