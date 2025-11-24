@@ -351,7 +351,6 @@ fn parse_fixture_line(line: &str) -> ArtifactCoordinates {
     );
     ArtifactCoordinates::new(group_id, artifact_id, version)
 }
-
 #[test]
 fn download_plan_matches_real_maven_fixture_list() {
     let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

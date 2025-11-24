@@ -319,6 +319,33 @@ fn cargo_bin_path(name: &str) -> Option<PathBuf> {
     env::var_os(var_name).map(PathBuf::from)
 }
 
+fn ensure_bin(name: &str, package: &str) -> Result<PathBuf> {
+    if let Some(path) = cargo_bin_path(name) {
+        return Ok(path);
+    }
+    let root = repo_root().join("jv");
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(&root);
+    cmd.args(["build", "--package", package, "--bin", name]);
+    let output = cmd.output().with_context(|| format!("failed to build {name}"))?;
+    if !output.status.success() {
+        bail!(
+            "building {name} failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(root.join("target").join("debug").join(name))
+}
+
+fn ensure_jvpm_bin() -> Result<PathBuf> {
+    ensure_bin("jvpm", "jv_pm")
+}
+
+fn ensure_jv_bin() -> Result<PathBuf> {
+    ensure_bin("jv", "jv_cli")
+}
+
 fn configure_command(command: &mut Command, project: &Path, home: &Path) -> Result<()> {
     command.current_dir(project);
     command.env("HOME", home);
@@ -392,7 +419,7 @@ fn write_maven_settings(home: &Path, repo_url: &str) -> Result<PathBuf> {
 fn write_wrapper_pom(target: &Path) -> Result<()> {
     let pom = r#"<project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
                              http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.example</groupId>
@@ -504,6 +531,108 @@ fn assert_jar_sets_match(expected: &[String], actual: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn baseline_fixture_path() -> PathBuf {
+    repo_root()
+        .join("jv")
+        .join("crates")
+        .join("jv_pm")
+        .join("tests")
+        .join("fixtures")
+        .join("maven_baseline_jars.txt")
+}
+
+fn load_baseline_fixture() -> Result<Vec<(String, String, String)>> {
+    let content = fs::read_to_string(baseline_fixture_path())
+        .context("failed to read maven_baseline_jars.txt")?;
+    content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|line| {
+            let line = line.trim().trim_end_matches(".jar");
+            let parts: Vec<&str> = line.split('/').collect();
+            if parts.len() < 3 {
+                return Err(anyhow!("invalid fixture line: {line}"));
+            }
+            let version = parts[parts.len() - 2].to_string();
+            let artifact = parts[parts.len() - 3].to_string();
+            let group = parts[..parts.len() - 3].join(".");
+            Ok((group, artifact, version))
+        })
+        .collect()
+}
+
+fn write_baseline_fixture_repo(base_dir: &Path, coords: &[(String, String, String)]) -> Result<()> {
+    if base_dir.exists() {
+        fs::remove_dir_all(base_dir)
+            .with_context(|| format!("failed to clear {}", base_dir.display()))?;
+    }
+    fs::create_dir_all(base_dir)
+        .with_context(|| format!("failed to create {}", base_dir.display()))?;
+
+    for (group, artifact, version) in coords {
+        let group_path = group.replace('.', "/");
+        let version_dir = base_dir
+            .join(&group_path)
+            .join(artifact)
+            .join(version);
+        fs::create_dir_all(&version_dir)
+            .with_context(|| format!("failed to create {}", version_dir.display()))?;
+
+        let jar_name = format!("{artifact}-{version}.jar");
+        let jar_path = version_dir.join(&jar_name);
+        let jar_bytes = format!("fixture-bytes-{artifact}-{version}").into_bytes();
+        fs::write(&jar_path, &jar_bytes)
+            .with_context(|| format!("failed to write {}", jar_path.display()))?;
+
+        let checksum = Sha256::digest(&jar_bytes);
+        let checksum_path = jar_path.with_extension("jar.sha256");
+        let checksum_text = format!("{:x}  {}\n", checksum, jar_name);
+        fs::write(&checksum_path, checksum_text)
+            .with_context(|| format!("failed to write {}", checksum_path.display()))?;
+
+        let pom_path = version_dir.join(format!("{artifact}-{version}.pom"));
+        let pom = if group == "org.apache.commons" && artifact == "commons-lang3" && version == "3.14.0" {
+            let mut deps = String::new();
+            deps.push_str("  <dependencies>\n");
+            for (dep_group, dep_artifact, dep_version) in coords.iter().filter(|(g, a, v)| {
+                !(g == group && a == artifact && v == version)
+            }) {
+                deps.push_str("    <dependency>\n");
+                deps.push_str(&format!("      <groupId>{}</groupId>\n", dep_group));
+                deps.push_str(&format!("      <artifactId>{}</artifactId>\n", dep_artifact));
+                deps.push_str(&format!("      <version>{}</version>\n", dep_version));
+                deps.push_str("    </dependency>\n");
+            }
+            deps.push_str("  </dependencies>\n");
+            format!(
+                "<project>\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>{}</groupId>\n  <artifactId>{}</artifactId>\n  <version>{}</version>\n{}\n</project>\n",
+                group, artifact, version, deps
+            )
+        } else {
+            format!(
+                "<project>\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>{}</groupId>\n  <artifactId>{}</artifactId>\n  <version>{}</version>\n</project>\n",
+                group, artifact, version
+            )
+        };
+        fs::write(&pom_path, pom)
+            .with_context(|| format!("failed to write {}", pom_path.display()))?;
+
+        let metadata_dir = version_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| anyhow!("failed to resolve metadata dir for {}", version_dir.display()))?;
+        let metadata_path = metadata_dir.join("maven-metadata.xml");
+        let metadata = format!(
+            "<metadata>\n  <groupId>{}</groupId>\n  <artifactId>{}</artifactId>\n  <versioning>\n    <latest>{}</latest>\n    <release>{}</release>\n    <versions>\n      <version>{}</version>\n    </versions>\n    <lastUpdated>20250101000000</lastUpdated>\n  </versioning>\n</metadata>\n",
+            group, artifact, version, version, version
+        );
+        fs::write(&metadata_path, metadata)
+            .with_context(|| format!("failed to write {}", metadata_path.display()))?;
+    }
+
+    Ok(())
+}
+
 fn sample_specs() -> Vec<DependencySpec> {
     let commons_transitive = DependencySpec::new("org.apache.commons", "commons-collections", "4.5");
     let commons = DependencySpec::new("org.apache.commons", "commons-lang3", "3.14.0")
@@ -571,10 +700,7 @@ fn parity_specs() -> Vec<DependencySpec> {
 
 #[test]
 fn wrapper_default_add_and_remove_manage_jars() -> Result<()> {
-    let Some(jvpm_bin) = cargo_bin_path("jvpm") else {
-        eprintln!("skipping wrapper_default_add_and_remove_manage_jars: jvpm binary unavailable");
-        return Ok(());
-    };
+    let jvpm_bin = ensure_jvpm_bin()?;
 
     let home = tempdir().context("failed to create home tempdir")?;
     let repo_dir = home.path().join("fake-maven");
@@ -670,10 +796,7 @@ fn wrapper_default_add_and_remove_manage_jars() -> Result<()> {
 
 #[test]
 fn wrapper_pubgrub_strategy_downloads_jars() -> Result<()> {
-    let Some(jvpm_bin) = cargo_bin_path("jvpm") else {
-        eprintln!("skipping wrapper_pubgrub_strategy_downloads_jars: jvpm binary unavailable");
-        return Ok(());
-    };
+    let jvpm_bin = ensure_jvpm_bin()?;
 
     let home = tempdir().context("failed to create home tempdir")?;
     let repo_dir = home.path().join("fake-maven");
@@ -735,10 +858,7 @@ fn wrapper_pubgrub_strategy_downloads_jars() -> Result<()> {
 
 #[test]
 fn wrapper_default_matches_maven_dependency_resolve_jars() -> Result<()> {
-    let Some(jvpm_bin) = cargo_bin_path("jvpm") else {
-        eprintln!("skipping wrapper_default_matches_maven_dependency_resolve_jars: jvpm binary unavailable");
-        return Ok(());
-    };
+    let jvpm_bin = ensure_jvpm_bin()?;
     let Some(mvn_bin) = maven_binary() else {
         eprintln!("skipping wrapper_default_matches_maven_dependency_resolve_jars: maven binary unavailable");
         return Ok(());
@@ -835,15 +955,67 @@ fn wrapper_default_matches_maven_dependency_resolve_jars() -> Result<()> {
 }
 
 #[test]
+fn wrapper_default_misses_maven_baseline_fixture_set() -> Result<()> {
+    let jvpm_bin = ensure_jvpm_bin()?;
+
+    let coords = load_baseline_fixture()?;
+    let home = tempdir().context("failed to create home tempdir")?;
+    let repo_dir = home.path().join("fake-maven");
+    write_baseline_fixture_repo(&repo_dir, &coords)?;
+    let server = match StubMavenServer::start(repo_dir) {
+        Ok(server) => server,
+        Err(err) => {
+            eprintln!("skipping wrapper_default_misses_maven_baseline_fixture_set: failed to start stub server ({err})");
+            return Ok(());
+        }
+    };
+    write_global_config(home.path(), &server.base_url())?;
+
+    let project = tempdir().context("failed to create project tempdir")?;
+    write_wrapper_pom(project.path())?;
+
+    let mut add = Command::new(&jvpm_bin);
+    configure_command(&mut add, project.path(), home.path())?;
+    add.args([
+        "add",
+        "--non-interactive",
+        "org.apache.commons:commons-lang3:3.14.0",
+    ]);
+    let output = add.output().context("failed to run jvpm add for commons-lang3")?;
+    if !output.status.success() {
+        bail!(
+            "jvpm add failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let wrapper_repo = project.path().join(".jv").join("repository");
+    let wrapper_jars = collect_relative_jars(&wrapper_repo)?;
+
+    let expected_jars: Vec<String> = coords
+        .iter()
+        .map(|(group, artifact, version)| {
+            format!(
+                "{}/{}/{}/{}-{}.jar",
+                group.replace('.', "/"),
+                artifact,
+                version,
+                artifact,
+                version
+            )
+        })
+        .collect();
+
+    assert_jar_sets_match(&expected_jars, &wrapper_jars)?;
+
+    Ok(())
+}
+
+#[test]
 fn jv_native_default_downloads_and_records_lockfile() -> Result<()> {
-    let Some(jv_bin) = cargo_bin_path("jv") else {
-        eprintln!("skipping jv_native_default_downloads_and_records_lockfile: jv binary unavailable");
-        return Ok(());
-    };
-    let Some(jvpm_bin) = cargo_bin_path("jvpm") else {
-        eprintln!("skipping jv_native_default_downloads_and_records_lockfile: jvpm binary unavailable");
-        return Ok(());
-    };
+    let jv_bin = ensure_jv_bin()?;
+    let jvpm_bin = ensure_jvpm_bin()?;
 
     let home = tempdir().context("failed to create home tempdir")?;
     let repo_dir = home.path().join("fake-maven");
@@ -904,14 +1076,8 @@ fn jv_native_default_downloads_and_records_lockfile() -> Result<()> {
 
 #[test]
 fn jv_native_maven_compat_strategy_downloads_via_wrapper_flow() -> Result<()> {
-    let Some(jv_bin) = cargo_bin_path("jv") else {
-        eprintln!("skipping jv_native_maven_compat_strategy_downloads_via_wrapper_flow: jv binary unavailable");
-        return Ok(());
-    };
-    let Some(jvpm_bin) = cargo_bin_path("jvpm") else {
-        eprintln!("skipping jv_native_maven_compat_strategy_downloads_via_wrapper_flow: jvpm binary unavailable");
-        return Ok(());
-    };
+    let jv_bin = ensure_jv_bin()?;
+    let jvpm_bin = ensure_jvpm_bin()?;
 
     let home = tempdir().context("failed to create home tempdir")?;
     let repo_dir = home.path().join("fake-maven");
