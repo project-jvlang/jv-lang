@@ -969,6 +969,98 @@ fn wrapper_closure_matches_commons_lang3_fixture_multiple_versions() {
     );
 }
 
+/// RED: 現状の base オプションでは provided/test/複数版を落とすため、Maven 実績フィクスチャ 62 件と一致しないことを明示する。
+#[test]
+fn base_closure_mismatches_commons_lang3_fixture_red() {
+    let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/maven_baseline_jars.txt");
+    let content = std::fs::read_to_string(&fixture_path).expect("fixture file should be readable");
+    let coords: Vec<ArtifactCoordinates> = content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(parse_fixture_line)
+        .collect();
+
+    let root = ArtifactCoordinates::new(
+        "org.apache.commons".to_string(),
+        "commons-lang3".to_string(),
+        "3.14.0".to_string(),
+    );
+
+    let temp = tempdir().expect("temp dir");
+    let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
+
+    // root POM にフィクスチャ全件を列挙する（provided/test/複数版を含む Maven 実績を再現）
+    let mut deps_xml = String::new();
+    deps_xml.push_str("<dependencies>");
+    for coord in &coords {
+        deps_xml.push_str("<dependency>");
+        deps_xml.push_str(&format!("<groupId>{}</groupId>", coord.group_id));
+        deps_xml.push_str(&format!("<artifactId>{}</artifactId>", coord.artifact_id));
+        deps_xml.push_str(&format!("<version>{}</version>", coord.version));
+        deps_xml.push_str("</dependency>");
+    }
+    deps_xml.push_str("</dependencies>");
+    let root_pom = format!(
+        r#"
+                <project>
+                  <modelVersion>4.0.0</modelVersion>
+                  <groupId>{}</groupId>
+                  <artifactId>{}</artifactId>
+                  <version>{}</version>
+                  {deps}
+                </project>
+            "#,
+        root.group_id,
+        root.artifact_id,
+        root.version,
+        deps = deps_xml
+    );
+    cache.store_pom(&root, &root_pom).expect("store root pom");
+
+    for coord in &coords {
+        if coord.group_id == root.group_id
+            && coord.artifact_id == root.artifact_id
+            && coord.version == root.version
+        {
+            continue;
+        }
+        cache
+            .store_pom(
+                coord,
+                "<project><modelVersion>4.0.0</modelVersion></project>",
+            )
+            .expect("store fixture pom");
+    }
+
+    let runtime = RuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
+
+    let closure = resolver
+        .resolve_closure_with_options(&[root.clone()], ClosureOptions::base())
+        .expect("base closure");
+
+    let plan_set: std::collections::HashSet<String> = closure
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+    let baseline: std::collections::HashSet<String> = coords
+        .iter()
+        .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+        .collect();
+
+    let missing: Vec<_> = baseline.difference(&plan_set).cloned().collect();
+    let extra: Vec<_> = plan_set.difference(&baseline).cloned().collect();
+
+    assert!(
+        missing.is_empty() && extra.is_empty(),
+        "base closure should NOT match Maven fixture (RED): missing={missing:?}, extra={extra:?}"
+    );
+}
+
 #[test]
 fn wrapper_closure_includes_provided_and_skips_test_dependencies_for_commons_lang3() {
     // wrapper が Maven 実績どおり provided を seeds に含め、test を除外することを検証する。
