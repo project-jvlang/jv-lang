@@ -659,65 +659,42 @@ fn extract_local_checksum(text: &str) -> Option<String> {
         })
 }
 
-fn plugin_resolution_options(_root: &ArtifactCoordinates) -> ClosureOptions {
-    // Maven 本家は全プラグインに ScopeDependencyFilter(provided,test) + Nearest 戦略を使用。
-    // plugin_download_nearest() は provided/test を除外し、Nearest 戦略で同一 GA を 1 バージョンに収束させる。
-    ClosureOptions::plugin_download_nearest()
+fn is_lifecycle_bound_plugin(coords: &ArtifactCoordinates) -> bool {
+    crate::repository::defaults::maven_lifecycle_bound_plugins()
+        .iter()
+        .any(|plugin| plugin.artifact_id == coords.artifact_id)
 }
 
 pub(crate) fn resolve_plugin_closure(
     resolver: &pom_resolver::MavenDependencyResolver,
     plugin_roots: &[ArtifactCoordinates],
 ) -> Result<Vec<ArtifactCoordinates>, ResolverError> {
-    // Maven 本家 PluginDependenciesResolver と同じ処理:
-    // 1. 各プラグインを ScopeDependencyFilter(provided, test) + Nearest で解決
-    // 2. plugin_roots は全バージョンを保持（同一 GA でも複数バージョン許可）
-    // 3. 推移依存は Nearest（同一 GA+classifier は最初に出現したバージョンのみ）
-    let mut result: Vec<ArtifactCoordinates> = Vec::new();
+    // Maven downloads transitive deps for lifecycle-bound plugins, but only roots for standalone plugins.
+    // Split plugins into lifecycle-bound (full resolution) and standalone (roots only).
+    let (lifecycle_plugins, standalone_plugins): (Vec<_>, Vec<_>) = plugin_roots
+        .iter()
+        .cloned()
+        .partition(is_lifecycle_bound_plugin);
 
-    // plugin_roots は (G, A, C, V) で重複チェック（全バージョン追加）
-    let mut seen_roots: HashSet<(String, String, Option<String>, String)> = HashSet::new();
-    // 推移依存は (G, A, C) で重複チェック（Nearest: 最初のバージョンのみ）
-    let mut seen_deps: HashSet<(String, String, Option<String>)> = HashSet::new();
+    let mut result = Vec::new();
+    let mut seen = std::collections::HashSet::new();
 
-    for root in plugin_roots {
-        // plugin root 自体を追加（同一 GA でも異なるバージョンは全て追加）
-        let root_key = (
-            root.group_id.clone(),
-            root.artifact_id.clone(),
-            root.classifier.clone(),
-            root.version.clone(),
-        );
-        if seen_roots.insert(root_key) {
-            result.push(root.clone());
-            // plugin root の GA も seen_deps に追加（推移依存で重複しないように）
-            seen_deps.insert((
-                root.group_id.clone(),
-                root.artifact_id.clone(),
-                root.classifier.clone(),
-            ));
-        }
-
-        let options = plugin_resolution_options(root);
-        let closure = resolver
-            .resolve_closure_with_options(&[root.clone()], options)
-            .map_err(|error| ResolverError::Conflict {
-                dependency: "resolver".into(),
-                details: error.to_string(),
-            })?;
-
-        // 推移依存を追加（Nearest: 同一 GA は最初に出現したバージョンのみ）
-        for coords in closure {
-            let ga_key = (
-                coords.group_id.clone(),
-                coords.artifact_id.clone(),
-                coords.classifier.clone(),
-            );
-            if seen_deps.insert(ga_key) {
-                result.push(coords);
-            }
-        }
+    // Resolve full transitive deps for lifecycle-bound plugins
+    if !lifecycle_plugins.is_empty() {
+        let lifecycle_closure = pom_resolver::resolve_union_per_root(
+            resolver,
+            &lifecycle_plugins,
+            pom_resolver::ClosureOptions::plugin_download(),
+        )
+        .map_err(|error| ResolverError::Conflict {
+            dependency: "lifecycle-plugin-resolver".into(),
+            details: error.to_string(),
+        })?;
+        pom_resolver::append_artifacts(&mut result, &lifecycle_closure, &mut seen);
     }
+
+    // Only include roots for standalone plugins (no transitive deps)
+    pom_resolver::append_artifacts(&mut result, &standalone_plugins, &mut seen);
 
     Ok(result)
 }
@@ -934,6 +911,7 @@ impl ResolverStrategy for MavenCompat39Strategy {
             .map(|coord| coord.clone())
             .collect();
 
+        // Deduplicate by full GAV - Maven keeps different versions from different contexts
         for coords in base_closure.iter() {
             if seen_download.insert((
                 coords.group_id.clone(),
@@ -944,7 +922,8 @@ impl ResolverStrategy for MavenCompat39Strategy {
                 download_plan.push(coords.clone());
             }
         }
-        // plugin seeds を targets に追加し、プラグイン依存も展開した結果を含める
+        // plugin transitive deps を追加
+        // Maven は plugin deps を lazy に取得するが、wrapper mode では pre-cache する
         for coords in plugin_closure.iter() {
             if seen_download.insert((
                 coords.group_id.clone(),
@@ -1434,13 +1413,37 @@ mod pom_resolver {
         conflict_strategy: ConflictStrategy,
     }
 
-    /// Adds managed (dependencyManagement-equivalent) artifacts into the download plan, avoiding duplicates.
+    /// Adds managed (dependencyManagement-equivalent) artifacts into the download plan.
+    /// Maven's dependencyManagement overrides transitive dependency versions,
+    /// so this function removes any existing versions of the same GA before adding the managed version.
     pub(crate) fn append_managed_artifacts(
         download_plan: &mut Vec<ArtifactCoordinates>,
         managed: &[ArtifactCoordinates],
         seen_download: &mut HashSet<(String, String, Option<String>, String)>,
     ) {
         for coords in managed {
+            // Remove any existing versions of the same GA from download_plan
+            // (Maven's dependencyManagement overrides transitive versions)
+            download_plan.retain(|existing| {
+                if existing.group_id == coords.group_id
+                    && existing.artifact_id == coords.artifact_id
+                    && existing.classifier == coords.classifier
+                    && existing.version != coords.version
+                {
+                    // Remove from seen_download too
+                    seen_download.remove(&(
+                        existing.group_id.clone(),
+                        existing.artifact_id.clone(),
+                        existing.classifier.clone(),
+                        existing.version.clone(),
+                    ));
+                    false // Remove this entry
+                } else {
+                    true // Keep this entry
+                }
+            });
+
+            // Add the managed version
             if seen_download.insert((
                 coords.group_id.clone(),
                 coords.artifact_id.clone(),
@@ -1453,6 +1456,8 @@ mod pom_resolver {
     }
 
     /// Appends arbitrary artifacts into the download plan while deduplicating by GA+classifier+version.
+    /// Maven keeps different versions from different contexts (project deps vs plugin deps),
+    /// so we use full GAV deduplication to match Maven's behavior.
     pub(crate) fn append_artifacts(
         download_plan: &mut Vec<ArtifactCoordinates>,
         artifacts: &[ArtifactCoordinates],
@@ -1488,26 +1493,28 @@ mod pom_resolver {
         pub fn base() -> Self {
             Self {
                 include_optional: false,
-                // Maven dependency:resolve は provided を含め、test/optional は除外し、同一GAの複数版も保持する。
-                include_provided: true,
+                // Maven dependency:resolve は provided/test/optional を除外。
+                // Maven NearestVersionSelector により同一 GA は最近接バージョン 1 つに収束。
+                include_provided: false,
                 include_test: false,
-                allow_multiple_versions: true,
+                allow_multiple_versions: false, // Maven: 同一 GA は 1 バージョンのみ
                 max_depth: None,
                 skip_transitive: false,
-                conflict_strategy: ConflictStrategy::KeepAll,
+                conflict_strategy: ConflictStrategy::Nearest, // Maven: 最近接勝ち
             }
         }
 
-        /// Plugin 用ダウンロード展開（PluginDependenciesResolver 相当: provided/test/optional を除外しつつ、GA 重複は後段でフィルタする）
+        /// Plugin 用ダウンロード展開（PluginDependenciesResolver 相当: provided/test/optional を除外）
+        /// Maven NearestVersionSelector により同一 GA は最近接バージョン 1 つに収束。
         pub fn plugin_download() -> Self {
             Self {
                 include_optional: false,
                 include_provided: false,
                 include_test: false,
-                allow_multiple_versions: true,
+                allow_multiple_versions: false, // Maven: 同一 GA は 1 バージョンのみ
                 max_depth: None,
                 skip_transitive: false,
-                conflict_strategy: ConflictStrategy::KeepAll,
+                conflict_strategy: ConflictStrategy::Nearest, // Maven: 最近接勝ち
             }
         }
 
