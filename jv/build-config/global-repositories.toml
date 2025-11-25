@@ -23,6 +23,13 @@ group_id = "org.apache.maven.plugins"
 artifact_id = "maven-dependency-plugin"
 version = "3.7.0"
 
+# Only plugins that are actually executed need their transitive deps resolved.
+# For dependency:resolve, only maven-dependency-plugin is executed.
+[[maven.lifecycle_bound_plugins]]
+group_id = "org.apache.maven.plugins"
+artifact_id = "maven-dependency-plugin"
+version = "3.7.0"
+
 [[maven.managed_artifacts]]
 group_id = "org.apache.commons"
 artifact_id = "commons-text"

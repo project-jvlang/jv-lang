@@ -57,6 +57,6 @@ org/codehaus/plexus/plexus-xml/3.0.0/plexus-xml-3.0.0.jar
 org/iq80/snappy/snappy/0.4/snappy-0.4.jar
 org/ow2/asm/asm/9.7/asm-9.7.jar
 org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar
-org/sonatype/plexus/plexus-build-api/0.0.7/plexus-build-api/0.0.7.jar
+org/sonatype/plexus/plexus-build-api/0.0.7/plexus-build-api-0.0.7.jar
 org/tukaani/xz/1.9/xz-1.9.jar
 oro/oro/2.0.8/oro-2.0.8.jar

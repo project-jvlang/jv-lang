@@ -34,6 +34,8 @@ pub(crate) struct MavenConfigSection {
     distributions: Vec<MavenDistribution>,
     #[serde(default, rename = "standard_plugins")]
     standard_plugins: Vec<MavenPluginDefinition>,
+    #[serde(default, rename = "lifecycle_bound_plugins")]
+    lifecycle_bound_plugins: Vec<MavenPluginDefinition>,
     #[serde(default, rename = "managed_artifacts")]
     managed_artifacts: Vec<MavenManagedArtifact>,
 }
@@ -73,6 +75,19 @@ impl MavenConfigSection {
                 }
             }
         }
+        if self.lifecycle_bound_plugins.is_empty() {
+            self.lifecycle_bound_plugins = fallback_lifecycle_bound_plugins();
+        } else {
+            for fallback in fallback_lifecycle_bound_plugins() {
+                let missing = self.lifecycle_bound_plugins.iter().all(|plugin| {
+                    plugin.group_id != fallback.group_id
+                        || plugin.artifact_id != fallback.artifact_id
+                });
+                if missing {
+                    self.lifecycle_bound_plugins.push(fallback);
+                }
+            }
+        }
     }
 }
 
@@ -82,6 +97,7 @@ impl Default for MavenConfigSection {
             default_distribution: default_distribution_id(),
             distributions: Vec::new(),
             standard_plugins: Vec::new(),
+            lifecycle_bound_plugins: Vec::new(),
             managed_artifacts: Vec::new(),
         }
     }
@@ -139,6 +155,10 @@ pub(crate) fn maven_standard_plugins() -> &'static [MavenPluginDefinition] {
 
 pub(crate) fn maven_managed_artifacts() -> &'static [MavenManagedArtifact] {
     &embedded_config().maven.managed_artifacts
+}
+
+pub(crate) fn maven_lifecycle_bound_plugins() -> &'static [MavenPluginDefinition] {
+    &embedded_config().maven.lifecycle_bound_plugins
 }
 
 pub(crate) fn default_maven_distribution_id() -> &'static str {
@@ -263,4 +283,17 @@ fn fallback_distributions() -> Vec<MavenDistribution> {
             description: Some("Apache Maven 4.x (fallback)".to_string()),
         },
     ]
+}
+
+/// Only plugins that are actually executed need their transitive deps resolved.
+/// For dependency:resolve, only maven-dependency-plugin is executed.
+fn fallback_lifecycle_bound_plugins() -> Vec<MavenPluginDefinition> {
+    vec![("org.apache.maven.plugins", "maven-dependency-plugin", "3.7.0")]
+        .into_iter()
+        .map(|(group_id, artifact_id, version)| MavenPluginDefinition {
+            group_id: group_id.to_string(),
+            artifact_id: artifact_id.to_string(),
+            version: version.to_string(),
+        })
+        .collect()
 }
