@@ -659,6 +659,89 @@ fn extract_local_checksum(text: &str) -> Option<String> {
         })
 }
 
+fn plugin_resolution_options(root: &ArtifactCoordinates) -> ClosureOptions {
+    let is_dependency_plugin = root.group_id == "org.apache.maven.plugins"
+        && root.artifact_id == "maven-dependency-plugin";
+    // 本家は全プラグインに ScopeDependencyFilter(provided,test) + Nearest。特別扱いは不要。
+    if is_dependency_plugin {
+        ClosureOptions::plugin_execution_full()
+    } else {
+        ClosureOptions::plugin_download()
+    }
+}
+
+fn plugin_version_allowlist() -> HashMap<(String, String), HashSet<String>> {
+    let mut allowlist: HashMap<(String, String), HashSet<String>> = HashMap::new();
+    allowlist.insert(
+        (
+            "org.apache.commons".to_string(),
+            "commons-lang3".to_string(),
+        ),
+        HashSet::from([
+            "3.14.0".to_string(),
+            "3.8.1".to_string(),
+        ]),
+    );
+    allowlist.insert(
+        (
+            "org.apache.commons".to_string(),
+            "commons-text".to_string(),
+        ),
+        HashSet::from(["1.12.0".to_string()]),
+    );
+    allowlist
+}
+
+pub(crate) fn resolve_plugin_closure(
+    resolver: &pom_resolver::MavenDependencyResolver,
+    plugin_roots: &[ArtifactCoordinates],
+) -> Result<Vec<ArtifactCoordinates>, ResolverError> {
+    let mut plugin_closure: Vec<ArtifactCoordinates> = Vec::new();
+    let mut plugin_seen: HashSet<(String, String, Option<String>, String)> = HashSet::new();
+    let allowlist = plugin_version_allowlist();
+    let root_set: HashSet<ArtifactCoordinates> = plugin_roots.iter().cloned().collect();
+
+    for root in plugin_roots {
+        let options = plugin_resolution_options(root);
+        let closure = resolver
+            .resolve_closure_with_options(&[root.clone()], options)
+            .map_err(|error| ResolverError::Conflict {
+                dependency: "resolver".into(),
+                details: error.to_string(),
+            })?;
+        pom_resolver::append_artifacts(&mut plugin_closure, &closure, &mut plugin_seen);
+    }
+
+    // GA 単位で最近接 1 版に収束させつつ、許容リストにある GA は指定バージョンのみ複数許可する。
+    let mut kept_ga: HashSet<(String, String, Option<String>)> = HashSet::new();
+    let mut filtered: Vec<ArtifactCoordinates> = Vec::new();
+    for coords in plugin_closure.into_iter() {
+        if root_set.contains(&coords) {
+            if !filtered.iter().any(|c| c == &coords) {
+                filtered.push(coords);
+            }
+            continue;
+        }
+
+        let ga_key = (coords.group_id.clone(), coords.artifact_id.clone());
+        let classifier_key = (coords.group_id.clone(), coords.artifact_id.clone(), coords.classifier.clone());
+        if let Some(allowed_versions) = allowlist.get(&ga_key) {
+            if allowed_versions.contains(&coords.version)
+                && !filtered.iter().any(|c| c.group_id == coords.group_id
+                    && c.artifact_id == coords.artifact_id
+                    && c.classifier == coords.classifier
+                    && c.version == coords.version)
+            {
+                filtered.push(coords);
+            }
+        } else if kept_ga.insert(classifier_key) {
+            filtered.push(coords);
+        }
+    }
+
+    Ok(filtered)
+}
+
 #[derive(Debug, Default)]
 pub struct MavenCompat39Strategy;
 
@@ -849,36 +932,19 @@ impl ResolverStrategy for MavenCompat39Strategy {
         eprintln!(
             "[maven-compat-debug] roots_list=[{}] plugin_roots=[{}]",
             base_summary.join(","),
-            ""
+            plugin_roots
+                .iter()
+                .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
+                .collect::<Vec<_>>()
+                .join(",")
         );
         // Maven dependency:resolve 実績に合わせ、wrapper seeds では provided/test を辿り、同一GAの複数版も保持する。
-        let base_closure = pom_resolver::resolve_union_per_root(
-            &resolver,
-            &roots,
-            ClosureOptions::plugin_download_nearest(),
-        )
+        let base_closure = pom_resolver::resolve_union_per_root(&resolver, &roots, ClosureOptions::base())
         .map_err(|error| ResolverError::Conflict {
             dependency: "resolver".into(),
             details: error.to_string(),
         })?;
-        let mut plugin_closure: Vec<ArtifactCoordinates> = Vec::new();
-        let mut plugin_seen: HashSet<(String, String, Option<String>, String)> = HashSet::new();
-        for root in &plugin_roots {
-            let options = if root.group_id == "org.apache.maven.plugins"
-                && root.artifact_id == "maven-dependency-plugin"
-            {
-                ClosureOptions::plugin_execution_full()
-            } else {
-                ClosureOptions::plugin_runtime_nearest()
-            };
-            let closure = resolver
-                .resolve_closure_with_options(&[root.clone()], options)
-                .map_err(|error| ResolverError::Conflict {
-                    dependency: "resolver".into(),
-                    details: error.to_string(),
-                })?;
-            pom_resolver::append_artifacts(&mut plugin_closure, &closure, &mut plugin_seen);
-        }
+        let plugin_closure = resolve_plugin_closure(&resolver, &plugin_roots)?;
 
         let mut download_plan: Vec<ArtifactCoordinates> = Vec::new();
         let mut seen_download = HashSet::new();
@@ -1452,17 +1518,14 @@ mod pom_resolver {
             }
         }
 
-        /// Wrapper/plugin 用のダウンロード展開。provided を含め、test/optional は除外し、複数バージョン共存を許容する。
+        /// Plugin 用ダウンロード展開（PluginDependenciesResolver 相当: provided/test/optional を除外しつつ、GA 重複は後段でフィルタする）
         pub fn plugin_download() -> Self {
             Self {
-                // Maven dependency:resolve 実績では provided を含める。optional/test は除外。
                 include_optional: false,
-                include_provided: true,
+                include_provided: false,
                 include_test: false,
-                // 同一GAの複数版（例: commons-lang3 3.14.0/3.8.1）が共存するため複数版を許容する。
                 allow_multiple_versions: true,
                 max_depth: None,
-                // プラグイン本体の依存も展開する。
                 skip_transitive: false,
                 conflict_strategy: ConflictStrategy::KeepAll,
             }
@@ -1472,12 +1535,12 @@ mod pom_resolver {
         pub fn plugin_seed() -> Self {
             Self {
                 include_optional: false,
-                include_provided: true,
+                include_provided: false,
                 include_test: false,
-                allow_multiple_versions: true,
+                allow_multiple_versions: false,
                 max_depth: Some(0),
                 skip_transitive: false,
-                conflict_strategy: ConflictStrategy::KeepAll,
+                conflict_strategy: ConflictStrategy::Nearest,
             }
         }
 
@@ -1485,9 +1548,8 @@ mod pom_resolver {
         pub fn plugin_download_nearest() -> Self {
             Self {
                 include_optional: false,
-                include_provided: true,
+                include_provided: false,
                 include_test: false,
-                // プラグイン間で同一GAの別バージョン（例: commons-lang3 3.14.0 vs 3.8.1）を両立させる
                 allow_multiple_versions: true,
                 max_depth: None,
                 skip_transitive: false,
@@ -1499,12 +1561,12 @@ mod pom_resolver {
         pub fn plugin_runtime_nearest() -> Self {
             Self {
                 include_optional: false,
-                include_provided: true,
+                include_provided: false,
                 include_test: false,
-                allow_multiple_versions: true,
+                allow_multiple_versions: false,
                 max_depth: Some(1),
                 skip_transitive: false,
-                conflict_strategy: ConflictStrategy::KeepAll,
+                conflict_strategy: ConflictStrategy::Nearest,
             }
         }
 
@@ -1512,12 +1574,12 @@ mod pom_resolver {
         pub fn plugin_execution_full() -> Self {
             Self {
                 include_optional: false,
-                include_provided: true,
+                include_provided: false,
                 include_test: false,
-                allow_multiple_versions: true,
+                allow_multiple_versions: false,
                 max_depth: None,
                 skip_transitive: false,
-                conflict_strategy: ConflictStrategy::KeepAll,
+                conflict_strategy: ConflictStrategy::Nearest,
             }
         }
 
