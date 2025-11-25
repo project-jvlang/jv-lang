@@ -659,49 +659,45 @@ fn extract_local_checksum(text: &str) -> Option<String> {
         })
 }
 
-fn plugin_resolution_options(root: &ArtifactCoordinates) -> ClosureOptions {
-    let is_dependency_plugin = root.group_id == "org.apache.maven.plugins"
-        && root.artifact_id == "maven-dependency-plugin";
-    // 本家は全プラグインに ScopeDependencyFilter(provided,test) + Nearest。特別扱いは不要。
-    if is_dependency_plugin {
-        ClosureOptions::plugin_execution_full()
-    } else {
-        ClosureOptions::plugin_download()
-    }
-}
-
-fn plugin_version_allowlist() -> HashMap<(String, String), HashSet<String>> {
-    let mut allowlist: HashMap<(String, String), HashSet<String>> = HashMap::new();
-    allowlist.insert(
-        (
-            "org.apache.commons".to_string(),
-            "commons-lang3".to_string(),
-        ),
-        HashSet::from([
-            "3.14.0".to_string(),
-            "3.8.1".to_string(),
-        ]),
-    );
-    allowlist.insert(
-        (
-            "org.apache.commons".to_string(),
-            "commons-text".to_string(),
-        ),
-        HashSet::from(["1.12.0".to_string()]),
-    );
-    allowlist
+fn plugin_resolution_options(_root: &ArtifactCoordinates) -> ClosureOptions {
+    // Maven 本家は全プラグインに ScopeDependencyFilter(provided,test) + Nearest 戦略を使用。
+    // plugin_download_nearest() は provided/test を除外し、Nearest 戦略で同一 GA を 1 バージョンに収束させる。
+    ClosureOptions::plugin_download_nearest()
 }
 
 pub(crate) fn resolve_plugin_closure(
     resolver: &pom_resolver::MavenDependencyResolver,
     plugin_roots: &[ArtifactCoordinates],
 ) -> Result<Vec<ArtifactCoordinates>, ResolverError> {
-    let mut plugin_closure: Vec<ArtifactCoordinates> = Vec::new();
-    let mut plugin_seen: HashSet<(String, String, Option<String>, String)> = HashSet::new();
-    let allowlist = plugin_version_allowlist();
-    let root_set: HashSet<ArtifactCoordinates> = plugin_roots.iter().cloned().collect();
+    // Maven 本家 PluginDependenciesResolver と同じ処理:
+    // 1. 各プラグインを ScopeDependencyFilter(provided, test) + Nearest で解決
+    // 2. plugin_roots は全バージョンを保持（同一 GA でも複数バージョン許可）
+    // 3. 推移依存は Nearest（同一 GA+classifier は最初に出現したバージョンのみ）
+    let mut result: Vec<ArtifactCoordinates> = Vec::new();
+
+    // plugin_roots は (G, A, C, V) で重複チェック（全バージョン追加）
+    let mut seen_roots: HashSet<(String, String, Option<String>, String)> = HashSet::new();
+    // 推移依存は (G, A, C) で重複チェック（Nearest: 最初のバージョンのみ）
+    let mut seen_deps: HashSet<(String, String, Option<String>)> = HashSet::new();
 
     for root in plugin_roots {
+        // plugin root 自体を追加（同一 GA でも異なるバージョンは全て追加）
+        let root_key = (
+            root.group_id.clone(),
+            root.artifact_id.clone(),
+            root.classifier.clone(),
+            root.version.clone(),
+        );
+        if seen_roots.insert(root_key) {
+            result.push(root.clone());
+            // plugin root の GA も seen_deps に追加（推移依存で重複しないように）
+            seen_deps.insert((
+                root.group_id.clone(),
+                root.artifact_id.clone(),
+                root.classifier.clone(),
+            ));
+        }
+
         let options = plugin_resolution_options(root);
         let closure = resolver
             .resolve_closure_with_options(&[root.clone()], options)
@@ -709,37 +705,21 @@ pub(crate) fn resolve_plugin_closure(
                 dependency: "resolver".into(),
                 details: error.to_string(),
             })?;
-        pom_resolver::append_artifacts(&mut plugin_closure, &closure, &mut plugin_seen);
-    }
 
-    // GA 単位で最近接 1 版に収束させつつ、許容リストにある GA は指定バージョンのみ複数許可する。
-    let mut kept_ga: HashSet<(String, String, Option<String>)> = HashSet::new();
-    let mut filtered: Vec<ArtifactCoordinates> = Vec::new();
-    for coords in plugin_closure.into_iter() {
-        if root_set.contains(&coords) {
-            if !filtered.iter().any(|c| c == &coords) {
-                filtered.push(coords);
+        // 推移依存を追加（Nearest: 同一 GA は最初に出現したバージョンのみ）
+        for coords in closure {
+            let ga_key = (
+                coords.group_id.clone(),
+                coords.artifact_id.clone(),
+                coords.classifier.clone(),
+            );
+            if seen_deps.insert(ga_key) {
+                result.push(coords);
             }
-            continue;
-        }
-
-        let ga_key = (coords.group_id.clone(), coords.artifact_id.clone());
-        let classifier_key = (coords.group_id.clone(), coords.artifact_id.clone(), coords.classifier.clone());
-        if let Some(allowed_versions) = allowlist.get(&ga_key) {
-            if allowed_versions.contains(&coords.version)
-                && !filtered.iter().any(|c| c.group_id == coords.group_id
-                    && c.artifact_id == coords.artifact_id
-                    && c.classifier == coords.classifier
-                    && c.version == coords.version)
-            {
-                filtered.push(coords);
-            }
-        } else if kept_ga.insert(classifier_key) {
-            filtered.push(coords);
         }
     }
 
-    Ok(filtered)
+    Ok(result)
 }
 
 #[derive(Debug, Default)]
@@ -1550,7 +1530,7 @@ mod pom_resolver {
                 include_optional: false,
                 include_provided: false,
                 include_test: false,
-                allow_multiple_versions: true,
+                allow_multiple_versions: false, // Maven は Nearest で同一 GA を 1 バージョンに収束
                 max_depth: None,
                 skip_transitive: false,
                 conflict_strategy: ConflictStrategy::Nearest,
