@@ -360,7 +360,7 @@ fn handle_add_command(args: AddArgs, mode: CliMode) -> Result<()> {
 
 fn handle_wrapper_add_command(args: &AddArgs) -> Result<()> {
     let resolver_options = resolver_options_for_wrapper(args.strategy);
-    let (context, mut manifest, manifest_path, mut manager) = load_wrapper_context_and_manifest()?;
+    let (context, mut manifest, _manifest_path, mut manager) = load_wrapper_context_and_manifest()?;
     let (runtime, client, cache) = prepare_wrapper_resolution_env()?;
 
     let interactive_allowed =
@@ -379,7 +379,9 @@ fn handle_wrapper_add_command(args: &AddArgs) -> Result<()> {
     let repositories = collect_maven_repositories(&manager);
     let mirrors = collect_effective_mirrors(&manifest)?;
 
-    save_manifest(&manifest, &manifest_path)?;
+    // NOTE: wrapper モードでは jv.toml を書き込まない。
+    // pom.xml / settings.xml / jv.lock のみを更新する。
+    // save_manifest は native モード専用。
 
     let (resolved, lockfile, local_repository, lockfile_updated, pom_updated, settings_updated) =
         generate_lock_and_files(
@@ -548,12 +550,8 @@ fn handle_wrapper_remove_command(args: &RemoveArgs) -> Result<()> {
     let context = WrapperContext::detect().map_err(|error| anyhow!(error))?;
     let resolver_options = resolver_options_for_wrapper(args.strategy);
 
-    let manifest_path = context.project_root.join("jv.toml");
     let mut manifest = context.manifest.clone();
-    let project_root = manifest_path
-        .parent()
-        .ok_or_else(|| anyhow!("jv.toml の親ディレクトリを特定できませんでした"))?
-        .to_path_buf();
+    let project_root = context.project_root.clone();
 
     if manifest.package.dependencies.is_empty() {
         return Err(anyhow!("pom.xml に管理対象の依存関係がありません。"));
@@ -605,7 +603,7 @@ fn handle_wrapper_remove_command(args: &RemoveArgs) -> Result<()> {
                 ));
             }
         } else {
-            return Err(anyhow!("依存関係 '{}' は jv.toml に存在しません。", target));
+            return Err(anyhow!("依存関係 '{}' は pom.xml に存在しません。", target));
         }
     }
 
@@ -620,7 +618,8 @@ fn handle_wrapper_remove_command(args: &RemoveArgs) -> Result<()> {
         mirrors.clone(),
     )?;
 
-    save_manifest(&manifest, &manifest_path)?;
+    // NOTE: wrapper モードでは jv.toml を書き込まない。
+    // pom.xml / settings.xml / jv.lock のみを更新する。
     let (resolved, lockfile, _) = resolve_with_lock(
         &manifest,
         &project_root,
