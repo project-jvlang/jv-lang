@@ -167,6 +167,82 @@ jvpm install -Dmaven.repo.local=/tmp/my-m2
 jvpm install -DskipTests -o -Pproduction
 ```
 
+## Maven パススルー機能
+
+### 概要
+
+`jvpm install` は依存解決を行った後、実際のビルド処理を Maven に委譲します。これにより、jvpm の高速な依存解決と Maven の成熟したビルドエコシステムの両方を活用できます。
+
+### パススルーの仕組み
+
+```
+jvpm install -DskipTests -Pproduction
+       ↓
+[1. 依存解決 (PubGrub)]
+       ↓
+[2. jv.lock 更新]
+       ↓
+[3. pom.xml 同期]
+       ↓
+[4. Maven 実行: mvn install -DskipTests -Pproduction]
+       ↓
+[5. 終了コードを透過]
+```
+
+### Maven バイナリの検索順序
+
+jvpm は以下の順序で Maven バイナリを検索します：
+
+1. **環境変数 `JVPM_MAVEN_BIN`**: 明示的に指定された Maven バイナリ
+2. **環境変数 `MVN_HOME` / `MAVEN_HOME`**: Maven ホームディレクトリの `bin/mvn`
+3. **toolchains ディレクトリ**: プロジェクトルートの `toolchains/maven/bin/mvn`
+4. **PATH**: システムパスから `mvn` を検索
+
+### 環境変数
+
+| 変数名 | 説明 | 例 |
+|--------|------|-----|
+| `JVPM_MAVEN_BIN` | Maven バイナリの絶対パス | `/opt/maven/bin/mvn` |
+| `MVN_HOME` | Maven ホームディレクトリ | `/opt/maven` |
+| `MAVEN_HOME` | Maven ホームディレクトリ（代替） | `/opt/maven` |
+| `JAVA_HOME` | Java ホームディレクトリ（Maven 用） | `/usr/lib/jvm/java-21` |
+
+### 終了コードの透過
+
+Maven の終了コードはそのまま jvpm の終了コードとして返されます：
+
+```bash
+# Maven が成功した場合
+jvpm install
+echo $?  # 0
+
+# Maven がエラーで終了した場合
+jvpm install
+echo $?  # Maven の終了コード（例: 1）
+```
+
+これにより、CI/CD パイプラインでの使用が容易になります。
+
+### サポートされる Maven ゴール
+
+`jvpm install` は `mvn install` を実行しますが、すべての Maven オプションがパススルーされるため、実質的にすべての Maven 機能が利用可能です：
+
+```bash
+# クリーンビルド
+jvpm install clean install
+
+# デプロイ
+jvpm install deploy
+
+# 特定フェーズのみ
+jvpm install compile
+
+# サイト生成
+jvpm install site
+```
+
+> **Note**: Maven ゴールを変更する場合、最初の引数として指定します。
+
 ## 依存管理
 
 ### 依存関係の追加
@@ -291,6 +367,94 @@ jvpm は Maven と比較して高速な依存解決を提供します：
 - JAR/WAR/POM パッケージングでの init
 - code-with-quarkus サンプルでの install
 - エラーケース（既存 pom.xml、jv.toml 検出など）
+
+## CI/CD 統合
+
+### GitHub Actions
+
+```yaml
+name: Build with jvpm
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Install jvpm
+        run: cargo install jv-cli
+
+      - name: Build
+        run: jvpm install -DskipTests
+
+      - name: Test
+        run: jvpm install
+```
+
+### GitLab CI
+
+```yaml
+build:
+  image: rust:latest
+  before_script:
+    - apt-get update && apt-get install -y openjdk-21-jdk maven
+    - cargo install jv-cli
+  script:
+    - jvpm install -DskipTests
+  artifacts:
+    paths:
+      - target/
+      - jv.lock
+```
+
+### jv.lock のコミット
+
+チームで依存バージョンを統一するために、`jv.lock` を Git にコミットすることを推奨します：
+
+```bash
+git add jv.lock
+git commit -m "chore: update jv.lock"
+```
+
+## トラブルシューティング
+
+### Maven が見つからない
+
+```
+エラー: Mavenコマンド (mvn) を検出できませんでした。toolchains/maven/bin/mvn を利用可能にするか、JVPM_MAVEN_BIN / MVN_HOME を設定してください。
+```
+
+**解決策:**
+1. Maven をインストールして PATH に追加
+2. `JVPM_MAVEN_BIN` 環境変数を設定
+3. プロジェクトの `toolchains/maven/` に Maven を配置
+
+### 依存解決に時間がかかる
+
+初回実行時は Maven 中央リポジトリからの取得が発生するため時間がかかります。2回目以降は `~/.m2/repository` のキャッシュが利用されます。
+
+```bash
+# キャッシュを利用したオフラインビルド
+jvpm install -o
+```
+
+### pom.xml の変更が反映されない
+
+`jvpm add` で追加した依存関係は `pom.xml` に自動反映されますが、手動で `pom.xml` を編集した場合は `jv.lock` との同期が必要です：
+
+```bash
+# jv.lock を再生成
+rm jv.lock
+jvpm install
+```
 
 ## 関連ドキュメント
 
