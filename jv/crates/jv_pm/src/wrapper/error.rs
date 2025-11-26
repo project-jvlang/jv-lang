@@ -15,4 +15,18 @@ pub enum WrapperError {
 
     #[error("ラッパーモード操作でエラーが発生しました: {0}")]
     OperationFailed(String),
+
+    #[error(
+        "既存のプロジェクトが検出されました。新しいディレクトリで init を実行してください。"
+    )]
+    ProjectAlreadyExists,
+
+    #[error("destination `{0}` is not empty")]
+    DestinationNotEmpty(std::path::PathBuf),
+
+    #[error("pom.xml が見つかりません。`jvpm init` でプロジェクトを初期化してください。")]
+    PomNotFound,
+
+    #[error("ファイル書き込み権限がありません: {0}")]
+    PermissionDenied(std::path::PathBuf),
 }

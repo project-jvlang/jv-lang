@@ -13,8 +13,8 @@ use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use is_terminal::IsTerminal;
 use jv_pm::cli::{
-    AddArgs, Cli, Commands, RemoveArgs, RepoAuthKind, RepoCommand, RepoOrigin, RepoScope,
-    ResolverAlgorithm, ResolverCommand,
+    AddArgs, Cli, Commands, InitArgs, InstallArgs, RemoveArgs, RepoAuthKind, RepoCommand,
+    RepoOrigin, RepoScope, ResolverAlgorithm, ResolverCommand,
 };
 use jv_pm::maven::{MavenIntegrationConfig, MavenIntegrationDispatcher};
 use jv_pm::resolver::MavenResolverContext;
@@ -22,6 +22,9 @@ use jv_pm::resolver::strategies::maven_39::dependency_coordinates_for_jar;
 use jv_pm::wrapper::{
     CliMode, WrapperCommandFilter,
     context::WrapperContext,
+    error::WrapperError,
+    init::{InitConfig, ProjectInitializer},
+    install::InstallConfig,
     sync::{self, WrapperUpdateSummary},
 };
 use jv_pm::{
@@ -172,6 +175,8 @@ fn real_main() -> Result<()> {
         Commands::Remove(args) => handle_remove_command(args, mode),
         Commands::Resolver(command) => handle_resolver_command(command),
         Commands::Repo(command) => handle_repo_command(command),
+        Commands::Init(args) => handle_init_command(args),
+        Commands::Install(args) => handle_install_command(args),
         Commands::Maven(args) => handle_maven_passthrough(args),
     }
 }
@@ -195,6 +200,84 @@ fn handle_maven_passthrough(args: Vec<OsString>) -> Result<()> {
         "{} がシグナル割り込みで終了しました",
         maven_cmd.display()
     ))
+}
+
+/// Handle the init command - create a new Maven project.
+fn handle_init_command(args: InitArgs) -> Result<()> {
+    // Create config from args (interactive or non-interactive based on args and terminal state)
+    let config = InitConfig::from_args(&args)?;
+
+    // Create and validate initializer
+    let initializer = ProjectInitializer::new(config.clone());
+    initializer.validate().map_err(|e| anyhow!(e))?;
+
+    // Generate project files
+    let summary = initializer.generate().map_err(|e| anyhow!(e))?;
+
+    // Print success message (R1-6)
+    println!("プロジェクト {} を初期化しました。", summary.artifact_id);
+    println!("`jvpm add <dependency>` で依存関係を追加してください。");
+    println!();
+    println!("生成されたファイル:");
+    for file in &summary.created_files {
+        println!("  {}", file.display());
+    }
+    if !summary.created_dirs.is_empty() {
+        println!("生成されたディレクトリ:");
+        for dir in &summary.created_dirs {
+            println!("  {}/", dir.display());
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle the install command - resolve dependencies and run mvn install.
+fn handle_install_command(args: InstallArgs) -> Result<()> {
+    let config = InstallConfig::from_args(&args);
+
+    // Check if pom.xml exists
+    let cwd = std::env::current_dir()?;
+    let pom_path = cwd.join("pom.xml");
+    if !pom_path.exists() {
+        return Err(anyhow!(WrapperError::PomNotFound));
+    }
+
+    // Load wrapper context and resolve dependencies
+    let resolver_options = resolver_options_for_wrapper(None);
+    let (context, manifest, _manifest_path, manager) = load_wrapper_context_and_manifest()?;
+    let (_runtime, _client, _cache) = prepare_wrapper_resolution_env()?;
+
+    let repositories = collect_maven_repositories(&manager);
+    let mirrors = collect_effective_mirrors(&manifest)?;
+
+    // Generate lock and files (R2-1: dependency resolution + jv.lock update)
+    let (_resolved, _lockfile, _local_repository, lockfile_updated, pom_updated, settings_updated) =
+        generate_lock_and_files_for_wrapper(
+            &manifest,
+            &context.project_root,
+            &resolver_options,
+            &context.lockfile_path,
+            repositories.clone(),
+            mirrors.clone(),
+            context.local_repository.clone(),
+        )?;
+
+    if lockfile_updated {
+        println!("jv.lock を更新しました。");
+    }
+    if pom_updated {
+        println!("pom.xml を更新しました。");
+    }
+    if settings_updated {
+        println!("settings.xml を更新しました。");
+    }
+
+    // Run mvn install with passthrough args (R2-2, R2-4, R2-5)
+    let mut maven_args = vec![OsString::from("install")];
+    maven_args.extend(config.maven_args);
+
+    handle_maven_passthrough(maven_args)
 }
 
 fn resolver_options_from_strategy(strategy: Option<ResolverAlgorithm>) -> ResolverOptions {

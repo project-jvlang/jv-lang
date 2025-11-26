@@ -66,6 +66,8 @@ fn command_name(command: &Commands) -> &'static str {
         Commands::Remove(_) => "remove",
         Commands::Resolver(_) => "resolver",
         Commands::Repo(_) => "repo",
+        Commands::Init(_) => "init",
+        Commands::Install(_) => "install",
         Commands::Maven(_) => "maven",
     }
 }

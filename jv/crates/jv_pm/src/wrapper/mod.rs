@@ -2,6 +2,8 @@
 pub mod context;
 pub mod error;
 pub mod filter;
+pub mod init;
+pub mod install;
 pub mod integration;
 pub mod lockfile;
 pub mod metrics;

@@ -27,6 +27,10 @@ pub enum Commands {
     /// Manage repository definitions and mirrors
     #[command(subcommand)]
     Repo(RepoCommand),
+    /// 新規プロジェクトを初期化する
+    Init(InitArgs),
+    /// プロジェクトをビルドしてローカルリポジトリにインストールする
+    Install(InstallArgs),
     /// 未定義コマンドはMavenへフォワード
     #[command(external_subcommand)]
     Maven(Vec<OsString>),
@@ -67,6 +71,45 @@ pub struct AddArgs {
     /// 使用する依存解決アルゴリズム（wrapperモードでも有効）
     #[arg(long = "strategy", value_enum)]
     pub strategy: Option<ResolverAlgorithm>,
+}
+
+
+/// 新規プロジェクトを初期化する
+#[derive(Debug, Clone, Args)]
+pub struct InitArgs {
+    /// Maven groupId (例: com.example)
+    #[arg(long = "group-id")]
+    pub group_id: Option<String>,
+    /// Maven artifactId (例: my-app)
+    #[arg(long = "artifact-id")]
+    pub artifact_id: Option<String>,
+    /// プロジェクトバージョン (例: 0.1.0-SNAPSHOT)
+    #[arg(long = "version")]
+    pub version: Option<String>,
+    /// パッケージングタイプ (jar, war, pom)
+    #[arg(long = "packaging")]
+    pub packaging: Option<String>,
+    /// Java バージョン (17, 21, 25)
+    #[arg(long = "java-version")]
+    pub java_version: Option<String>,
+    /// 非対話モード（デフォルト値を使用）
+    #[arg(short = 'n', long = "non-interactive")]
+    pub non_interactive: bool,
+    /// プロジェクトを作成するディレクトリ
+    pub directory: Option<std::path::PathBuf>,
+}
+
+/// プロジェクトをビルドしてローカルリポジトリにインストールする
+///
+/// 追加の Maven オプションを渡すことができます:
+/// - `-DskipTests`: テストをスキップ
+/// - `-o`: オフラインモード
+/// - `-U`: スナップショットを強制更新
+#[derive(Debug, Clone, Args)]
+pub struct InstallArgs {
+    /// Maven に渡す追加の引数
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub maven_args: Vec<std::ffi::OsString>,
 }
 
 #[derive(Debug, Clone, Args)]
