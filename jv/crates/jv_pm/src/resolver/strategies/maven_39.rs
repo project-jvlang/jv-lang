@@ -172,8 +172,7 @@ impl MavenJarDownloader {
         let mut attempt = 0;
         loop {
             let (to_download, mut jar_paths) = self.build_download_plan(targets)?;
-            eprintln!(
-                "[maven-compat-debug] build_download_plan: targets={} to_download={}",
+            tracing::debug!("build_download_plan: targets={} to_download={}",
                 targets.len(),
                 to_download.len()
             );
@@ -791,8 +790,7 @@ impl ResolverStrategy for MavenCompat39Strategy {
             );
 
         let registries = registries_from_context(ctx);
-        eprintln!(
-            "[maven-compat-debug] registries={} local_repository={} strategy={}",
+        tracing::debug!("registries={} local_repository={} strategy={}",
             registries.len(),
             ctx.local_repository.display(),
             info.name
@@ -848,8 +846,7 @@ impl ResolverStrategy for MavenCompat39Strategy {
         if roots.is_empty() {
             let pom_direct = provider.direct_dependencies();
             if !pom_direct.is_empty() {
-                eprintln!(
-                    "[maven-compat-debug] roots empty; falling back to pom.xml direct_dependencies ({} items)",
+                tracing::debug!("roots empty; falling back to pom.xml direct_dependencies ({} items)",
                     pom_direct.len()
                 );
                 direct = pom_direct;
@@ -860,8 +857,7 @@ impl ResolverStrategy for MavenCompat39Strategy {
             }
         }
 
-        eprintln!(
-            "[maven-compat-debug] direct_dependencies={} (base_only={}) base_dep_names=[{}]",
+        tracing::debug!("direct_dependencies={} (base_only={}) base_dep_names=[{}]",
             direct.len(),
             base_only,
             direct
@@ -876,8 +872,7 @@ impl ResolverStrategy for MavenCompat39Strategy {
             .map(|p| p.to_artifact())
             .collect();
         if roots.len() != direct.len() {
-            eprintln!(
-                "[maven-compat-debug] roots_dedup_mismatch roots={} direct={} (duplicates dropped)",
+            tracing::debug!("roots_dedup_mismatch roots={} direct={} (duplicates dropped)",
                 roots.len(),
                 direct.len()
             );
@@ -886,8 +881,7 @@ impl ResolverStrategy for MavenCompat39Strategy {
             .iter()
             .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
             .collect();
-        eprintln!(
-            "[maven-compat-debug] roots_list=[{}] plugin_roots=[{}]",
+        tracing::debug!("roots_list=[{}] plugin_roots=[{}]",
             base_summary.join(","),
             plugin_roots
                 .iter()
@@ -944,8 +938,7 @@ impl ResolverStrategy for MavenCompat39Strategy {
             plugin_closure.len()
         );
 
-        eprintln!(
-            "[maven-compat-debug] download_plan_size={} roots_info={}",
+        tracing::debug!("download_plan_size={} roots_info={}",
             download_plan.len(),
             download_roots_summary
         );
@@ -962,23 +955,20 @@ impl ResolverStrategy for MavenCompat39Strategy {
                 .take(5)
                 .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
                 .collect();
-            eprintln!(
-                "[maven-compat-debug] download_plan_head=[{}] download_plan_tail=[{}]",
+            tracing::debug!("download_plan_head=[{}] download_plan_tail=[{}]",
                 head.join(","),
                 tail.into_iter().rev().collect::<Vec<_>>().join(",")
             );
         }
 
         let targets = jar_downloader.artifact_targets(&download_plan);
-        eprintln!(
-            "[maven-compat-debug] targets={} local_repo={}",
+        tracing::debug!("targets={} local_repo={}",
             targets.len(),
             ctx.local_repository.display()
         );
         jar_downloader.ensure_artifacts(&runtime, &targets)?;
         let present = targets.iter().filter(|(_, path)| path.exists()).count();
-        eprintln!(
-            "[maven-compat-debug] artifacts_present_after_download={}/{}",
+        tracing::debug!("artifacts_present_after_download={}/{}",
             present,
             targets.len()
         );
@@ -1722,8 +1712,7 @@ mod pom_resolver {
                             )
                         })
                         .collect();
-                    eprintln!(
-                        "[maven-compat-debug] pom_deps coords={}:{}:{} depth={} count={} allow_provided={} allow_test={} include_optional={} allow_multi={} samples=[{}]",
+                    tracing::debug!("pom_deps coords={}:{}:{} depth={} count={} allow_provided={} allow_test={} include_optional={} allow_multi={} samples=[{}]",
                         coords.group_id,
                         coords.artifact_id,
                         coords.version,
@@ -1753,8 +1742,7 @@ mod pom_resolver {
 
                     if dependency.optional && !include_optional {
                         optional_seen += 1;
-                        eprintln!(
-                            "[maven-compat-debug] skip_optional coords={}:{}:{}",
+                        tracing::debug!("skip_optional coords={}:{}:{}",
                             dependency.coordinates.group_id,
                             dependency.coordinates.artifact_id,
                             dependency.coordinates.version
@@ -1771,8 +1759,7 @@ mod pom_resolver {
                     };
                     if !allowed_scope {
                         skipped_scope += 1;
-                        eprintln!(
-                            "[maven-compat-debug] skip_scope coords={}:{}:{} scope={:?} include_provided={} include_test={}",
+                        tracing::debug!("skip_scope coords={}:{}:{} scope={:?} include_provided={} include_test={}",
                             dependency.coordinates.group_id,
                             dependency.coordinates.artifact_id,
                             dependency.coordinates.version,
@@ -1828,8 +1815,7 @@ mod pom_resolver {
                             }
                         }
                         if edge_log_emitted < max_edge_log {
-                            eprintln!(
-                                "[maven-compat-debug] enqueue_edge parent={}:{}:{} -> child={}:{}:{} scope={:?} optional={}",
+                            tracing::debug!("enqueue_edge parent={}:{}:{} -> child={}:{}:{} scope={:?} optional={}",
                                 dependency.coordinates.group_id,
                                 dependency.coordinates.artifact_id,
                                 dependency.coordinates.version,
@@ -1933,8 +1919,7 @@ mod pom_resolver {
                                 }
                             }
                             if edge_log_emitted < max_edge_log {
-                                eprintln!(
-                                    "[maven-compat-debug] enqueue_edge parent={}:{}:{} -> child={}:{}:{} scope={:?} optional={}",
+                                tracing::debug!("enqueue_edge parent={}:{}:{} -> child={}:{}:{} scope={:?} optional={}",
                                     dependency.coordinates.group_id,
                                     dependency.coordinates.artifact_id,
                                     dependency.coordinates.version,
@@ -1947,8 +1932,7 @@ mod pom_resolver {
                                 edge_log_emitted += 1;
                             }
                         } else {
-                            eprintln!(
-                                "[maven-compat-debug] retain_existing ga={}:{} version={} depth={}",
+                            tracing::debug!("retain_existing ga={}:{} version={} depth={}",
                                 coords.group_id, coords.artifact_id, coords.version, current_depth
                             );
                         }
@@ -1956,8 +1940,7 @@ mod pom_resolver {
                 }
             }
 
-            eprintln!(
-                "[maven-compat-debug] closure_finalize len={} optional_seen={} optional_enqueued={} skipped_scope={}",
+            tracing::debug!("closure_finalize len={} optional_seen={} optional_enqueued={} skipped_scope={}",
                 ordered.len(),
                 optional_seen,
                 optional_enqueued,
@@ -1969,11 +1952,10 @@ mod pom_resolver {
                     .map(|(k, v)| format!("{k}:{v}"))
                     .collect();
                 parts.sort();
-                eprintln!("[maven-compat-debug] scope_counts={}", parts.join(","));
+                tracing::debug!("scope_counts={}", parts.join(","));
             }
             if !optional_added_samples.is_empty() {
-                eprintln!(
-                    "[maven-compat-debug] optional_enqueued_samples=[{}]",
+                tracing::debug!("optional_enqueued_samples=[{}]",
                     optional_added_samples.join(",")
                 );
             }
@@ -1986,8 +1968,7 @@ mod pom_resolver {
                 if coords.len() > 50 {
                     coords.truncate(50);
                 }
-                eprintln!(
-                    "[maven-compat-debug] ga_versions size={} samples=[{}]",
+                tracing::debug!("ga_versions size={} samples=[{}]",
                     ordered.len(),
                     coords.join(",")
                 );
@@ -2007,8 +1988,7 @@ mod pom_resolver {
                 if versions.len() > 50 {
                     versions.truncate(50);
                 }
-                eprintln!(
-                    "[maven-compat-debug] ga_versions size={} samples=[{}]",
+                tracing::debug!("ga_versions size={} samples=[{}]",
                     ga_versions.len(),
                     versions.join(",")
                 );
