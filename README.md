@@ -256,6 +256,78 @@ jv add jv-json           # jv依存関係を追加
 jv audit                 # セキュリティ監査
 ```
 
+## jvpm: Maven ラッパーモード
+
+**jvpm** は既存の Maven プロジェクトでも使用可能な Maven ラッパーです。`pom.xml` のあるプロジェクトで `jvpm` コマンドを実行すると、自動的にラッパーモードで動作し、依存管理を高速化します。
+
+### クイックスタート
+
+```bash
+# 新規 Maven プロジェクトを作成
+jvpm init my-maven-app
+cd my-maven-app
+
+# 依存関係を追加
+jvpm add org.junit.jupiter:junit-jupiter-api:5.9.2
+
+# ビルド（Maven パススルー）
+jvpm install -DskipTests
+```
+
+### init コマンド
+
+新しい Maven プロジェクトを初期化します：
+
+```bash
+# 基本的な JAR プロジェクト
+jvpm init my-app
+
+# WAR プロジェクト（Web アプリケーション）
+jvpm init --packaging war my-webapp
+
+# 親 POM プロジェクト（マルチモジュール）
+jvpm init --packaging pom my-parent
+
+# すべてのオプションを指定
+jvpm init \
+  --group-id com.example \
+  --artifact-id my-app \
+  --version 1.0.0 \
+  --packaging jar \
+  --java-version 21 \
+  my-app
+```
+
+### install コマンド
+
+依存解決と Maven ビルドを実行します：
+
+```bash
+# 依存解決 + mvn install
+jvpm install
+
+# テストをスキップ
+jvpm install -DskipTests
+
+# オフラインモード
+jvpm install -o
+
+# スナップショット強制更新
+jvpm install -U
+
+# カスタム Maven リポジトリ
+jvpm install -Dmaven.repo.local=/path/to/repo
+```
+
+### メリット
+
+- **高速な依存解決**: PubGrub アルゴリズムによる効率的な依存解決
+- **jv.lock によるバージョン固定**: チーム全体で同じ依存バージョンを保証
+- **シームレスな Maven 統合**: 既存の Maven ワークフローをそのまま使用
+- **自動 pom.xml 同期**: 依存追加時に pom.xml を自動更新
+
+詳細は [jvpm Maven ラッパーガイド](docs/jvpm-maven-wrapper.md) を参照してください。
+
 ## IDE サポート
 
 jvにはIDE統合用のLanguage Server Protocol実装が含まれています：
@@ -317,3 +389,4 @@ IDEA UltimateとCommunity用プラグインが利用可能。
 - [アーキテクチャ概要](jv/docs/architecture.md)
 - [CLIリファレンス](jv/docs/cli-reference.md)
 - [パッケージマネージャーガイド](docs/jv_pm.md)
+- [jvpm Maven ラッパーガイド](docs/jvpm-maven-wrapper.md)
