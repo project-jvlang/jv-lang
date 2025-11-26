@@ -181,8 +181,10 @@ echo "[2/3] jvpm add 実行中..." | tee -a "$LOGFILE"
 
 MAVEN_JARS="$RUN_DIR/maven-jars.txt"
 WRAPPER_JARS="$RUN_DIR/wrapper-jars.txt"
+# wrapper モードでは ~/.m2/repository を使用（HOME=$WRAPPER_HOME のため $WRAPPER_HOME/.m2/repository）
+WRAPPER_REPO="$WRAPPER_HOME/.m2/repository"
 collect_jars "$MAVEN_REPO" > "$MAVEN_JARS"
-collect_jars "$WRAPPER_PROJECT/.jv/repository" > "$WRAPPER_JARS"
+collect_jars "$WRAPPER_REPO" > "$WRAPPER_JARS"
 
 echo "[3/3] Jar セット比較..." | tee -a "$LOGFILE"
 compare_sets "$MAVEN_JARS" "$WRAPPER_JARS"

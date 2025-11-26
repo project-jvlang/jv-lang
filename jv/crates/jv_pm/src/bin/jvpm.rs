@@ -220,7 +220,8 @@ fn load_wrapper_context_and_manifest()
     let context = WrapperContext::detect().map_err(|error| anyhow!(error))?;
     let manifest_path = context.project_root.join("jv.toml");
     let manifest = context.manifest.clone();
-    let mut manager = RepositoryManager::with_project_root(context.project_root.clone())
+    // wrapper モードでは ~/.m2/repository をローカルリポジトリとして使用
+    let mut manager = RepositoryManager::with_local_repository(context.local_repository.clone())
         .context("リポジトリマネージャーの初期化に失敗しました")?;
     manager.load_project_config(&manifest);
     Ok((context, manifest, manifest_path, manager))
@@ -314,20 +315,23 @@ fn resolve_dependency_additions(
     Ok(additions)
 }
 
-fn generate_lock_and_files(
+fn generate_lock_and_files_for_wrapper(
     manifest: &Manifest,
     project_root: &Path,
     resolver_options: &ResolverOptions,
     lockfile_path: &Path,
     repositories: Vec<MavenRepositoryConfig>,
     mirrors: Vec<MavenMirrorConfig>,
+    local_repository: PathBuf,
 ) -> Result<(ResolvedDependencies, Lockfile, PathBuf, bool, bool, bool)> {
-    let (resolved, lockfile, local_repository) = resolve_with_lock(
+    // wrapper モードでは呼び出し元から渡された local_repository (~/.m2/repository) を使用
+    let (resolved, lockfile, local_repository) = resolve_with_lock_and_repository(
         manifest,
         project_root,
         resolver_options,
         repositories.clone(),
         mirrors.clone(),
+        local_repository,
     )?;
 
     let lockfile_updated = write_wrapper_lockfile(lockfile_path, &lockfile)?;
@@ -384,13 +388,14 @@ fn handle_wrapper_add_command(args: &AddArgs) -> Result<()> {
     // save_manifest は native モード専用。
 
     let (resolved, lockfile, local_repository, lockfile_updated, pom_updated, settings_updated) =
-        generate_lock_and_files(
+        generate_lock_and_files_for_wrapper(
             &manifest,
             &context.project_root,
             &resolver_options,
             &context.lockfile_path,
             repositories.clone(),
             mirrors.clone(),
+            context.local_repository.clone(),
         )?;
 
     export_java_project(
@@ -1084,8 +1089,20 @@ fn resolve_with_lock(
     repositories: Vec<MavenRepositoryConfig>,
     mirrors: Vec<MavenMirrorConfig>,
 ) -> Result<(ResolvedDependencies, Lockfile, PathBuf)> {
-    let dispatcher = ResolverDispatcher::with_default_strategies();
+    // native モード: プロジェクトローカルの .jv/repository を使用
     let local_repository = ensure_local_repository(project_root)?;
+    resolve_with_lock_and_repository(manifest, project_root, options, repositories, mirrors, local_repository)
+}
+
+fn resolve_with_lock_and_repository(
+    manifest: &Manifest,
+    project_root: &Path,
+    options: &ResolverOptions,
+    repositories: Vec<MavenRepositoryConfig>,
+    mirrors: Vec<MavenMirrorConfig>,
+    local_repository: PathBuf,
+) -> Result<(ResolvedDependencies, Lockfile, PathBuf)> {
+    let dispatcher = ResolverDispatcher::with_default_strategies();
     let remote_repositories: Vec<MavenRepositoryConfig> = repositories
         .into_iter()
         .filter(|repo| !repo.url.starts_with("file://"))

@@ -75,15 +75,22 @@ impl RepositoryManager {
 
     /// プロジェクトルートを指定して初期化する。
     pub fn with_project_root(project_root: impl Into<PathBuf>) -> Result<Self, RepositoryError> {
-        Self::build(project_root.into(), None)
+        let project_root = project_root.into();
+        let local_repo_path = project_root.join(".jv").join("repository");
+        Self::build(local_repo_path, None)
+    }
+
+    /// カスタムローカルリポジトリパスを指定して初期化する（wrapper モード用）。
+    pub fn with_local_repository(local_repository: impl Into<PathBuf>) -> Result<Self, RepositoryError> {
+        Self::build(local_repository.into(), None)
     }
 
     fn build(
-        project_root: PathBuf,
+        local_repo_path: PathBuf,
         home_override: Option<PathBuf>,
     ) -> Result<Self, RepositoryError> {
         let global = load_global_config(home_override)?;
-        let local_repository = local_repository_config(&project_root);
+        let local_repository = local_repository_config_from_path(&local_repo_path);
 
         Ok(Self {
             use_global_repositories: true,
@@ -312,9 +319,8 @@ fn matches_pattern(text: &str, pattern: &str) -> bool {
     pattern.ends_with('*') || remaining.is_empty()
 }
 
-fn local_repository_config(project_root: &Path) -> RepositoryConfig {
-    let path = project_root.join(".jv").join("repository");
-    let url = Url::from_file_path(&path)
+fn local_repository_config_from_path(path: &Path) -> RepositoryConfig {
+    let url = Url::from_file_path(path)
         .map(|url| url.to_string())
         .unwrap_or_else(|_| format!("file://{}", path.display()));
 

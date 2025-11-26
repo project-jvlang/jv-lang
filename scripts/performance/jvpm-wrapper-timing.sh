@@ -199,7 +199,8 @@ verify_wrapper_jar() {
     local artifact="$3"
     local version="$4"
     local group_path="${group//./\/}"
-    local local_repo="$workdir/.jv/repository"
+    # wrapper モードでは ~/.m2/repository を使用
+    local local_repo="$MAVEN_CACHE_DIR"
     local jar_path="$local_repo/$group_path/$artifact/$version/$artifact-$version.jar"
 
     if [[ -f "$jar_path" ]]; then
@@ -216,7 +217,8 @@ verify_wrapper_jar_removed() {
     local artifact="$3"
     local version="$4"
     local group_path="${group//./\/}"
-    local local_repo="$workdir/.jv/repository"
+    # wrapper モードでは ~/.m2/repository を使用
+    local local_repo="$MAVEN_CACHE_DIR"
     local version_dir="$local_repo/$group_path/$artifact/$version"
 
     if [[ -d "$version_dir" ]]; then
@@ -237,6 +239,8 @@ collect_maven_jar_list() {
 verify_wrapper_jars_from_list() {
     local run_dir="$1"
     local jar_list="$run_dir/maven-jars.txt"
+    # wrapper モードでは ~/.m2/repository を使用
+    local local_repo="$MAVEN_CACHE_DIR"
 
     if [[ ! -f "$jar_list" ]]; then
         echo "Maven jar リストが見つかりません: $jar_list" >&2
@@ -245,7 +249,7 @@ verify_wrapper_jars_from_list() {
 
     local -a missing=()
     while IFS= read -r relative; do
-        local jar_path="$run_dir/.jv/repository/$relative"
+        local jar_path="$local_repo/$relative"
         if [[ ! -f "$jar_path" ]]; then
             missing+=("$relative")
         fi
@@ -253,7 +257,7 @@ verify_wrapper_jars_from_list() {
     # 追加/欠落をフルリストで確認
     local tmp_wrapper_list
     tmp_wrapper_list=$(mktemp)
-    find "$run_dir/.jv/repository" -type f -name '*.jar' -printf '%P\n' | sort > "$tmp_wrapper_list"
+    find "$local_repo" -type f -name '*.jar' -printf '%P\n' | sort > "$tmp_wrapper_list"
     local missing_file extra_file
     missing_file=$(mktemp)
     extra_file=$(mktemp)
@@ -288,6 +292,8 @@ verify_wrapper_jars_from_list() {
 verify_wrapper_jars_removed_from_list() {
     local run_dir="$1"
     local jar_list="$run_dir/maven-jars.txt"
+    # wrapper モードでは ~/.m2/repository を使用
+    local local_repo="$MAVEN_CACHE_DIR"
 
     if [[ ! -f "$jar_list" ]]; then
         echo "Maven jar リストが見つかりません: $jar_list" >&2
@@ -295,7 +301,7 @@ verify_wrapper_jars_removed_from_list() {
     fi
 
     while IFS= read -r relative; do
-        local version_dir="$run_dir/.jv/repository/${relative%/*}"
+        local version_dir="$local_repo/${relative%/*}"
         if [[ -d "$version_dir" ]]; then
             echo "依存 Jar が残っています: $version_dir" >&2
             exit 1
