@@ -136,7 +136,7 @@ jvpm install [MAVEN_OPTIONS...]
 ### 動作フロー
 
 1. **プロジェクト検出**: `pom.xml` の存在を確認
-2. **依存解決**: PubGrub アルゴリズムで依存関係を解決
+2. **依存解決**: 依存関係を解決
 3. **jv.lock 更新**: 解決結果をロックファイルに記録
 4. **pom.xml 同期**: 依存関係を pom.xml に反映
 5. **Maven パススルー**: `mvn install` を実行
@@ -172,14 +172,14 @@ jvpm install -DskipTests -o -Pproduction
 
 ### 概要
 
-`jvpm install` は依存解決を行った後、実際のビルド処理を Maven に委譲します。これにより、jvpm の高速な依存解決と Maven の成熟したビルドエコシステムの両方を活用できます。
+`jvpm install` は依存解決を行った後、実際のビルド処理を Maven に委譲します。これにより、jv.lock によるバージョン固定と Maven の成熟したビルドエコシステムの両方を活用できます。
 
 ### パススルーの仕組み
 
 ```
 jvpm install -DskipTests -Pproduction
        ↓
-[1. 依存解決 (PubGrub)]
+[1. 依存解決]
        ↓
 [2. jv.lock 更新]
        ↓
@@ -289,17 +289,14 @@ jvpm remove org.junit.jupiter:junit-jupiter-api
 
 ### 依存解決戦略
 
-jvpm は複数の依存解決戦略をサポートしています：
+jvpm は Maven 互換の依存解決を行います。詳細は `jv resolver` コマンドで確認できます。
 
 ```bash
 # 戦略一覧
-jvpm resolver list
+jv resolver list
 
-# デフォルト: PubGrub（推奨）
-jvpm add --resolver pubgrub org.example:lib
-
-# Maven 互換モード
-jvpm add --resolver maven org.example:lib
+# 戦略の詳細
+jv resolver info maven
 ```
 
 ## jv.lock ファイル
@@ -309,7 +306,7 @@ jvpm add --resolver maven org.example:lib
 ### 特徴
 
 - **再現性**: チーム全体で同じ依存バージョンを保証
-- **高速性**: 解決済みの依存情報をキャッシュ
+- **キャッシュ**: 解決済みの依存情報を記録
 - **Git 管理**: リポジトリにコミットして共有
 
 ### 形式
@@ -368,17 +365,6 @@ jv ネイティブプロジェクトでは `jv pm` コマンドを使用して�
 エラー: destination `/path/to/dir` is not empty
 空のディレクトリを指定するか、新しいディレクトリ名を使用してください。
 ```
-
-## パフォーマンス
-
-jvpm は Maven と比較して高速な依存解決を提供します：
-
-| 操作 | Maven | jvpm |
-|-----|-------|------|
-| 依存追加 | ~7-8 秒 | ~0.02 秒 |
-| 依存解決 | ~20 秒 | ~14 秒 |
-
-※ 実測値は環境により異なります。詳細は [jvpm-maven-wrapper-comparison.md](jvpm-maven-wrapper-comparison.md) を参照。
 
 ## デモスクリプト
 
@@ -494,5 +480,4 @@ jvpm install
 ## 関連ドキュメント
 
 - [jv_pm Phase 2 利用ガイド](jv_pm.md)
-- [Maven Wrapper との比較](jvpm-maven-wrapper-comparison.md)
 - [CLI リファレンス](../jv/docs/cli-reference.md)
