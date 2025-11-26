@@ -252,8 +252,6 @@ jvpm -o test                  # → mvn -o test (オフラインモード)
 jvpm -U compile               # → mvn -U compile (スナップショット更新)
 ```
 
-> **Note**: `jvpm install` は特別なコマンドで、jvpm の依存解決を実行した後に `mvn install` を呼び出します。依存解決なしで直接 `mvn install` を実行したい場合は引数を追加してください（例: `jvpm install -DskipTests`）。
-
 ### jvpm コマンド一覧
 
 | コマンド | 動作 |
@@ -261,10 +259,12 @@ jvpm -U compile               # → mvn -U compile (スナップショット更�
 | `jvpm add` | 依存関係を追加（jv.lock + pom.xml を更新） |
 | `jvpm remove` | 依存関係を削除（jv.lock + pom.xml を更新） |
 | `jvpm init` | 新規 Maven プロジェクトを初期化 |
-| `jvpm install` | 依存解決 + `mvn install` を実行 |
+| `jvpm install` | 依存解決 + ビルドを実行（特殊コマンド） |
 | `jvpm resolver` | 依存解決戦略の確認（`jv resolver` を案内） |
 | `jvpm repo` | リポジトリ管理（`jv repo` を案内） |
 | その他すべて | Maven に直接フォワード |
+
+> **Note**: `jvpm install` は jvpm の特殊コマンドで、依存解決を実行してから Maven を呼び出します。`jvpm clean install` や `jvpm test` などは Maven に直接フォワードされるため、jvpm の依存解決は行われません。依存解決と Maven ビルドを両方行いたい場合は `jvpm install` を使用してください。
 
 ## 依存管理
 
@@ -339,6 +339,8 @@ checksum = "sha256:..."
 | 設定ファイル | `jv.toml` | `pom.xml` |
 | ロックファイル | `jv.lock` | `jv.lock` |
 | ビルド | `jv build` | `jvpm install` |
+| テスト | `jv test` | `jvpm test` |
+| クリーン | `jv clean` | `jvpm clean` |
 | 出力 | `.java` ファイル | Maven 成果物 |
 | 対象 | jv プロジェクト | Maven プロジェクト |
 
@@ -412,14 +414,19 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
+      - name: Set up Maven
+        uses: stCarolas/setup-maven@v5
+        with:
+          maven-version: 3.9.9
+
       - name: Install jvpm
         run: cargo install jv-cli
 
       - name: Build
-        run: jvpm install -DskipTests
+        run: jvpm clean install -DskipTests
 
       - name: Test
-        run: jvpm install
+        run: jvpm test
 ```
 
 ### GitLab CI
@@ -431,11 +438,16 @@ build:
     - apt-get update && apt-get install -y openjdk-21-jdk maven
     - cargo install jv-cli
   script:
-    - jvpm install -DskipTests
+    - jvpm clean install -DskipTests
   artifacts:
     paths:
       - target/
       - jv.lock
+
+test:
+  extends: .build
+  script:
+    - jvpm test
 ```
 
 ### jv.lock のコミット

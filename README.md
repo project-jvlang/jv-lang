@@ -303,11 +303,17 @@ jvpm init \
 依存解決と Maven ビルドを実行します：
 
 ```bash
-# 依存解決 + mvn install
+# 依存解決 + ビルド
 jvpm install
 
 # テストをスキップ
 jvpm install -DskipTests
+
+# テストのみ実行
+jvpm test
+
+# クリーンビルド
+jvpm clean install
 
 # オフラインモード
 jvpm install -o
@@ -315,15 +321,15 @@ jvpm install -o
 # スナップショット強制更新
 jvpm install -U
 
-# カスタム Maven リポジトリ
-jvpm install -Dmaven.repo.local=/path/to/repo
+# 依存ツリーの表示
+jvpm dependency:tree
 ```
 
 ### メリット
 
+- **完全な Maven 互換**: `mvn` コマンドを `jvpm` に置き換えるだけ
 - **高速な依存解決**: PubGrub アルゴリズムによる効率的な依存解決
 - **jv.lock によるバージョン固定**: チーム全体で同じ依存バージョンを保証
-- **シームレスな Maven 統合**: 既存の Maven ワークフローをそのまま使用
 - **自動 pom.xml 同期**: 依存追加時に pom.xml を自動更新
 
 詳細は [jvpm Maven ラッパーガイド](docs/jvpm-maven-wrapper.md) を参照してください。
