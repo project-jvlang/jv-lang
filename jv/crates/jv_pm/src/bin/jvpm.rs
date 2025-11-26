@@ -1246,6 +1246,28 @@ fn remove_local_artifact(jar_path: &Path) -> Result<()> {
         }
     }
 
+    // バージョンディレクトリが空なら削除（親ディレクトリも再帰的にクリーンアップ）
+    // NOTE: アーティファクトの POM ファイルは削除しない（依存解決のキャッシュとして残す）
+    if let Some(version_dir) = jar_path.parent() {
+        let _ = cleanup_empty_directories(version_dir);
+    }
+
+    Ok(())
+}
+
+fn cleanup_empty_directories(dir: &Path) -> Result<()> {
+    // ディレクトリが空の場合のみ削除
+    if dir.is_dir() {
+        if let Ok(mut entries) = fs::read_dir(dir) {
+            if entries.next().is_none() {
+                fs::remove_dir(dir)?;
+                // 親ディレクトリも再帰的にチェック
+                if let Some(parent) = dir.parent() {
+                    let _ = cleanup_empty_directories(parent);
+                }
+            }
+        }
+    }
     Ok(())
 }
 
