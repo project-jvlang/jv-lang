@@ -10,6 +10,7 @@
 - **install**: 依存解決 + Maven ビルドの実行
 - **add/remove**: 依存関係の追加・削除
 - **jv.lock による再現性**: チーム全体で同じ依存バージョンを保証
+- **Maven パススルー**: 未定義サブコマンドは Maven に直接フォワード（`jvpm clean`, `jvpm test` など）
 
 ## クイックスタート
 
@@ -223,25 +224,47 @@ echo $?  # Maven の終了コード（例: 1）
 
 これにより、CI/CD パイプラインでの使用が容易になります。
 
-### サポートされる Maven ゴール
+### 未定義サブコマンドの Maven フォワード
 
-`jvpm install` は `mvn install` を実行しますが、すべての Maven オプションがパススルーされるため、実質的にすべての Maven 機能が利用可能です：
+jvpm は `add`, `remove`, `init`, `install`, `resolver`, `repo` 以外のサブコマンドを **すべて Maven に直接フォワード** します。これにより、jvpm を Maven の完全な代替として使用できます：
 
 ```bash
-# クリーンビルド
-jvpm install clean install
+# Maven ゴールを直接実行
+jvpm clean                    # → mvn clean
+jvpm compile                  # → mvn compile
+jvpm test                     # → mvn test
+jvpm package                  # → mvn package
+jvpm deploy                   # → mvn deploy
+jvpm site                     # → mvn site
 
-# デプロイ
-jvpm install deploy
+# 複数ゴールの組み合わせ
+jvpm clean install            # → mvn clean install
+jvpm clean package -DskipTests # → mvn clean package -DskipTests
 
-# 特定フェーズのみ
-jvpm install compile
+# Maven プラグインの実行
+jvpm dependency:tree          # → mvn dependency:tree
+jvpm versions:display-dependency-updates  # → mvn versions:display-dependency-updates
+jvpm spring-boot:run          # → mvn spring-boot:run
 
-# サイト生成
-jvpm install site
+# プロファイルとオプション
+jvpm -Pproduction package     # → mvn -Pproduction package
+jvpm -o test                  # → mvn -o test (オフラインモード)
+jvpm -U compile               # → mvn -U compile (スナップショット更新)
 ```
 
-> **Note**: Maven ゴールを変更する場合、最初の引数として指定します。
+> **Note**: `jvpm install` は特別なコマンドで、jvpm の依存解決を実行した後に `mvn install` を呼び出します。依存解決なしで直接 `mvn install` を実行したい場合は引数を追加してください（例: `jvpm install -DskipTests`）。
+
+### jvpm コマンド一覧
+
+| コマンド | 動作 |
+|---------|------|
+| `jvpm add` | 依存関係を追加（jv.lock + pom.xml を更新） |
+| `jvpm remove` | 依存関係を削除（jv.lock + pom.xml を更新） |
+| `jvpm init` | 新規 Maven プロジェクトを初期化 |
+| `jvpm install` | 依存解決 + `mvn install` を実行 |
+| `jvpm resolver` | 依存解決戦略の確認（`jv resolver` を案内） |
+| `jvpm repo` | リポジトリ管理（`jv repo` を案内） |
+| その他すべて | Maven に直接フォワード |
 
 ## 依存管理
 
