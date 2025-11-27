@@ -1,3 +1,4 @@
+use super::maven_39::hydrate_resolved_dependencies_with_jars;
 use crate::Manifest;
 use crate::resolver::{
     DependencyProvider, LinearResolutionProfile, ResolvedDependencies, ResolverAlgorithmKind,
@@ -38,7 +39,7 @@ impl ResolverStrategy for BreadthFirstStrategy {
         options: &ResolverOptions,
     ) -> Result<ResolvedDependencies, ResolverError> {
         let info = self.metadata();
-        execute_linear_resolution(
+        let mut resolved = execute_linear_resolution(
             manifest,
             provider,
             options,
@@ -47,6 +48,16 @@ impl ResolverStrategy for BreadthFirstStrategy {
                 heuristic: "breadth-first",
                 treat_range_as_pending: false,
             },
-        )
+        )?;
+
+        if let Some(context) = options.maven_context.as_ref() {
+            hydrate_resolved_dependencies_with_jars(None, context, &mut resolved)?;
+        } else {
+            tracing::warn!(
+                "MavenResolverContext が設定されていないため Jar ダウンロードをスキップします"
+            );
+        }
+
+        Ok(resolved)
     }
 }

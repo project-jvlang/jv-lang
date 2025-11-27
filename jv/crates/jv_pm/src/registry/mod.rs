@@ -1,3 +1,6 @@
+use md5;
+use sha1::Sha1;
+use std::error::Error as StdError;
 use std::fmt;
 use std::time::Duration;
 
@@ -106,6 +109,10 @@ impl ArtifactCoordinates {
         }
     }
 
+    pub fn jar_file_name(&self) -> String {
+        format!("{}.jar", self.jar_basename())
+    }
+
     fn pom_basename(&self) -> String {
         format!("{}-{}", self.artifact_id, self.version)
     }
@@ -118,8 +125,17 @@ impl ArtifactCoordinates {
         format!("{}/{}.pom", self.version_path(), self.pom_basename())
     }
 
-    fn checksum_path(&self) -> String {
-        format!("{}/{}.jar.sha256", self.version_path(), self.jar_basename())
+    pub fn checksum_path(&self) -> String {
+        self.checksum_path_with_extension("sha256")
+    }
+
+    fn checksum_path_with_extension(&self, extension: &str) -> String {
+        format!(
+            "{}/{}.jar.{}",
+            self.version_path(),
+            self.jar_basename(),
+            extension
+        )
     }
 }
 
@@ -222,6 +238,58 @@ impl DownloadedJar {
     }
 }
 
+/// チェックサムアルゴリズムの選択肢。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChecksumAlgorithm {
+    Sha256,
+    Sha1,
+    Md5,
+}
+
+impl ChecksumAlgorithm {
+    pub fn extension(&self) -> &'static str {
+        match self {
+            ChecksumAlgorithm::Sha256 => "sha256",
+            ChecksumAlgorithm::Sha1 => "sha1",
+            ChecksumAlgorithm::Md5 => "md5",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            ChecksumAlgorithm::Sha256 => "SHA-256",
+            ChecksumAlgorithm::Sha1 => "SHA-1",
+            ChecksumAlgorithm::Md5 => "MD5",
+        }
+    }
+
+    pub fn compute(&self, bytes: &[u8]) -> String {
+        match self {
+            ChecksumAlgorithm::Sha256 => format!("{:x}", Sha256::digest(bytes)),
+            ChecksumAlgorithm::Sha1 => {
+                let mut hasher = Sha1::new();
+                hasher.update(bytes);
+                format!("{:x}", hasher.finalize())
+            }
+            ChecksumAlgorithm::Md5 => format!("{:x}", md5::compute(bytes)),
+        }
+    }
+}
+
+impl fmt::Display for ChecksumAlgorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.description())
+    }
+}
+
+/// チェックサム付きJar。
+#[derive(Debug, Clone)]
+pub struct ChecksumVerifiedJar {
+    pub jar: DownloadedJar,
+    pub algorithm: ChecksumAlgorithm,
+    pub expected_checksum: String,
+}
+
 /// Mavenレジストリに関するエラー種別。
 #[derive(Debug, Error)]
 pub enum RegistryError {
@@ -261,6 +329,11 @@ pub enum RegistryError {
         expected: String,
         actual: String,
     },
+    #[error("チェックサムファイルが見つかりません ({algorithms:?}): {coordinates}")]
+    ChecksumMissing {
+        coordinates: ArtifactCoordinates,
+        algorithms: Vec<String>,
+    },
     #[error("メタデータの解析に失敗しました: {source}")]
     MetadataParse {
         coordinates: MavenCoordinates,
@@ -288,6 +361,8 @@ impl MavenRegistry {
     ) -> Result<Self, RegistryError> {
         let client = Client::builder()
             .timeout(DEFAULT_TIMEOUT)
+            // Avoid HTTP/2 oddities against Maven Central; prefer HTTP/1.1.
+            .http1_only()
             .user_agent(format!("jv-pm/{}", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|source| RegistryError::ClientBuild { source })?;
@@ -349,42 +424,24 @@ impl MavenRegistry {
             })
     }
 
-    /// JARをダウンロードし、`.sha256`で完全性を検証する。
+    /// JARをダウンロードし、チェックサムで完全性を検証する。
     pub async fn download_jar(
         &self,
         coords: &ArtifactCoordinates,
     ) -> Result<DownloadedJar, RegistryError> {
-        let url = self.join_path(&coords.jar_path())?;
-        let jar_bytes = self.request_bytes(url, ResourceKind::Jar(coords)).await?;
-
-        let expected = self.download_checksum(coords).await?;
-        let actual = format!("{:x}", Sha256::digest(jar_bytes.as_ref()));
-        if expected != actual {
-            warn!(
-                artifact = %coords,
-                expected = %expected,
-                actual = %actual,
-                "ダウンロードしたアーティファクトのチェックサムが一致しません"
-            );
-            return Err(RegistryError::ChecksumMismatch {
-                coordinates: coords.clone(),
-                expected,
-                actual,
-            });
-        }
-
-        Ok(DownloadedJar {
-            bytes: jar_bytes.to_vec(),
-            checksum: expected,
-        })
+        let result = self
+            .download_jar_with_algorithms(coords, &[ChecksumAlgorithm::Sha256])
+            .await?;
+        Ok(result.jar)
     }
 
-    /// `.sha256` チェックサムファイルを取得し、正規化したハッシュ文字列を返す。
-    pub async fn download_checksum(
+    /// 指定アルゴリズムのチェックサムファイルを取得し、正規化したハッシュ文字列を返す。
+    pub async fn download_checksum_with_algorithm(
         &self,
         coords: &ArtifactCoordinates,
+        algorithm: ChecksumAlgorithm,
     ) -> Result<String, RegistryError> {
-        let url = self.join_path(&coords.checksum_path())?;
+        let url = self.join_path(&coords.checksum_path_with_extension(algorithm.extension()))?;
         let bytes = self
             .request_bytes(url, ResourceKind::Checksum(coords))
             .await?;
@@ -395,8 +452,74 @@ impl MavenRegistry {
             }
         })?;
         extract_checksum(text).ok_or_else(|| RegistryError::InvalidResponse {
-            resource: format!("checksum {}", coords),
-            message: "チェックサムファイルに有効な値が含まれていません".to_string(),
+            resource: format!("checksum {} ({})", coords, algorithm),
+            message: format!("{}チェックサムが含まれていません", algorithm.description()),
+        })
+    }
+
+    pub async fn download_checksum(
+        &self,
+        coords: &ArtifactCoordinates,
+    ) -> Result<String, RegistryError> {
+        self.download_checksum_with_algorithm(coords, ChecksumAlgorithm::Sha256)
+            .await
+    }
+
+    pub async fn download_jar_with_algorithms(
+        &self,
+        coords: &ArtifactCoordinates,
+        algorithms: &[ChecksumAlgorithm],
+    ) -> Result<ChecksumVerifiedJar, RegistryError> {
+        let url = self.join_path(&coords.jar_path())?;
+        let jar_bytes = self.request_bytes(url, ResourceKind::Jar(coords)).await?;
+
+        for algorithm in algorithms {
+            match self
+                .download_checksum_with_algorithm(coords, *algorithm)
+                .await
+            {
+                Ok(expected) => {
+                    let actual = algorithm.compute(jar_bytes.as_ref());
+                    if actual != expected {
+                        warn!(
+                            artifact = %coords,
+                            algorithm = %algorithm,
+                            expected = %expected,
+                            actual = %actual,
+                            "ダウンロードしたアーティファクトのチェックサムが一致しません"
+                        );
+                        return Err(RegistryError::ChecksumMismatch {
+                            coordinates: coords.clone(),
+                            expected,
+                            actual,
+                        });
+                    }
+
+                    return Ok(ChecksumVerifiedJar {
+                        jar: DownloadedJar {
+                            bytes: jar_bytes.to_vec(),
+                            checksum: actual,
+                        },
+                        algorithm: *algorithm,
+                        expected_checksum: expected,
+                    });
+                }
+                Err(error) => match error {
+                    RegistryError::ArtifactNotFound {
+                        resource: ArtifactResource::Checksum,
+                        ..
+                    } => continue,
+                    other => return Err(other),
+                },
+            }
+        }
+
+        Err(RegistryError::ChecksumMissing {
+            coordinates: coords.clone(),
+            algorithms: algorithms
+                .iter()
+                .map(|algorithm| algorithm.description().to_string())
+                .collect(),
         })
     }
 
@@ -500,6 +623,13 @@ impl MavenRegistry {
                     sleep(delay).await;
                 }
                 Err(error) => {
+                    // Emit full error chain to aid diagnosing transport failures.
+                    let mut chain = format!("{error:?}");
+                    let mut curr = error.source();
+                    while let Some(src) = curr {
+                        chain.push_str(&format!(" | caused by: {src}"));
+                        curr = src.source();
+                    }
                     let retryable = error.is_timeout() || error.is_connect();
                     warn!(
                         attempt,
@@ -507,7 +637,7 @@ impl MavenRegistry {
                         target = %resource,
                         url = %url,
                         retryable,
-                        error = %error,
+                        error = %chain,
                         "HTTPリクエスト失敗"
                     );
                     if retryable && attempt < max_attempts {

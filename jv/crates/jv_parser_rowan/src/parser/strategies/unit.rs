@@ -4,7 +4,6 @@ use crate::frontend::{
 };
 use crate::parser::context::ParserContext;
 use crate::syntax::{SyntaxKind, TokenKind};
-use jv_lexer::TokenType;
 
 use super::StatementStrategy;
 
@@ -22,39 +21,22 @@ impl StatementStrategy for UnitTypeDefinitionStrategy {
         if lookahead != TokenKind::At {
             return false;
         }
-
-        let Some((_, TokenKind::Identifier)) = ctx.peek_significant_kind_n(1) else {
+        if !ctx.cursor_has_whitespace_after_at()
+            && !self.looks_like_unit_definition_without_space(ctx)
+        {
             return false;
-        };
-        let Some((left_paren_index, TokenKind::LeftParen)) = ctx.peek_significant_kind_n(2) else {
-            return false;
-        };
-
-        let mut depth = 0usize;
-        let mut index = left_paren_index + 1;
-        while index < ctx.tokens.len() {
-            let token = &ctx.tokens[index];
-            let kind = TokenKind::from_token(token);
-            match kind {
-                TokenKind::LeftParen => depth = depth.saturating_add(1),
-                TokenKind::RightParen => {
-                    if depth == 0 {
-                        if let Some((_, next_kind)) =
-                            Self::next_significant_kind_from(ctx, index + 1)
-                        {
-                            return matches!(next_kind, TokenKind::Identifier | TokenKind::Unknown);
-                        }
-                        return false;
-                    }
-                    depth -= 1;
-                }
-                TokenKind::Eof => return false,
-                _ => {}
-            }
-            index += 1;
         }
 
-        false
+        matches!(
+            (
+                ctx.peek_significant_kind_n(1),
+                ctx.peek_significant_kind_n(2)
+            ),
+            (
+                Some((_, TokenKind::Identifier)),
+                Some((_, TokenKind::LeftParen))
+            )
+        )
     }
 
     fn parse(&self, ctx: &mut ParserContext<'_>) -> bool {
@@ -79,55 +61,18 @@ impl StatementStrategy for UnitTypeDefinitionStrategy {
 }
 
 impl UnitTypeDefinitionStrategy {
-    fn next_significant_kind_from(
-        ctx: &ParserContext<'_>,
-        start_index: usize,
-    ) -> Option<(usize, TokenKind)> {
-        let mut index = start_index;
-        while index < ctx.tokens.len() {
-            let token = &ctx.tokens[index];
-            let kind = TokenKind::from_token(token);
-            if kind.is_trivia() {
-                index += 1;
-                continue;
-            }
-            return Some((index, kind));
-        }
-        None
-    }
-
-    fn bump_unit_symbol(&self, ctx: &mut ParserContext<'_>) -> bool {
-        let Some(token) = ctx.peek_significant_token_n(0) else {
-            ctx.report_error(
-                "単位名を識別子で指定してください",
-                ctx.position(),
-                ctx.position(),
-            );
-            return false;
-        };
-        let kind = TokenKind::from_token(token);
-        if kind == TokenKind::Identifier || matches!(token.token_type, TokenType::Invalid(_)) {
-            ctx.bump_raw();
-            true
-        } else {
-            ctx.report_error(
-                "単位名を識別子で指定してください",
-                ctx.position(),
-                ctx.position(),
-            );
-            false
-        }
-    }
-
     fn parse_header(&self, ctx: &mut ParserContext<'_>, start: usize) -> bool {
         ctx.start_node(SyntaxKind::UnitHeader);
 
+        let at_index = ctx.position();
         if !ctx.bump_expected(TokenKind::At, "単位定義は `@` で始まります") {
             ctx.finish_node();
             return false;
         }
 
-        let has_space = ctx.consume_inline_whitespace();
+        let consumed_space = ctx.consume_inline_whitespace();
+        let whitespace_after_at = ctx.has_whitespace_after_at(at_index);
+        let has_space = consumed_space || whitespace_after_at;
         if !has_space {
             ctx.report_error(DIAGNOSTIC_JV_UNIT_001_MISSING_SPACE, start, ctx.position());
         }
@@ -173,7 +118,7 @@ impl UnitTypeDefinitionStrategy {
         ctx.consume_inline_whitespace();
 
         ctx.start_node(SyntaxKind::UnitName);
-        if !self.bump_unit_symbol(ctx) {
+        if !self.consume_unit_name(ctx) {
             ctx.finish_node(); // UnitName
             ctx.finish_node(); // UnitHeader
             return false;
@@ -364,5 +309,110 @@ impl UnitTypeDefinitionStrategy {
 
         ctx.finish_node();
         block_ok
+    }
+
+    fn looks_like_unit_definition_without_space(&self, ctx: &ParserContext<'_>) -> bool {
+        let mut index = ctx.position().saturating_add(1);
+        let tokens = ctx.tokens;
+        let len = tokens.len();
+
+        let next_significant = |mut idx: usize| -> Option<(usize, TokenKind)> {
+            while idx < len {
+                let kind = TokenKind::from_token(&tokens[idx]);
+                if !kind.is_trivia() {
+                    return Some((idx, kind));
+                }
+                idx += 1;
+            }
+            None
+        };
+
+        let (new_index, kind) = match next_significant(index) {
+            Some(value) => value,
+            None => return false,
+        };
+        index = new_index;
+        if kind != TokenKind::Identifier {
+            return false;
+        }
+        index += 1;
+
+        let (new_index, kind) = match next_significant(index) {
+            Some(value) => value,
+            None => return false,
+        };
+        index = new_index;
+        if kind != TokenKind::LeftParen {
+            return false;
+        }
+        let mut depth = 1usize;
+        index += 1;
+        while index < len {
+            let kind_now = TokenKind::from_token(&tokens[index]);
+            match kind_now {
+                TokenKind::LeftParen => depth = depth.saturating_add(1),
+                TokenKind::RightParen => {
+                    depth = depth.saturating_sub(1);
+                    index += 1;
+                    if depth == 0 {
+                        break;
+                    } else {
+                        continue;
+                    }
+                }
+                TokenKind::Eof | TokenKind::Newline => return false,
+                _ => {}
+            }
+            index += 1;
+        }
+
+        if depth != 0 {
+            return false;
+        }
+
+        let (new_index, kind) = match next_significant(index) {
+            Some(value) => value,
+            None => return false,
+        };
+        index = new_index;
+        if kind != TokenKind::Identifier {
+            return false;
+        }
+        index += 1;
+
+        let (new_index, kind) = match next_significant(index) {
+            Some(value) => value,
+            None => return false,
+        };
+        index = new_index;
+        let mut current_kind = kind;
+        if current_kind == TokenKind::Bang {
+            index += 1;
+            current_kind = match next_significant(index) {
+                Some((_, next_kind)) => next_kind,
+                None => return false,
+            };
+        }
+
+        current_kind == TokenKind::LeftBrace
+    }
+
+    fn consume_unit_name(&self, ctx: &mut ParserContext<'_>) -> bool {
+        ctx.consume_trivia();
+        match ctx.peek_significant_kind() {
+            Some(TokenKind::Identifier) | Some(TokenKind::Unknown) => {
+                ctx.bump_raw();
+                true
+            }
+            _ => {
+                let start = ctx.position();
+                ctx.report_error(
+                    "単位名を識別子または記号で指定してください",
+                    start,
+                    start.saturating_add(1),
+                );
+                false
+            }
+        }
     }
 }

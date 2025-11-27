@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use crate::repository::defaults;
+use crate::wrapper::integration::WrapperIntegrationStrategy;
 use crate::{Lockfile, Manifest, ResolvedDependencies};
 
 pub mod pom_generator;
@@ -73,7 +75,7 @@ impl MavenMirrorConfig {
 /// Maven統合に必要な入力情報。
 #[derive(Debug)]
 pub struct MavenIntegrationConfig<'a> {
-    pub manifest: &'a Manifest,
+    pub manifest: Option<&'a Manifest>,
     pub resolved: &'a ResolvedDependencies,
     pub lockfile: Option<&'a Lockfile>,
     pub repositories: &'a [MavenRepositoryConfig],
@@ -130,10 +132,16 @@ impl MavenIntegrationDispatcher {
         let mut strategies: HashMap<String, Box<dyn MavenIntegrationStrategy>> = HashMap::new();
         strategies.insert("maven3".to_string(), Box::new(Maven3IntegrationStrategy));
         strategies.insert("maven4".to_string(), Box::new(Maven4IntegrationStrategy));
+        strategies.insert(
+            "wrapper-default".to_string(),
+            Box::new(WrapperIntegrationStrategy),
+        );
+
+        let default_strategy = defaults::default_maven_distribution_id().to_string();
 
         Self {
             strategies,
-            default_strategy: "maven3".to_string(),
+            default_strategy,
         }
     }
 
@@ -201,6 +209,8 @@ pub enum MavenIntegrationError {
     Pom(#[from] PomGenerationError),
     #[error("settings.xml の生成に失敗しました: {0}")]
     Settings(#[from] SettingsGenerationError),
+    #[error("manifest 情報が不足しています")]
+    MissingManifest,
 }
 
 struct Maven3IntegrationStrategy;
@@ -215,14 +225,18 @@ impl MavenIntegrationStrategy for Maven3IntegrationStrategy {
     }
 
     fn maven_version(&self) -> &str {
-        "3.x"
+        defaults::maven_distribution_version("maven3")
     }
 
     fn generate(
         &self,
         config: &MavenIntegrationConfig<'_>,
     ) -> Result<MavenIntegrationFiles, MavenIntegrationError> {
-        let pom = PomGenerator::new(config.manifest, config.resolved)
+        let manifest = config
+            .manifest
+            .ok_or(MavenIntegrationError::MissingManifest)?;
+
+        let pom = PomGenerator::new(manifest, config.resolved)
             .with_lockfile(config.lockfile)
             .with_repositories(config.repositories)
             .generate()?;
@@ -253,7 +267,7 @@ impl MavenIntegrationStrategy for Maven4IntegrationStrategy {
     }
 
     fn maven_version(&self) -> &str {
-        "4.x"
+        defaults::maven_distribution_version("maven4")
     }
 
     fn generate(
@@ -316,6 +330,7 @@ mod tests {
                     decision: VersionDecision::Exact("1.0.1".to_string()),
                     scope: DependencyScope::Main,
                     source: ResolutionSource::Registry,
+                    local_artifact: None,
                 },
                 crate::resolver::ResolvedDependency {
                     name: "org.example:test-kit".to_string(),
@@ -323,6 +338,7 @@ mod tests {
                     decision: VersionDecision::Exact("2.1.0".to_string()),
                     scope: DependencyScope::Dev,
                     source: ResolutionSource::Registry,
+                    local_artifact: None,
                 },
             ],
             diagnostics: Vec::<ResolutionDiagnostic>::new(),
@@ -397,7 +413,7 @@ mod tests {
         let dispatcher = MavenIntegrationDispatcher::new();
         let files = dispatcher
             .generate_default(&MavenIntegrationConfig {
-                manifest: &manifest,
+                manifest: Some(&manifest),
                 resolved: &resolved,
                 lockfile: Some(&lockfile),
                 repositories: &repositories,

@@ -10,254 +10,36 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::Parser;
 use is_terminal::IsTerminal;
+use jv_pm::cli::{
+    AddArgs, Cli, Commands, InitArgs, InstallArgs, RemoveArgs, RepoAuthKind, RepoCommand,
+    RepoOrigin, RepoScope, ResolverAlgorithm, ResolverCommand,
+};
+use jv_pm::maven::{MavenIntegrationConfig, MavenIntegrationDispatcher};
+use jv_pm::resolver::MavenResolverContext;
+use jv_pm::resolver::strategies::maven_39::dependency_coordinates_for_jar;
+use jv_pm::wrapper::{
+    CliMode, WrapperCommandFilter,
+    context::WrapperContext,
+    error::WrapperError,
+    init::{InitConfig, ProjectInitializer},
+    install::InstallConfig,
+    sync::{self, WrapperUpdateSummary},
+};
 use jv_pm::{
-    AuthConfig, AuthType, DependencyCache, ExportError, ExportRequest, FilterConfig,
-    JavaProjectExporter, LockfileService, Manifest, MavenCoordinates, MavenMetadata,
-    MavenMirrorConfig, MavenRegistry, MavenRepositoryConfig, MirrorConfig, RegistryError,
-    RepositoryConfig, RepositoryManager, ResolutionStats, ResolvedDependencies,
-    ResolverAlgorithmKind, ResolverDispatcher, ResolverOptions, ResolverStrategyInfo,
-    StrategyStability,
+    self, AuthConfig, AuthType, DependencyCache, DependencyScope, ExportError, ExportRequest,
+    FilterConfig, JavaProjectExporter, Lockfile, LockfileService, Manifest, MavenCoordinates,
+    MavenMetadata, MavenMirrorConfig, MavenRegistry, MavenRepositoryConfig, MirrorConfig,
+    RegistryError, RepositoryConfig, RepositoryManager, RequestedDependency, ResolutionStats,
+    ResolvedDependencies, ResolvedDependency, ResolverAlgorithmKind, ResolverDispatcher,
+    ResolverOptions, ResolverStrategyInfo, StrategyStability, repository,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use strsim::normalized_levenshtein;
 use tokio::runtime::Builder as RuntimeBuilder;
 use url::form_urlencoded;
-
-#[derive(Parser, Debug)]
-#[command(name = "jvpm")]
-#[command(about = "jv package manager helper", long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    /// 依存関係を追加する
-    Add(AddArgs),
-    /// 依存関係を削除する
-    Remove(RemoveArgs),
-    /// Inspect resolver strategies
-    #[command(subcommand)]
-    Resolver(ResolverCommand),
-    /// Manage repository definitions and mirrors
-    #[command(subcommand)]
-    Repo(RepoCommand),
-    /// 未定義コマンドはMavenへフォワード
-    #[command(external_subcommand)]
-    Maven(Vec<OsString>),
-}
-
-#[derive(Debug, Clone, Args)]
-struct AddArgs {
-    /// 追加する依存関係（group:artifact[:version] または group:artifact@version 形式）
-    #[arg(value_name = "package", required = true)]
-    packages: Vec<String>,
-    /// 非対話モード（候補のみ表示して終了）
-    #[arg(long = "non-interactive")]
-    non_interactive: bool,
-}
-
-#[derive(Debug, Clone, Args)]
-struct RemoveArgs {
-    /// 削除する依存関係（名前または group:artifact 形式）
-    #[arg(value_name = "package", required = true)]
-    packages: Vec<String>,
-    /// 非対話モード（候補のみ表示して終了）
-    #[arg(long = "non-interactive")]
-    non_interactive: bool,
-}
-
-#[derive(Subcommand, Debug)]
-enum ResolverCommand {
-    /// List every registered resolver strategy
-    List {
-        /// Emit machine-readable JSON instead of a human table
-        #[arg(long)]
-        json: bool,
-    },
-    /// Show extended metadata for a single strategy
-    Info {
-        /// Strategy name or alias (see `jv resolver list`)
-        name: String,
-        /// Emit machine-readable JSON instead of a textual block
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum RepoCommand {
-    /// 現在有効なリポジトリ一覧を表示する
-    List {
-        /// グローバル設定に登録済みのリポジトリも含める
-        #[arg(long = "include-global")]
-        include_global: bool,
-        /// JSON形式で出力する
-        #[arg(long)]
-        json: bool,
-    },
-    /// 指定したリポジトリの詳細を表示する
-    Show {
-        /// 対象となるリポジトリ名
-        name: String,
-        /// グローバル設定の一覧も検索対象に含める
-        #[arg(long = "include-global")]
-        include_global: bool,
-        /// JSON形式で出力する
-        #[arg(long)]
-        json: bool,
-    },
-    /// 新しいリポジトリ定義を追加する
-    Add {
-        /// 追加するリポジトリ名
-        name: String,
-        /// 追加するリポジトリURL
-        url: String,
-        /// 優先度（小さいほど優先）
-        #[arg(long)]
-        priority: Option<u32>,
-        /// 書き込み先のスコープ
-        #[arg(long = "scope", value_enum, default_value_t = RepoScope::Project)]
-        scope: RepoScope,
-        /// 認証方式
-        #[arg(long, value_enum, default_value_t = RepoAuthKind::None)]
-        auth: RepoAuthKind,
-        /// BASIC認証のユーザー名環境変数
-        #[arg(long = "username-env")]
-        username_env: Option<String>,
-        /// BASIC認証のパスワード環境変数
-        #[arg(long = "password-env")]
-        password_env: Option<String>,
-        /// トークン認証の環境変数
-        #[arg(long = "token-env")]
-        token_env: Option<String>,
-        /// include-groups フィルタ
-        #[arg(long = "include-group")]
-        include_groups: Vec<String>,
-        /// exclude-groups フィルタ
-        #[arg(long = "exclude-group")]
-        exclude_groups: Vec<String>,
-    },
-    /// 既存リポジトリ定義を削除する
-    Remove {
-        /// 削除するリポジトリ名
-        name: String,
-        /// 削除対象のスコープ
-        #[arg(long = "scope", value_enum, default_value_t = RepoScope::Project)]
-        scope: RepoScope,
-    },
-    /// ミラー設定を表示・編集する
-    Mirror {
-        /// mirror-of対象名
-        target: Option<String>,
-        /// ミラーURL（設定/更新時）
-        url: Option<String>,
-        /// 表示名（省略可）
-        #[arg(long = "name")]
-        display_name: Option<String>,
-        /// 指定時は該当設定を削除する
-        #[arg(long)]
-        remove: bool,
-        /// JSON形式で出力する
-        #[arg(long)]
-        json: bool,
-        /// 操作対象スコープ
-        #[arg(long = "scope", value_enum, default_value_t = RepoScope::Project)]
-        scope: RepoScope,
-    },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-enum RepoScope {
-    Project,
-    Global,
-}
-
-impl RepoScope {
-    fn label(self) -> &'static str {
-        match self {
-            RepoScope::Project => "プロジェクト",
-            RepoScope::Global => "グローバル",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-enum RepoAuthKind {
-    None,
-    Basic,
-    Token,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RepoOrigin {
-    Local,
-    Project,
-    Global,
-}
-
-impl RepoOrigin {
-    fn label(self) -> &'static str {
-        match self {
-            RepoOrigin::Local => "ローカル",
-            RepoOrigin::Project => "プロジェクト",
-            RepoOrigin::Global => "グローバル",
-        }
-    }
-}
-
-impl Serialize for RepoOrigin {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(match self {
-            RepoOrigin::Local => "local",
-            RepoOrigin::Project => "project",
-            RepoOrigin::Global => "global",
-        })
-    }
-}
-
-impl Serialize for RepoScope {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(match self {
-            RepoScope::Project => "project",
-            RepoScope::Global => "global",
-        })
-    }
-}
-
-impl Serialize for RepoAuthKind {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(match self {
-            RepoAuthKind::None => "none",
-            RepoAuthKind::Basic => "basic",
-            RepoAuthKind::Token => "token",
-        })
-    }
-}
-
-impl From<AuthType> for RepoAuthKind {
-    fn from(value: AuthType) -> Self {
-        match value {
-            AuthType::None => RepoAuthKind::None,
-            AuthType::Basic => RepoAuthKind::Basic,
-            AuthType::Token => RepoAuthKind::Token,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 struct RepositoryEntry {
     origin: RepoOrigin,
@@ -381,12 +163,20 @@ fn main() {
 }
 
 fn real_main() -> Result<()> {
+    let mode = CliMode::detect();
+    if mode.is_wrapper() {
+        println!("[wrapper-mode] Maven ラッパーモードで起動しました");
+    }
     let cli = Cli::parse();
+    WrapperCommandFilter::validate(&cli.command, mode).map_err(|err| anyhow!(err))?;
+
     match cli.command {
-        Commands::Add(args) => handle_add_command(args),
-        Commands::Remove(args) => handle_remove_command(args),
+        Commands::Add(args) => handle_add_command(args, mode),
+        Commands::Remove(args) => handle_remove_command(args, mode),
         Commands::Resolver(command) => handle_resolver_command(command),
         Commands::Repo(command) => handle_repo_command(command),
+        Commands::Init(args) => handle_init_command(args),
+        Commands::Install(args) => handle_install_command(args),
         Commands::Maven(args) => handle_maven_passthrough(args),
     }
 }
@@ -412,7 +202,310 @@ fn handle_maven_passthrough(args: Vec<OsString>) -> Result<()> {
     ))
 }
 
-fn handle_add_command(args: AddArgs) -> Result<()> {
+/// Handle the init command - create a new Maven project.
+fn handle_init_command(args: InitArgs) -> Result<()> {
+    // Create config from args (interactive or non-interactive based on args and terminal state)
+    let config = InitConfig::from_args(&args)?;
+
+    // Create and validate initializer
+    let initializer = ProjectInitializer::new(config.clone());
+    initializer.validate().map_err(|e| anyhow!(e))?;
+
+    // Generate project files
+    let summary = initializer.generate().map_err(|e| anyhow!(e))?;
+
+    // Print success message (R1-6)
+    println!("プロジェクト {} を初期化しました。", summary.artifact_id);
+    println!("`jvpm add <dependency>` で依存関係を追加してください。");
+    println!();
+    println!("生成されたファイル:");
+    for file in &summary.created_files {
+        println!("  {}", file.display());
+    }
+    if !summary.created_dirs.is_empty() {
+        println!("生成されたディレクトリ:");
+        for dir in &summary.created_dirs {
+            println!("  {}/", dir.display());
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle the install command - resolve dependencies and run mvn install.
+fn handle_install_command(args: InstallArgs) -> Result<()> {
+    let config = InstallConfig::from_args(&args);
+
+    // Check if pom.xml exists
+    let cwd = std::env::current_dir()?;
+    let pom_path = cwd.join("pom.xml");
+    if !pom_path.exists() {
+        return Err(anyhow!(WrapperError::PomNotFound));
+    }
+
+    // Load wrapper context and resolve dependencies
+    let resolver_options = resolver_options_for_wrapper(None);
+    let (context, manifest, _manifest_path, manager) = load_wrapper_context_and_manifest()?;
+    let (_runtime, _client, _cache) = prepare_wrapper_resolution_env()?;
+
+    let repositories = collect_maven_repositories(&manager);
+    let mirrors = collect_effective_mirrors(&manifest)?;
+
+    // Generate lock and files (R2-1: dependency resolution + jv.lock update)
+    let (_resolved, _lockfile, _local_repository, lockfile_updated, pom_updated, settings_updated) =
+        generate_lock_and_files_for_wrapper(
+            &manifest,
+            &context.project_root,
+            &resolver_options,
+            &context.lockfile_path,
+            repositories.clone(),
+            mirrors.clone(),
+            context.local_repository.clone(),
+        )?;
+
+    if lockfile_updated {
+        println!("jv.lock を更新しました。");
+    }
+    if pom_updated {
+        println!("pom.xml を更新しました。");
+    }
+    if settings_updated {
+        println!("settings.xml を更新しました。");
+    }
+
+    // Run mvn install with passthrough args (R2-2, R2-4, R2-5)
+    let mut maven_args = vec![OsString::from("install")];
+    maven_args.extend(config.maven_args);
+
+    handle_maven_passthrough(maven_args)
+}
+
+fn resolver_options_from_strategy(strategy: Option<ResolverAlgorithm>) -> ResolverOptions {
+    let mut options = ResolverOptions::default();
+    if let Some(strategy) = strategy {
+        options = options.with_strategy(strategy.strategy_name());
+    }
+    options
+}
+
+/// Wrapperモード専用: 明示指定が無ければ Maven 互換戦略をデフォルトで使用する。
+fn resolver_options_for_wrapper(strategy: Option<ResolverAlgorithm>) -> ResolverOptions {
+    match strategy {
+        Some(value) => resolver_options_from_strategy(Some(value)),
+        None => {
+            ResolverOptions::default().with_strategy(ResolverAlgorithm::MavenCompat.strategy_name())
+        }
+    }
+}
+
+fn load_wrapper_context_and_manifest()
+-> Result<(WrapperContext, Manifest, PathBuf, RepositoryManager)> {
+    let context = WrapperContext::detect().map_err(|error| anyhow!(error))?;
+    let manifest_path = context.project_root.join("jv.toml");
+    let manifest = context.manifest.clone();
+    // wrapper モードでは ~/.m2/repository をローカルリポジトリとして使用
+    let mut manager = RepositoryManager::with_local_repository(context.local_repository.clone())
+        .context("リポジトリマネージャーの初期化に失敗しました")?;
+    manager.load_project_config(&manifest);
+    Ok((context, manifest, manifest_path, manager))
+}
+
+fn prepare_wrapper_resolution_env()
+-> Result<(tokio::runtime::Runtime, Client, Arc<DependencyCache>)> {
+    let runtime = RuntimeBuilder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("tokioランタイムの初期化に失敗しました")?;
+
+    let client = Client::builder()
+        .user_agent(format!("jvpm-wrapper/{}", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs(20))
+        .build()
+        .context("HTTPクライアントの初期化に失敗しました")?;
+
+    let cache =
+        Arc::new(DependencyCache::global().context("グローバルキャッシュの初期化に失敗しました")?);
+
+    Ok((runtime, client, cache))
+}
+
+fn resolve_dependency_additions(
+    args: &AddArgs,
+    manifest: &mut Manifest,
+    manager: &mut RepositoryManager,
+    runtime: &tokio::runtime::Runtime,
+    client: &Client,
+    cache: &Arc<DependencyCache>,
+    interactive_allowed: bool,
+) -> Result<Vec<MavenCoordinates>> {
+    let mut additions = Vec::new();
+    for raw in &args.packages {
+        let input = parse_dependency_input(raw)?;
+        let (coordinate, version_hint) = match input {
+            ParsedDependencyInput::Qualified {
+                coordinate,
+                requirement,
+            } => (coordinate, requirement),
+            ParsedDependencyInput::ArtifactOnly { query } => {
+                let suggestions = search_package_candidates(runtime, client, &query, 10)
+                    .with_context(|| format!("'{}' の依存候補検索に失敗しました", query))?;
+
+                if suggestions.is_empty() {
+                    return Err(anyhow!(
+                        "依存候補が見つかりませんでした: '{}'. 完全な group:artifact を指定してください。",
+                        query
+                    ));
+                }
+
+                if suggestions.len() > 1 && (!interactive_allowed || args.non_interactive) {
+                    print_non_interactive_suggestions(&suggestions);
+                    std::process::exit(2);
+                }
+
+                let chosen = if suggestions.len() == 1 {
+                    suggestions.into_iter().next().unwrap()
+                } else {
+                    println!("複数の候補が見つかりました。追加する依存関係を選択してください:");
+                    print_suggestions(&suggestions);
+                    let index = prompt_user_selection(suggestions.len())?;
+                    suggestions.into_iter().nth(index).unwrap()
+                };
+
+                (chosen.coordinate, None)
+            }
+        };
+
+        let version = resolve_version_for_coordinate(
+            runtime,
+            cache,
+            manager,
+            &coordinate,
+            version_hint.as_deref(),
+        )
+        .with_context(|| format!("{} のバージョン決定に失敗しました", coordinate.display()))?;
+
+        manifest
+            .package
+            .dependencies
+            .insert(coordinate.display(), version.clone());
+
+        additions.push(MavenCoordinates::new(
+            coordinate.group_id.clone(),
+            coordinate.artifact_id.clone(),
+        ));
+    }
+
+    Ok(additions)
+}
+
+fn generate_lock_and_files_for_wrapper(
+    manifest: &Manifest,
+    project_root: &Path,
+    resolver_options: &ResolverOptions,
+    lockfile_path: &Path,
+    repositories: Vec<MavenRepositoryConfig>,
+    mirrors: Vec<MavenMirrorConfig>,
+    local_repository: PathBuf,
+) -> Result<(ResolvedDependencies, Lockfile, PathBuf, bool, bool, bool)> {
+    // wrapper モードでは呼び出し元から渡された local_repository (~/.m2/repository) を使用
+    let (resolved, lockfile, local_repository) = resolve_with_lock_and_repository(
+        manifest,
+        project_root,
+        resolver_options,
+        repositories.clone(),
+        mirrors.clone(),
+        local_repository,
+    )?;
+
+    let lockfile_updated = write_wrapper_lockfile(lockfile_path, &lockfile)?;
+    let (pom_updated, settings_updated) = sync_wrapper_files(
+        project_root,
+        manifest,
+        &resolved,
+        &lockfile,
+        &local_repository,
+        &repositories,
+        &mirrors,
+    )?;
+
+    Ok((
+        resolved,
+        lockfile,
+        local_repository,
+        lockfile_updated,
+        pom_updated,
+        settings_updated,
+    ))
+}
+
+fn handle_add_command(args: AddArgs, mode: CliMode) -> Result<()> {
+    if mode.is_wrapper() {
+        return handle_wrapper_add_command(&args);
+    }
+    handle_native_add_command(args)
+}
+
+fn handle_wrapper_add_command(args: &AddArgs) -> Result<()> {
+    let resolver_options = resolver_options_for_wrapper(args.strategy);
+    let (context, mut manifest, _manifest_path, mut manager) = load_wrapper_context_and_manifest()?;
+    let (runtime, client, cache) = prepare_wrapper_resolution_env()?;
+
+    let interactive_allowed =
+        !args.non_interactive && io::stdin().is_terminal() && io::stdout().is_terminal();
+
+    let additions = resolve_dependency_additions(
+        args,
+        &mut manifest,
+        &mut manager,
+        &runtime,
+        &client,
+        &cache,
+        interactive_allowed,
+    )?;
+
+    let repositories = collect_maven_repositories(&manager);
+    let mirrors = collect_effective_mirrors(&manifest)?;
+
+    // NOTE: wrapper モードでは jv.toml を書き込まない。
+    // pom.xml / settings.xml / jv.lock のみを更新する。
+    // save_manifest は native モード専用。
+
+    let (resolved, lockfile, local_repository, lockfile_updated, pom_updated, settings_updated) =
+        generate_lock_and_files_for_wrapper(
+            &manifest,
+            &context.project_root,
+            &resolver_options,
+            &context.lockfile_path,
+            repositories.clone(),
+            mirrors.clone(),
+            context.local_repository.clone(),
+        )?;
+
+    export_java_project(
+        &manifest,
+        &context.project_root,
+        &lockfile,
+        &resolved,
+        &local_repository,
+        &repositories,
+        &mirrors,
+    )?;
+
+    let summary = WrapperUpdateSummary {
+        added: additions,
+        removed: Vec::new(),
+        pom_updated,
+        settings_updated,
+        lockfile_updated,
+    };
+
+    print_wrapper_add_summary(&summary);
+    Ok(())
+}
+
+fn handle_native_add_command(args: AddArgs) -> Result<()> {
+    let resolver_options = resolver_options_from_strategy(args.strategy);
+
     let runtime = RuntimeBuilder::new_multi_thread()
         .enable_all()
         .build()
@@ -495,8 +588,32 @@ fn handle_add_command(args: AddArgs) -> Result<()> {
         additions.push((coordinate, version));
     }
 
-    finalize_project_state(&manifest, &manifest_path, &project_root)
-        .context("依存関係追加後のプロジェクト更新に失敗しました")?;
+    save_manifest(&manifest, &manifest_path)?;
+
+    let repositories = collect_maven_repositories(&manager);
+    let mirrors = collect_effective_mirrors(&manifest)?;
+    let (resolved, lockfile, local_repository) = resolve_with_lock(
+        &manifest,
+        &project_root,
+        &resolver_options,
+        repositories.clone(),
+        mirrors.clone(),
+    )
+    .context("依存関係の解決に失敗しました")?;
+
+    let lockfile_path = project_root.join("jv.lock");
+    LockfileService::save(&lockfile_path, &lockfile)
+        .with_context(|| format!("{} への書き込みに失敗しました", lockfile_path.display()))?;
+
+    export_java_project(
+        &manifest,
+        &project_root,
+        &lockfile,
+        &resolved,
+        &local_repository,
+        &repositories,
+        &mirrors,
+    )?;
 
     for (coordinate, version) in &additions {
         println!(
@@ -510,7 +627,142 @@ fn handle_add_command(args: AddArgs) -> Result<()> {
     Ok(())
 }
 
-fn handle_remove_command(args: RemoveArgs) -> Result<()> {
+fn handle_remove_command(args: RemoveArgs, mode: CliMode) -> Result<()> {
+    if mode.is_wrapper() {
+        return handle_wrapper_remove_command(&args);
+    }
+    handle_native_remove_command(args)
+}
+
+fn handle_wrapper_remove_command(args: &RemoveArgs) -> Result<()> {
+    let context = WrapperContext::detect().map_err(|error| anyhow!(error))?;
+    let resolver_options = resolver_options_for_wrapper(args.strategy);
+
+    let mut manifest = context.manifest.clone();
+    let project_root = context.project_root.clone();
+
+    if manifest.package.dependencies.is_empty() {
+        return Err(anyhow!("pom.xml に管理対象の依存関係がありません。"));
+    }
+
+    let mut manager = RepositoryManager::with_project_root(project_root.clone())
+        .context("リポジトリマネージャーの初期化に失敗しました")?;
+    manager.load_project_config(&manifest);
+
+    let interactive_allowed =
+        !args.non_interactive && io::stdin().is_terminal() && io::stdout().is_terminal();
+
+    let mut removed = Vec::new();
+    let mut removed_coords = Vec::new();
+    let previous_manifest = manifest.clone();
+
+    for raw in &args.packages {
+        let input = parse_dependency_input(raw)?;
+        let target = match input {
+            ParsedDependencyInput::Qualified { coordinate, .. } => {
+                let name = coordinate.display();
+                if manifest.package.dependencies.contains_key(&name) {
+                    name
+                } else {
+                    select_remove_candidate(
+                        &manifest,
+                        &coordinate.artifact_id,
+                        &name,
+                        interactive_allowed,
+                        args.non_interactive,
+                    )?
+                }
+            }
+            ParsedDependencyInput::ArtifactOnly { query } => select_remove_candidate(
+                &manifest,
+                &query,
+                &query,
+                interactive_allowed,
+                args.non_interactive,
+            )?,
+        };
+
+        if let Some(requirement) = manifest.package.dependencies.remove(&target) {
+            removed.push((target.clone(), requirement));
+            if let Some((group, artifact)) = target.split_once(':') {
+                removed_coords.push(MavenCoordinates::new(
+                    group.to_string(),
+                    artifact.to_string(),
+                ));
+            }
+        } else {
+            return Err(anyhow!("依存関係 '{}' は pom.xml に存在しません。", target));
+        }
+    }
+
+    let repositories = collect_maven_repositories(&manager);
+    let mirrors = collect_effective_mirrors(&manifest)?;
+
+    let (previous_resolved, _, local_repository) = resolve_with_lock(
+        &previous_manifest,
+        &project_root,
+        &resolver_options,
+        repositories.clone(),
+        mirrors.clone(),
+    )?;
+
+    // NOTE: wrapper モードでは jv.toml を書き込まない。
+    // pom.xml / settings.xml / jv.lock のみを更新する。
+    let (resolved, lockfile, _) = resolve_with_lock(
+        &manifest,
+        &project_root,
+        &resolver_options,
+        repositories.clone(),
+        mirrors.clone(),
+    )?;
+
+    let lockfile_updated = write_wrapper_lockfile(&context.lockfile_path, &lockfile)?;
+    let (pom_updated, settings_updated) = sync_wrapper_files(
+        &project_root,
+        &manifest,
+        &resolved,
+        &lockfile,
+        &local_repository,
+        &repositories,
+        &mirrors,
+    )?;
+
+    export_java_project(
+        &manifest,
+        &project_root,
+        &lockfile,
+        &resolved,
+        &local_repository,
+        &repositories,
+        &mirrors,
+    )?;
+
+    cleanup_removed_artifacts(
+        &previous_resolved.dependencies,
+        &resolved.dependencies,
+        &local_repository,
+    )?;
+
+    for (name, _) in &removed {
+        println!("依存関係 '{}' を削除しました。", name);
+    }
+    println!("更新: pom.xml / jv.lock");
+
+    let summary = WrapperUpdateSummary {
+        added: Vec::new(),
+        removed: removed_coords,
+        pom_updated,
+        settings_updated,
+        lockfile_updated,
+    };
+
+    print_wrapper_remove_summary(&summary);
+    Ok(())
+}
+
+fn handle_native_remove_command(args: RemoveArgs) -> Result<()> {
+    let resolver_options = resolver_options_from_strategy(args.strategy);
+
     let (mut manifest, manifest_path) = load_manifest_with_path()?;
     let project_root = manifest_path
         .parent()
@@ -520,6 +772,11 @@ fn handle_remove_command(args: RemoveArgs) -> Result<()> {
     if manifest.package.dependencies.is_empty() {
         return Err(anyhow!("jv.toml に管理対象の依存関係がありません。"));
     }
+
+    let previous_manifest = manifest.clone();
+    let mut manager = RepositoryManager::with_project_root(project_root.clone())
+        .context("リポジトリマネージャーの初期化に失敗しました")?;
+    manager.load_project_config(&manifest);
 
     let interactive_allowed =
         !args.non_interactive && io::stdin().is_terminal() && io::stdout().is_terminal();
@@ -559,8 +816,47 @@ fn handle_remove_command(args: RemoveArgs) -> Result<()> {
         }
     }
 
-    finalize_project_state(&manifest, &manifest_path, &project_root)
-        .context("依存関係削除後のプロジェクト更新に失敗しました")?;
+    let repositories = collect_maven_repositories(&manager);
+    let mirrors = collect_effective_mirrors(&manifest)?;
+
+    let (previous_resolved, _, local_repository) = resolve_with_lock(
+        &previous_manifest,
+        &project_root,
+        &resolver_options,
+        repositories.clone(),
+        mirrors.clone(),
+    )
+    .context("依存関係削除前の状態解決に失敗しました")?;
+
+    save_manifest(&manifest, &manifest_path)?;
+    let (resolved, lockfile, _) = resolve_with_lock(
+        &manifest,
+        &project_root,
+        &resolver_options,
+        repositories.clone(),
+        mirrors.clone(),
+    )
+    .context("依存関係削除後の解決に失敗しました")?;
+
+    let lockfile_path = project_root.join("jv.lock");
+    LockfileService::save(&lockfile_path, &lockfile)
+        .with_context(|| format!("{} への書き込みに失敗しました", lockfile_path.display()))?;
+
+    export_java_project(
+        &manifest,
+        &project_root,
+        &lockfile,
+        &resolved,
+        &local_repository,
+        &repositories,
+        &mirrors,
+    )?;
+
+    cleanup_removed_artifacts(
+        &previous_resolved.dependencies,
+        &resolved.dependencies,
+        &local_repository,
+    )?;
 
     for (name, _) in &removed {
         println!("依存関係 '{}' を削除しました。", name);
@@ -568,6 +864,47 @@ fn handle_remove_command(args: RemoveArgs) -> Result<()> {
     println!("更新: jv.toml / jv.lock");
 
     Ok(())
+}
+
+fn print_wrapper_add_summary(summary: &WrapperUpdateSummary) {
+    if summary.added.is_empty() {
+        println!("依存関係の追加に変更はありませんでした。");
+    } else {
+        for coordinate in &summary.added {
+            println!("依存関係 '{}' を追加しました。", coordinate);
+        }
+    }
+    print_wrapper_file_updates(summary);
+}
+
+fn print_wrapper_remove_summary(summary: &WrapperUpdateSummary) {
+    if summary.removed.is_empty() {
+        println!("依存関係の削除に変更はありませんでした。");
+    } else {
+        for coordinate in &summary.removed {
+            println!("依存関係 '{}' を削除しました。", coordinate);
+        }
+    }
+    print_wrapper_file_updates(summary);
+}
+
+fn print_wrapper_file_updates(summary: &WrapperUpdateSummary) {
+    let mut updates = Vec::new();
+    if summary.pom_updated {
+        updates.push("pom.xml");
+    }
+    if summary.settings_updated {
+        updates.push("settings.xml");
+    }
+    if summary.lockfile_updated {
+        updates.push("jv.lock");
+    }
+
+    if updates.is_empty() {
+        println!("更新: ファイルに変更はありませんでした。");
+    } else {
+        println!("更新: {}", updates.join(" / "));
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -828,18 +1165,69 @@ fn select_preferred_version(metadata: &MavenMetadata) -> Option<String> {
         .or_else(|| metadata.versions().iter().last().cloned())
 }
 
-fn finalize_project_state(
+fn resolve_with_lock(
     manifest: &Manifest,
-    manifest_path: &Path,
     project_root: &Path,
-) -> Result<()> {
-    save_manifest(manifest, manifest_path)?;
+    options: &ResolverOptions,
+    repositories: Vec<MavenRepositoryConfig>,
+    mirrors: Vec<MavenMirrorConfig>,
+) -> Result<(ResolvedDependencies, Lockfile, PathBuf)> {
+    // native モード: プロジェクトローカルの .jv/repository を使用
+    let local_repository = ensure_local_repository(project_root)?;
+    resolve_with_lock_and_repository(manifest, project_root, options, repositories, mirrors, local_repository)
+}
 
+fn resolve_with_lock_and_repository(
+    manifest: &Manifest,
+    project_root: &Path,
+    options: &ResolverOptions,
+    repositories: Vec<MavenRepositoryConfig>,
+    mirrors: Vec<MavenMirrorConfig>,
+    local_repository: PathBuf,
+) -> Result<(ResolvedDependencies, Lockfile, PathBuf)> {
     let dispatcher = ResolverDispatcher::with_default_strategies();
+    let remote_repositories: Vec<MavenRepositoryConfig> = repositories
+        .into_iter()
+        .filter(|repo| !repo.url.starts_with("file://"))
+        .collect();
+    let base_dependencies: Vec<RequestedDependency> = manifest
+        .package
+        .dependencies
+        .iter()
+        .map(|(name, requirement)| RequestedDependency {
+            name: name.clone(),
+            requirement: requirement.clone(),
+            scope: DependencyScope::Main,
+        })
+        .collect();
+
+    let ctx = MavenResolverContext {
+        project_root: project_root.to_path_buf(),
+        local_repository: local_repository.clone(),
+        repositories: remote_repositories.clone(),
+        mirrors: mirrors.clone(),
+        base_dependencies,
+    };
+    let options = options.clone().with_maven_context(ctx);
+
     let resolved = if manifest.package.dependencies.is_empty() {
+        let requested = options
+            .strategy
+            .as_deref()
+            .unwrap_or_else(|| dispatcher.default_strategy());
+        let (strategy_label, algorithm) = dispatcher
+            .strategy_info(requested)
+            .map(|info| (info.name.clone(), info.algorithm))
+            .unwrap_or_else(|| {
+                (
+                    dispatcher.default_strategy().to_string(),
+                    ResolverAlgorithmKind::PubGrub,
+                )
+            });
+
         ResolvedDependencies {
-            strategy: dispatcher.default_strategy().to_string(),
-            algorithm: ResolverAlgorithmKind::PubGrub,
+            strategy: strategy_label,
+            algorithm,
             dependencies: Vec::new(),
             diagnostics: Vec::new(),
             stats: ResolutionStats {
@@ -849,38 +1237,48 @@ fn finalize_project_state(
             },
         }
     } else {
-        dispatcher
-            .resolve_manifest(manifest, ResolverOptions::default())
-            .context("依存関係の解決に失敗しました")?
+        match dispatcher.resolve_manifest(manifest, options) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                eprintln!("[wrapper-debug] resolve_manifest error: {error:?}");
+                return Err(anyhow!(error).context("依存関係の解決に失敗しました"));
+            }
+        }
     };
 
-    let lockfile =
-        LockfileService::generate(manifest, &resolved).context("jv.lock の生成に失敗しました")?;
-    let lockfile_path = project_root.join("jv.lock");
-    LockfileService::save(&lockfile_path, &lockfile)
-        .with_context(|| format!("{} への書き込みに失敗しました", lockfile_path.display()))?;
+    let lockfile = match LockfileService::generate(manifest, &resolved) {
+        Ok(lock) => lock,
+        Err(error) => {
+            eprintln!("[wrapper-debug] lockfile generation failed: {:?}", error);
+            return Err(error).context("jv.lock の生成に失敗しました");
+        }
+    };
 
-    let local_repository = ensure_local_repository(project_root)?;
+    Ok((resolved, lockfile, local_repository))
+}
 
-    let mut manager = RepositoryManager::with_project_root(project_root.to_path_buf())
-        .context("リポジトリマネージャーの初期化に失敗しました")?;
-    manager.load_project_config(manifest);
-
-    let repositories = collect_maven_repositories(&manager);
-    let mirrors = collect_effective_mirrors(manifest)?;
+fn export_java_project(
+    manifest: &Manifest,
+    project_root: &Path,
+    lockfile: &Lockfile,
+    resolved: &ResolvedDependencies,
+    local_repository: &Path,
+    repositories: &[MavenRepositoryConfig],
+    mirrors: &[MavenMirrorConfig],
+) -> Result<()> {
     let sources_dir = resolve_sources_dir(project_root, manifest);
     let output_dir = resolve_output_dir(project_root);
 
     let request = ExportRequest {
         project_root,
         manifest,
-        lockfile: &lockfile,
+        lockfile,
         sources_dir: sources_dir.as_path(),
         output_dir: output_dir.as_path(),
-        local_repository: local_repository.as_path(),
-        repositories: &repositories,
-        mirrors: &mirrors,
-        resolved: Some(&resolved),
+        local_repository,
+        repositories,
+        mirrors,
+        resolved: Some(resolved),
     };
 
     match JavaProjectExporter::export(&request) {
@@ -901,6 +1299,108 @@ fn finalize_project_state(
     }
 
     Ok(())
+}
+
+fn cleanup_removed_artifacts(
+    previous: &[ResolvedDependency],
+    current: &[ResolvedDependency],
+    local_repository: &Path,
+) -> Result<()> {
+    let current_coordinates: HashSet<String> = current
+        .iter()
+        .filter_map(|dep| dependency_coordinates_for_jar(dep).map(|coords| coords.to_string()))
+        .collect();
+
+    for dependency in previous {
+        let Some(coords) = dependency_coordinates_for_jar(dependency) else {
+            continue;
+        };
+
+        if current_coordinates.contains(&coords.to_string()) {
+            continue;
+        }
+
+        let jar_path = local_repository
+            .join(coords.maven_coordinates().group_path())
+            .join(&coords.artifact_id)
+            .join(&coords.version)
+            .join(coords.jar_file_name());
+
+        remove_local_artifact(&jar_path)?;
+    }
+
+    Ok(())
+}
+
+fn remove_local_artifact(jar_path: &Path) -> Result<()> {
+    if jar_path.exists() {
+        fs::remove_file(jar_path)
+            .with_context(|| format!("{} の削除に失敗しました", jar_path.display()))?;
+    }
+
+    for ext in &["sha256", "sha1", "md5"] {
+        let checksum_path = jar_path.with_extension(format!("jar.{ext}"));
+        if checksum_path.exists() {
+            fs::remove_file(&checksum_path)
+                .with_context(|| format!("{} の削除に失敗しました", checksum_path.display()))?;
+        }
+    }
+
+    // バージョンディレクトリが空なら削除（親ディレクトリも再帰的にクリーンアップ）
+    // NOTE: アーティファクトの POM ファイルは削除しない（依存解決のキャッシュとして残す）
+    if let Some(version_dir) = jar_path.parent() {
+        let _ = cleanup_empty_directories(version_dir);
+    }
+
+    Ok(())
+}
+
+fn cleanup_empty_directories(dir: &Path) -> Result<()> {
+    // ディレクトリが空の場合のみ削除
+    if dir.is_dir() {
+        if let Ok(mut entries) = fs::read_dir(dir) {
+            if entries.next().is_none() {
+                fs::remove_dir(dir)?;
+                // 親ディレクトリも再帰的にチェック
+                if let Some(parent) = dir.parent() {
+                    let _ = cleanup_empty_directories(parent);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn sync_wrapper_files(
+    project_root: &Path,
+    manifest: &Manifest,
+    resolved: &ResolvedDependencies,
+    lockfile: &Lockfile,
+    local_repository: &Path,
+    repositories: &[MavenRepositoryConfig],
+    mirrors: &[MavenMirrorConfig],
+) -> Result<(bool, bool)> {
+    let dispatcher = MavenIntegrationDispatcher::new();
+    let config = MavenIntegrationConfig {
+        manifest: Some(manifest),
+        resolved,
+        lockfile: Some(lockfile),
+        repositories,
+        mirrors,
+        project_root,
+        local_repository,
+    };
+
+    let files = dispatcher
+        .generate("wrapper-default", &config)
+        .map_err(|error| anyhow!(error))?;
+
+    sync::sync_maven_artifacts(project_root, &files).map_err(|error| anyhow!(error))
+}
+
+fn write_wrapper_lockfile(path: &Path, lockfile: &Lockfile) -> Result<bool> {
+    let content = toml::to_string_pretty(lockfile).context("jv.lock の整形に失敗しました")?;
+    sync::write_lockfile(path, content.as_bytes()).map_err(|error| anyhow!(error))
 }
 
 fn collect_maven_repositories(manager: &RepositoryManager) -> Vec<MavenRepositoryConfig> {
@@ -1331,7 +1831,7 @@ fn add_project_repository(options: AddOptions) -> Result<()> {
 fn add_global_repository(options: AddOptions) -> Result<()> {
     let mut global = load_global_config_state()?;
     if global.data.repositories.is_empty() {
-        global.data.repositories = default_global_repositories();
+        global.data.repositories = repository::builtin_global_repositories();
     }
 
     let new_config = build_repository_config(&options)?;
@@ -1396,7 +1896,7 @@ fn remove_project_repository(options: RemoveOptions) -> Result<()> {
 fn remove_global_repository(options: RemoveOptions) -> Result<()> {
     let mut global = load_global_config_state()?;
     if global.data.repositories.is_empty() {
-        global.data.repositories = default_global_repositories();
+        global.data.repositories = repository::builtin_global_repositories();
     }
 
     let before = global.data.repositories.len();
@@ -1693,7 +2193,7 @@ fn save_global_config_state(state: &GlobalConfigState) -> Result<()> {
 
 fn effective_global_repositories(config: &StoredGlobalConfig) -> Vec<RepositoryConfig> {
     if config.repositories.is_empty() {
-        default_global_repositories()
+        repository::builtin_global_repositories()
     } else {
         config.repositories.clone()
     }
@@ -1701,25 +2201,6 @@ fn effective_global_repositories(config: &StoredGlobalConfig) -> Vec<RepositoryC
 
 fn effective_global_mirrors(config: &StoredGlobalConfig) -> Vec<MirrorConfig> {
     config.mirrors.clone()
-}
-
-fn default_global_repositories() -> Vec<RepositoryConfig> {
-    vec![
-        RepositoryConfig {
-            name: "jv-registry".to_string(),
-            url: "https://registry.jvlang.org".to_string(),
-            priority: 50,
-            auth: None,
-            filter: None,
-        },
-        RepositoryConfig {
-            name: "maven-central".to_string(),
-            url: "https://repo.maven.apache.org/maven2".to_string(),
-            priority: 100,
-            auth: None,
-            filter: None,
-        },
-    ]
 }
 
 fn build_repository_config(options: &AddOptions) -> Result<RepositoryConfig> {

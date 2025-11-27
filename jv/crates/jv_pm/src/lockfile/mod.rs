@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
+use std::collections::{BTreeMap, BTreeSet, HashMap, btree_map::Entry};
 use std::fs;
 use std::path::Path;
 
@@ -7,7 +7,8 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{
-    DependencyScope, Manifest, PackageInfo, ResolutionSource, ResolvedDependencies, VersionDecision,
+    DependencyScope, Manifest, PackageInfo, ResolutionSource, ResolvedDependencies,
+    ResolverAlgorithmKind, VersionDecision,
 };
 
 /// 現行の`jv.lock`スキーマバージョン。
@@ -56,6 +57,43 @@ impl LockfileManifestSnapshot {
         Self {
             name: manifest.package.name.clone(),
             version: manifest.package.version.clone(),
+            hash,
+            dependencies,
+        }
+    }
+
+    pub fn from_resolved(resolved: &ResolvedDependencies) -> Self {
+        let mut dependencies: Vec<LockfileManifestDependency> = resolved
+            .dependencies
+            .iter()
+            .map(|dependency| LockfileManifestDependency {
+                name: dependency.name.clone(),
+                requirement: dependency.requested.clone(),
+                scope: dependency.scope,
+            })
+            .collect();
+
+        dependencies.sort_by(|left, right| {
+            left.scope
+                .cmp(&right.scope)
+                .then(left.name.cmp(&right.name))
+        });
+
+        let manifest_name = format!("wrapper-{}", resolved.strategy);
+        let manifest_version = algorithm_label(resolved.algorithm).to_string();
+
+        let package_info = PackageInfo {
+            name: manifest_name.clone(),
+            version: manifest_version.clone(),
+            description: None,
+            dependencies: HashMap::new(),
+        };
+
+        let hash = compute_manifest_hash(&package_info, &dependencies);
+
+        Self {
+            name: manifest_name,
+            version: manifest_version,
             hash,
             dependencies,
         }
@@ -338,6 +376,82 @@ impl LockfileService {
         Ok(lockfile)
     }
 
+    pub fn generate_from_resolved(
+        resolved: &ResolvedDependencies,
+    ) -> Result<Lockfile, LockfileError> {
+        let manifest_snapshot = LockfileManifestSnapshot::from_resolved(resolved);
+        let mut package_map: BTreeMap<String, LockedPackage> = BTreeMap::new();
+        let mut root_dependencies: Vec<LockedDependency> = Vec::new();
+
+        for dependency in &resolved.dependencies {
+            let version = match &dependency.decision {
+                VersionDecision::Exact(value) => value.clone(),
+                _ => {
+                    return Err(LockfileError::NonExactVersion {
+                        name: dependency.name.clone(),
+                    });
+                }
+            };
+
+            root_dependencies.push(LockedDependency {
+                name: dependency.name.clone(),
+                version: version.clone(),
+                scope: dependency.scope,
+            });
+
+            match package_map.entry(dependency.name.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(LockedPackage {
+                        name: dependency.name.clone(),
+                        version: version.clone(),
+                        source: LockedSource::from(&dependency.source),
+                        checksum: None,
+                        dependencies: Vec::new(),
+                    });
+                }
+                Entry::Occupied(mut entry) => {
+                    let existing = entry.get_mut();
+                    if existing.version != version {
+                        return Err(LockfileError::ConflictingPackageVersion {
+                            name: dependency.name.clone(),
+                            previous: existing.version.clone(),
+                            next: version,
+                        });
+                    }
+
+                    if matches!(existing.source, LockedSource::Unknown) {
+                        existing.source = LockedSource::from(&dependency.source);
+                    }
+                }
+            }
+        }
+
+        root_dependencies.sort_by(|left, right| {
+            left.scope
+                .cmp(&right.scope)
+                .then(left.name.cmp(&right.name))
+        });
+
+        let mut packages: Vec<LockedPackage> = package_map.into_values().collect();
+        packages.push(LockedPackage {
+            name: manifest_snapshot.name.clone(),
+            version: manifest_snapshot.version.clone(),
+            source: LockedSource::Lockfile,
+            checksum: None,
+            dependencies: root_dependencies,
+        });
+        packages.sort_by(|left, right| left.name.cmp(&right.name));
+
+        let lockfile = Lockfile {
+            version: LOCKFILE_VERSION,
+            manifest: manifest_snapshot,
+            packages,
+        };
+
+        Self::validate(&lockfile)?;
+        Ok(lockfile)
+    }
+
     pub fn save(path: impl AsRef<Path>, lockfile: &Lockfile) -> Result<(), LockfileError> {
         Self::validate(lockfile)?;
         let toml = toml::to_string_pretty(lockfile)?;
@@ -479,6 +593,14 @@ fn scope_label(scope: DependencyScope) -> &'static str {
     }
 }
 
+fn algorithm_label(algorithm: ResolverAlgorithmKind) -> &'static str {
+    match algorithm {
+        ResolverAlgorithmKind::PubGrub => "pubgrub",
+        ResolverAlgorithmKind::BreadthFirst => "breadth-first",
+        ResolverAlgorithmKind::MavenCompat => "maven-compat",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -522,6 +644,7 @@ mod tests {
                     decision: VersionDecision::Exact("1.0.188".to_string()),
                     scope: DependencyScope::Main,
                     source: ResolutionSource::Registry,
+                    local_artifact: None,
                 },
                 ResolvedDependency {
                     name: "tokio".to_string(),
@@ -529,6 +652,7 @@ mod tests {
                     decision: VersionDecision::Exact("1.37.0".to_string()),
                     scope: DependencyScope::Dev,
                     source: ResolutionSource::Registry,
+                    local_artifact: None,
                 },
             ],
             diagnostics: Vec::new(),
@@ -667,6 +791,46 @@ mod tests {
         }
 
         let error = LockfileService::generate(&manifest, &resolved).unwrap_err();
+        matches!(error, LockfileError::NonExactVersion { .. });
+    }
+
+    #[test]
+    fn generate_from_resolved_includes_root_package() {
+        let resolved = sample_resolved();
+        let lockfile =
+            LockfileService::generate_from_resolved(&resolved).expect("generate lockfile");
+
+        assert_eq!(lockfile.manifest.name, "wrapper-pubgrub");
+        assert_eq!(lockfile.manifest.version, "pubgrub");
+
+        let root = lockfile
+            .packages
+            .iter()
+            .find(|package| package.name == lockfile.manifest.name)
+            .expect("root package entry");
+
+        assert_eq!(root.dependencies.len(), 2);
+        assert_eq!(root.dependencies[0].name, "serde");
+        assert_eq!(root.dependencies[0].scope, DependencyScope::Main);
+        assert_eq!(root.dependencies[1].name, "tokio");
+        assert_eq!(root.dependencies[1].scope, DependencyScope::Dev);
+
+        let serde_pkg = lockfile
+            .packages
+            .iter()
+            .find(|package| package.name == "serde")
+            .expect("serde package entry");
+        assert_eq!(serde_pkg.version, "1.0.188");
+    }
+
+    #[test]
+    fn generate_from_resolved_fails_on_non_exact_versions() {
+        let mut resolved = sample_resolved();
+        if let Some(first) = resolved.dependencies.first_mut() {
+            first.decision = VersionDecision::Range("^1".to_string());
+        }
+
+        let error = LockfileService::generate_from_resolved(&resolved).unwrap_err();
         matches!(error, LockfileError::NonExactVersion { .. });
     }
 }

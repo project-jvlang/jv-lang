@@ -1,0 +1,1128 @@
+use anyhow::{anyhow, bail, Context, Result};
+use std::collections::BTreeSet;
+use sha2::{Digest, Sha256};
+use std::env;
+use std::fs;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::thread;
+use tempfile::tempdir;
+
+#[derive(Clone)]
+struct DependencySpec {
+    group: &'static str,
+    artifact: &'static str,
+    version: &'static str,
+    dependencies: Vec<DependencyCoordinate>,
+}
+
+#[derive(Clone)]
+struct DependencyCoordinate {
+    group: &'static str,
+    artifact: &'static str,
+    version: &'static str,
+    optional: bool,
+    scope: Option<&'static str>,
+}
+
+impl DependencySpec {
+    fn new(group: &'static str, artifact: &'static str, version: &'static str) -> Self {
+        Self {
+            group,
+            artifact,
+            version,
+            dependencies: Vec::new(),
+        }
+    }
+
+    fn with_dependencies(mut self, dependencies: Vec<DependencyCoordinate>) -> Self {
+        self.dependencies = dependencies;
+        self
+    }
+
+    fn jar_name(&self) -> String {
+        format!("{}-{}.jar", self.artifact, self.version)
+    }
+
+    fn pom_name(&self) -> String {
+        format!("{}-{}.pom", self.artifact, self.version)
+    }
+
+    fn group_path(&self) -> PathBuf {
+        let mut path = PathBuf::new();
+        for segment in self.group.split('.') {
+            path.push(segment);
+        }
+        path
+    }
+}
+
+impl DependencyCoordinate {
+    fn new(group: &'static str, artifact: &'static str, version: &'static str) -> Self {
+        Self {
+            group,
+            artifact,
+            version,
+            optional: false,
+            scope: None,
+        }
+    }
+
+    fn optional(mut self) -> Self {
+        self.optional = true;
+        self
+    }
+
+    fn with_scope(mut self, scope: &'static str) -> Self {
+        self.scope = Some(scope);
+        self
+    }
+}
+
+struct StubMavenRepo;
+
+impl StubMavenRepo {
+    fn create(base_dir: &Path, specs: &[DependencySpec]) -> Result<()> {
+        if base_dir.exists() {
+            fs::remove_dir_all(base_dir)
+                .with_context(|| format!("failed to clear {}", base_dir.display()))?;
+        }
+        fs::create_dir_all(base_dir)
+            .with_context(|| format!("failed to create {}", base_dir.display()))?;
+
+        for spec in specs {
+            Self::write_metadata(base_dir, spec)?;
+            Self::write_artifacts(base_dir, spec)?;
+        }
+
+        Ok(())
+    }
+
+    fn write_metadata(base_dir: &Path, spec: &DependencySpec) -> Result<()> {
+        let mut path = base_dir.join(spec.group_path());
+        fs::create_dir_all(&path)
+            .with_context(|| format!("failed to create {}", path.display()))?;
+        path.push(spec.artifact);
+        fs::create_dir_all(&path)
+            .with_context(|| format!("failed to create {}", path.display()))?;
+        let metadata_path = path.join("maven-metadata.xml");
+        let metadata = format!(
+            "<metadata>\n  <groupId>{}</groupId>\n  <artifactId>{}</artifactId>\n  <versioning>\n    <latest>{}</latest>\n    <release>{}</release>\n    <versions>\n      <version>{}</version>\n    </versions>\n    <lastUpdated>{}</lastUpdated>\n  </versioning>\n</metadata>\n",
+            spec.group,
+            spec.artifact,
+            spec.version,
+            spec.version,
+            spec.version,
+            Self::last_updated_stamp()
+        );
+        fs::write(&metadata_path, metadata)
+            .with_context(|| format!("failed to write {}", metadata_path.display()))?;
+        Ok(())
+    }
+
+    fn write_artifacts(base_dir: &Path, spec: &DependencySpec) -> Result<()> {
+        let mut version_dir = base_dir.join(spec.group_path());
+        version_dir.push(spec.artifact);
+        version_dir.push(spec.version);
+        fs::create_dir_all(&version_dir)
+            .with_context(|| format!("failed to create {}", version_dir.display()))?;
+
+        let jar_path = version_dir.join(spec.jar_name());
+        let jar_bytes = format!("test-bytes-{}-{}", spec.artifact, spec.version).into_bytes();
+        fs::write(&jar_path, &jar_bytes)
+            .with_context(|| format!("failed to write {}", jar_path.display()))?;
+
+        let checksum = Sha256::digest(&jar_bytes);
+        let checksum_path = jar_path.with_extension("jar.sha256");
+        let checksum_text = format!("{:x}  {}\n", checksum, spec.jar_name());
+        fs::write(&checksum_path, checksum_text)
+            .with_context(|| format!("failed to write {}", checksum_path.display()))?;
+
+        let pom_path = version_dir.join(spec.pom_name());
+        let pom = Self::render_pom(spec);
+        fs::write(&pom_path, pom).with_context(|| format!("failed to write {}", pom_path.display()))?;
+
+        Ok(())
+    }
+
+    fn last_updated_stamp() -> String {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        format!("2025{:0>10}", now % 10_000_000_000)
+    }
+
+    fn render_pom(spec: &DependencySpec) -> String {
+        let mut buffer = String::new();
+        buffer.push_str("<project>\n");
+        buffer.push_str("  <modelVersion>4.0.0</modelVersion>\n");
+        buffer.push_str(&format!("  <groupId>{}</groupId>\n", spec.group));
+        buffer.push_str(&format!("  <artifactId>{}</artifactId>\n", spec.artifact));
+        buffer.push_str(&format!("  <version>{}</version>\n", spec.version));
+        buffer.push_str("  <packaging>jar</packaging>\n");
+        if !spec.dependencies.is_empty() {
+            buffer.push_str("  <dependencies>\n");
+            for dep in &spec.dependencies {
+                buffer.push_str("    <dependency>\n");
+                buffer.push_str(&format!("      <groupId>{}</groupId>\n", dep.group));
+                buffer.push_str(&format!("      <artifactId>{}</artifactId>\n", dep.artifact));
+                buffer.push_str(&format!("      <version>{}</version>\n", dep.version));
+                if dep.optional {
+                    buffer.push_str("      <optional>true</optional>\n");
+                }
+                if let Some(scope) = dep.scope {
+                    buffer.push_str(&format!("      <scope>{}</scope>\n", scope));
+                }
+                buffer.push_str("    </dependency>\n");
+            }
+            buffer.push_str("  </dependencies>\n");
+        }
+        buffer.push_str("</project>\n");
+        buffer
+    }
+}
+
+struct StubMavenServer {
+    address: SocketAddr,
+    shutdown: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl StubMavenServer {
+    fn start(base_dir: PathBuf) -> Result<Self> {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).context("failed to bind stub server")?;
+        listener
+            .set_nonblocking(true)
+            .context("failed to configure listener")?;
+        let address = listener.local_addr().context("failed to read address")?;
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_clone = Arc::clone(&shutdown);
+        let handle = thread::spawn(move || Self::serve(listener, base_dir, shutdown_clone));
+
+        Ok(Self {
+            address,
+            shutdown,
+            handle: Some(handle),
+        })
+    }
+
+    fn base_url(&self) -> String {
+        format!("http://{}", self.address)
+    }
+
+    fn serve(
+        listener: TcpListener,
+        base_dir: PathBuf,
+        shutdown: Arc<AtomicBool>,
+    ) {
+        while !shutdown.load(Ordering::Relaxed) {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    let _ = Self::handle_client(stream, &base_dir);
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(error) => {
+                    eprintln!("stub server accept error: {error:?}");
+                    break;
+                }
+            }
+        }
+    }
+
+    fn handle_client(
+        mut stream: TcpStream,
+        base_dir: &Path,
+    ) -> Result<()> {
+        let mut buffer = [0u8; 2048];
+        let read = stream.read(&mut buffer)?;
+        if read == 0 {
+            return Ok(());
+        }
+
+        let request = String::from_utf8_lossy(&buffer[..read]);
+        let mut lines = request.lines();
+        let Some(request_line) = lines.next() else {
+            return Ok(());
+        };
+
+        let mut parts = request_line.split_whitespace();
+        let method = parts.next().unwrap_or_default();
+        let path = parts.next().unwrap_or("/");
+
+        if !method.eq_ignore_ascii_case("GET") && !method.eq_ignore_ascii_case("HEAD") {
+            return Ok(());
+        }
+
+        let resolved = base_dir.join(path.trim_start_matches('/'));
+        if resolved.is_file() {
+            let body = fs::read(&resolved)
+                .with_context(|| format!("failed to read {}", resolved.display()))?;
+            let content_type = Self::detect_content_type(&resolved);
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: {}\r\nConnection: close\r\n\r\n",
+                body.len(),
+                content_type
+            );
+            stream.write_all(header.as_bytes()).ok();
+            if !method.eq_ignore_ascii_case("HEAD") {
+                stream.write_all(&body).ok();
+            }
+        } else {
+            let response =
+                "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            stream.write_all(response.as_bytes()).ok();
+        }
+
+        Ok(())
+    }
+
+    fn detect_content_type(path: &Path) -> &'static str {
+        match path.extension().and_then(|ext| ext.to_str()) {
+            Some("xml") | Some("pom") => "application/xml",
+            Some("sha256") => "text/plain",
+            Some("jar") => "application/java-archive",
+            _ => "application/octet-stream",
+        }
+    }
+}
+
+impl Drop for StubMavenServer {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+        let _ = TcpStream::connect(self.address);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+fn repo_root() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .ancestors()
+        .find(|candidate| candidate.join("toolchains").is_dir())
+        .expect("failed to locate repository root")
+        .to_path_buf()
+}
+
+fn cargo_bin_path(name: &str) -> Option<PathBuf> {
+    let var_name = format!("CARGO_BIN_EXE_{}", name.replace('-', "_"));
+    env::var_os(var_name).map(PathBuf::from)
+}
+
+fn ensure_bin(name: &str, package: &str) -> Result<PathBuf> {
+    if let Some(path) = cargo_bin_path(name) {
+        return Ok(path);
+    }
+    let root = repo_root().join("jv");
+    let mut cmd = Command::new("cargo");
+    cmd.current_dir(&root);
+    cmd.args(["build", "--package", package, "--bin", name]);
+    let output = cmd.output().with_context(|| format!("failed to build {name}"))?;
+    if !output.status.success() {
+        bail!(
+            "building {name} failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(root.join("target").join("debug").join(name))
+}
+
+fn ensure_jvpm_bin() -> Result<PathBuf> {
+    ensure_bin("jvpm", "jv_pm")
+}
+
+fn ensure_jv_bin() -> Result<PathBuf> {
+    ensure_bin("jv", "jv_cli")
+}
+
+fn configure_command(command: &mut Command, project: &Path, home: &Path) -> Result<()> {
+    command.current_dir(project);
+    command.env("HOME", home);
+
+    let root = repo_root();
+    let java25 = root.join("toolchains/jdk25");
+    let java21 = root.join("toolchains/jdk21");
+    command.env("JAVA_HOME", &java25);
+    command.env("JAVA25_HOME", &java25);
+    command.env("JAVA21_HOME", &java21);
+
+    let mut path_entries = vec![java25.join("bin"), java21.join("bin")];
+    if let Some(maven_dir) = maven_bin_dir() {
+        path_entries.push(maven_dir);
+    }
+    if let Some(existing) = env::var_os("PATH") {
+        path_entries.extend(env::split_paths(&existing));
+    }
+    let joined = env::join_paths(path_entries).context("failed to join PATH entries")?;
+    command.env("PATH", joined);
+
+    Ok(())
+}
+
+fn maven_bin_dir() -> Option<PathBuf> {
+    maven_binary().and_then(|path| path.parent().map(|dir| dir.to_path_buf()))
+}
+
+fn maven_binary() -> Option<PathBuf> {
+    if let Some(home) = env::var_os("MVN_HOME") {
+        let candidate = PathBuf::from(home).join("bin").join("mvn");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    let candidate = repo_root().join("toolchains/maven/bin/mvn");
+    if candidate.exists() {
+        return Some(candidate);
+    }
+    None
+}
+
+fn write_global_config(home: &Path, repo_url: &str) -> Result<()> {
+    let config_dir = home.join(".jv");
+    fs::create_dir_all(&config_dir)
+        .with_context(|| format!("failed to create {}", config_dir.display()))?;
+    let config_path = config_dir.join("config.toml");
+    let contents = format!(
+        "repositories = [{{ name = \"integration\", url = \"{}\", priority = 5 }}]\n",
+        repo_url
+    );
+    fs::write(&config_path, contents)
+        .with_context(|| format!("failed to write {}", config_path.display()))?;
+    Ok(())
+}
+
+fn write_maven_settings(home: &Path, repo_url: &str) -> Result<PathBuf> {
+    let settings_dir = home.join(".m2");
+    fs::create_dir_all(&settings_dir)
+        .with_context(|| format!("failed to create {}", settings_dir.display()))?;
+    let settings_path = settings_dir.join("settings.xml");
+    let settings = format!(
+        "<settings>\n  <mirrors>\n    <mirror>\n      <id>integration</id>\n      <url>{}</url>\n      <mirrorOf>*</mirrorOf>\n    </mirror>\n  </mirrors>\n  <profiles>\n    <profile>\n      <id>integration</id>\n      <repositories>\n        <repository>\n          <id>integration</id>\n          <url>{}</url>\n        </repository>\n      </repositories>\n    </profile>\n  </profiles>\n  <activeProfiles>\n    <activeProfile>integration</activeProfile>\n  </activeProfiles>\n</settings>\n",
+        repo_url, repo_url
+    );
+    fs::write(&settings_path, settings)
+        .with_context(|| format!("failed to write {}", settings_path.display()))?;
+    Ok(settings_path)
+}
+
+fn write_wrapper_pom(target: &Path) -> Result<()> {
+    let pom = r#"<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example</groupId>
+  <artifactId>wrapper-project</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+</project>
+"#;
+    fs::write(target.join("pom.xml"), pom)
+        .with_context(|| format!("failed to write {}", target.join("pom.xml").display()))
+}
+
+fn write_dependency_pom(target: &Path, dependency: &DependencySpec) -> Result<()> {
+    fs::create_dir_all(target)
+        .with_context(|| format!("failed to create {}", target.display()))?;
+    let pom = format!(
+        r#"<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example</groupId>
+  <artifactId>wrapper-project</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+  <dependencies>
+    <dependency>
+      <groupId>{}</groupId>
+      <artifactId>{}</artifactId>
+      <version>{}</version>
+    </dependency>
+  </dependencies>
+</project>
+"#,
+        dependency.group, dependency.artifact, dependency.version
+    );
+    fs::write(target.join("pom.xml"), pom)
+        .with_context(|| format!("failed to write {}", target.join("pom.xml").display()))
+}
+
+fn write_jv_manifest(target: &Path, repo_url: &str) -> Result<()> {
+    fs::create_dir_all(target.join("src"))
+        .with_context(|| format!("failed to create {}", target.join("src").display()))?;
+    fs::write(
+        target.join("src/main.jv"),
+        "fun main() { println(\"hello\") }\n",
+    )
+    .with_context(|| "failed to write src/main.jv")?;
+    let manifest = format!(
+        "[package]\nname = \"jv-project\"\nversion = \"0.1.0\"\n\n[package.dependencies]\n\n[project]\nentrypoint = \"src/main.jv\"\n\n[project.sources]\ninclude = [\"src/**/*.jv\"]\n\n[project.output]\ndirectory = \"target\"\n\n[[repositories]]\nname = \"integration\"\nurl = \"{}\"\npriority = 5\n",
+        repo_url
+    );
+    fs::write(target.join("jv.toml"), manifest)
+        .with_context(|| format!("failed to write {}", target.join("jv.toml").display()))
+}
+
+fn jar_path(root: &Path, spec: &DependencySpec) -> PathBuf {
+    root.join(".jv")
+        .join("repository")
+        .join(spec.group_path())
+        .join(spec.artifact)
+        .join(spec.version)
+        .join(spec.jar_name())
+}
+
+fn lockfile_contains(path: &Path, needle: &str) -> Result<bool> {
+    let content =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    Ok(content.contains(needle))
+}
+
+fn collect_relative_jars(root: &Path) -> Result<Vec<String>> {
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut entries = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir)
+            .with_context(|| format!("failed to read directory {}", dir.display()))?
+        {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("jar") {
+                if let Ok(relative) = path.strip_prefix(root) {
+                    entries.push(relative.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    entries.sort();
+    Ok(entries)
+}
+
+fn assert_jar_sets_match(expected: &[String], actual: &[String]) -> Result<()> {
+    let expected_set: BTreeSet<_> = expected.iter().cloned().collect();
+    let actual_set: BTreeSet<_> = actual.iter().cloned().collect();
+    let missing: Vec<_> = expected_set.difference(&actual_set).cloned().collect();
+    let extra: Vec<_> = actual_set.difference(&expected_set).cloned().collect();
+    if !missing.is_empty() || !extra.is_empty() {
+        bail!(
+            "jar sets differ: missing={:?}, extra={:?}",
+            missing,
+            extra
+        );
+    }
+    Ok(())
+}
+
+fn baseline_fixture_path() -> PathBuf {
+    repo_root()
+        .join("jv")
+        .join("crates")
+        .join("jv_pm")
+        .join("tests")
+        .join("fixtures")
+        .join("maven_baseline_jars.txt")
+}
+
+fn load_baseline_fixture() -> Result<Vec<(String, String, String)>> {
+    let content = fs::read_to_string(baseline_fixture_path())
+        .context("failed to read maven_baseline_jars.txt")?;
+    content
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|line| {
+            let line = line.trim().trim_end_matches(".jar");
+            let parts: Vec<&str> = line.split('/').collect();
+            if parts.len() < 3 {
+                return Err(anyhow!("invalid fixture line: {line}"));
+            }
+            let version = parts[parts.len() - 2].to_string();
+            let artifact = parts[parts.len() - 3].to_string();
+            let group = parts[..parts.len() - 3].join(".");
+            Ok((group, artifact, version))
+        })
+        .collect()
+}
+
+fn write_baseline_fixture_repo(base_dir: &Path, coords: &[(String, String, String)]) -> Result<()> {
+    if base_dir.exists() {
+        fs::remove_dir_all(base_dir)
+            .with_context(|| format!("failed to clear {}", base_dir.display()))?;
+    }
+    fs::create_dir_all(base_dir)
+        .with_context(|| format!("failed to create {}", base_dir.display()))?;
+
+    for (group, artifact, version) in coords {
+        let group_path = group.replace('.', "/");
+        let version_dir = base_dir
+            .join(&group_path)
+            .join(artifact)
+            .join(version);
+        fs::create_dir_all(&version_dir)
+            .with_context(|| format!("failed to create {}", version_dir.display()))?;
+
+        let jar_name = format!("{artifact}-{version}.jar");
+        let jar_path = version_dir.join(&jar_name);
+        let jar_bytes = format!("fixture-bytes-{artifact}-{version}").into_bytes();
+        fs::write(&jar_path, &jar_bytes)
+            .with_context(|| format!("failed to write {}", jar_path.display()))?;
+
+        let checksum = Sha256::digest(&jar_bytes);
+        let checksum_path = jar_path.with_extension("jar.sha256");
+        let checksum_text = format!("{:x}  {}\n", checksum, jar_name);
+        fs::write(&checksum_path, checksum_text)
+            .with_context(|| format!("failed to write {}", checksum_path.display()))?;
+
+        let pom_path = version_dir.join(format!("{artifact}-{version}.pom"));
+        let pom = if group == "org.apache.commons" && artifact == "commons-lang3" && version == "3.14.0" {
+            let mut deps = String::new();
+            deps.push_str("  <dependencies>\n");
+            for (dep_group, dep_artifact, dep_version) in coords.iter().filter(|(g, a, v)| {
+                !(g == group && a == artifact && v == version)
+            }) {
+                deps.push_str("    <dependency>\n");
+                deps.push_str(&format!("      <groupId>{}</groupId>\n", dep_group));
+                deps.push_str(&format!("      <artifactId>{}</artifactId>\n", dep_artifact));
+                deps.push_str(&format!("      <version>{}</version>\n", dep_version));
+                deps.push_str("    </dependency>\n");
+            }
+            deps.push_str("  </dependencies>\n");
+            format!(
+                "<project>\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>{}</groupId>\n  <artifactId>{}</artifactId>\n  <version>{}</version>\n{}\n</project>\n",
+                group, artifact, version, deps
+            )
+        } else {
+            format!(
+                "<project>\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>{}</groupId>\n  <artifactId>{}</artifactId>\n  <version>{}</version>\n</project>\n",
+                group, artifact, version
+            )
+        };
+        fs::write(&pom_path, pom)
+            .with_context(|| format!("failed to write {}", pom_path.display()))?;
+
+        let metadata_dir = version_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| anyhow!("failed to resolve metadata dir for {}", version_dir.display()))?;
+        let metadata_path = metadata_dir.join("maven-metadata.xml");
+        let metadata = format!(
+            "<metadata>\n  <groupId>{}</groupId>\n  <artifactId>{}</artifactId>\n  <versioning>\n    <latest>{}</latest>\n    <release>{}</release>\n    <versions>\n      <version>{}</version>\n    </versions>\n    <lastUpdated>20250101000000</lastUpdated>\n  </versioning>\n</metadata>\n",
+            group, artifact, version, version, version
+        );
+        fs::write(&metadata_path, metadata)
+            .with_context(|| format!("failed to write {}", metadata_path.display()))?;
+    }
+
+    Ok(())
+}
+
+fn sample_specs() -> Vec<DependencySpec> {
+    let commons_transitive = DependencySpec::new("org.apache.commons", "commons-collections", "4.5");
+    let commons = DependencySpec::new("org.apache.commons", "commons-lang3", "3.14.0")
+        .with_dependencies(vec![DependencyCoordinate::new(
+            "org.apache.commons",
+            "commons-collections",
+            "4.5",
+        )]);
+
+    let junit_api =
+        DependencySpec::new("org.junit.jupiter", "junit-jupiter-api", "5.9.2").with_dependencies(
+            vec![DependencyCoordinate::new(
+                "org.opentest4j",
+                "opentest4j",
+                "1.3.0",
+            )
+            .optional()],
+        );
+    let junit = DependencySpec::new("org.junit.jupiter", "junit-jupiter", "5.9.2")
+        .with_dependencies(vec![DependencyCoordinate::new(
+            "org.junit.jupiter",
+            "junit-jupiter-api",
+            "5.9.2",
+        )]);
+    let opentest = DependencySpec::new("org.opentest4j", "opentest4j", "1.3.0");
+
+    vec![commons, commons_transitive, junit, junit_api, opentest]
+}
+
+fn parity_specs() -> Vec<DependencySpec> {
+    let runtime_leaf =
+        DependencySpec::new("com.example", "runtime-leaf", "1.0.0");
+    let runtime_core = DependencySpec::new("com.example", "runtime-core", "1.0.0")
+        .with_dependencies(vec![DependencyCoordinate::new(
+            "com.example",
+            "runtime-leaf",
+            "1.0.0",
+        )]);
+    let provided_only =
+        DependencySpec::new("com.example", "provided-helper", "1.0.0");
+    let test_helper =
+        DependencySpec::new("com.example", "test-helper", "1.0.0");
+    let optional_helper =
+        DependencySpec::new("com.example", "optional-helper", "1.0.0");
+    let app = DependencySpec::new("com.example", "parity-app", "1.0.0")
+        .with_dependencies(vec![
+            DependencyCoordinate::new("com.example", "runtime-core", "1.0.0"),
+            DependencyCoordinate::new("com.example", "provided-helper", "1.0.0")
+                .with_scope("provided"),
+            DependencyCoordinate::new("com.example", "test-helper", "1.0.0")
+                .with_scope("test"),
+            DependencyCoordinate::new("com.example", "optional-helper", "1.0.0")
+                .optional(),
+        ]);
+
+    vec![
+        app,
+        runtime_core,
+        runtime_leaf,
+        provided_only,
+        test_helper,
+        optional_helper,
+    ]
+}
+
+#[test]
+fn wrapper_default_add_and_remove_manage_jars() -> Result<()> {
+    let jvpm_bin = ensure_jvpm_bin()?;
+
+    let home = tempdir().context("failed to create home tempdir")?;
+    let repo_dir = home.path().join("fake-maven");
+    let specs = sample_specs();
+    StubMavenRepo::create(&repo_dir, &specs)?;
+    let server = StubMavenServer::start(repo_dir)?;
+    write_global_config(home.path(), &server.base_url())?;
+
+    let project = tempdir().context("failed to create project tempdir")?;
+    write_wrapper_pom(project.path())?;
+
+    let commons = specs
+        .iter()
+        .find(|spec| spec.artifact == "commons-lang3")
+        .cloned()
+        .expect("commons-lang3 spec missing");
+    let collections = specs
+        .iter()
+        .find(|spec| spec.artifact == "commons-collections")
+        .cloned()
+        .expect("commons-collections spec missing");
+
+    let mut add = Command::new(&jvpm_bin);
+    configure_command(&mut add, project.path(), home.path())?;
+    add.arg("add")
+        .arg("--non-interactive")
+        .arg("org.apache.commons:commons-lang3:3.14.0");
+    let output = add.output().context("failed to run jvpm add")?;
+    if !output.status.success() {
+        bail!(
+            "jvpm add failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let pom = fs::read_to_string(project.path().join("pom.xml"))
+        .context("failed to read pom.xml after add")?;
+    assert!(
+        pom.contains("commons-lang3"),
+        "pom.xml did not contain commons-lang3 entry"
+    );
+
+    let lockfile = project.path().join("jv.lock");
+    assert!(lockfile.exists(), "jv.lock was not generated");
+
+    let commons_path = jar_path(project.path(), &commons);
+    let collections_path = jar_path(project.path(), &collections);
+    assert!(
+        commons_path.exists(),
+        "commons-lang3 jar missing: {}",
+        commons_path.display()
+    );
+    assert!(
+        collections_path.exists(),
+        "transitive jar missing: {}",
+        collections_path.display()
+    );
+
+    let mut remove = Command::new(&jvpm_bin);
+    configure_command(&mut remove, project.path(), home.path())?;
+    remove
+        .arg("remove")
+        .arg("--non-interactive")
+        .arg("org.apache.commons:commons-lang3:3.14.0");
+    let output = remove.output().context("failed to run jvpm remove")?;
+    if !output.status.success() {
+        bail!(
+            "jvpm remove failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    assert!(
+        !commons_path.exists(),
+        "commons-lang3 jar should be removed"
+    );
+    assert!(
+        !collections_path.exists(),
+        "transitive jar should be removed"
+    );
+
+    let pom_after = fs::read_to_string(project.path().join("pom.xml"))
+        .context("failed to read pom.xml after remove")?;
+    assert!(
+        !pom_after.contains("commons-lang3"),
+        "pom.xml still contains commons-lang3 after removal"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn wrapper_pubgrub_strategy_downloads_jars() -> Result<()> {
+    let jvpm_bin = ensure_jvpm_bin()?;
+
+    let home = tempdir().context("failed to create home tempdir")?;
+    let repo_dir = home.path().join("fake-maven");
+    let specs = sample_specs();
+    StubMavenRepo::create(&repo_dir, &specs)?;
+    let server = StubMavenServer::start(repo_dir)?;
+    write_global_config(home.path(), &server.base_url())?;
+
+    let project = tempdir().context("failed to create project tempdir")?;
+    write_wrapper_pom(project.path())?;
+
+    let junit = specs
+        .iter()
+        .find(|spec| spec.artifact == "junit-jupiter")
+        .cloned()
+        .expect("junit-jupiter spec missing");
+    let junit_api = specs
+        .iter()
+        .find(|spec| spec.artifact == "junit-jupiter-api")
+        .cloned()
+        .expect("junit-jupiter-api spec missing");
+
+    let mut add = Command::new(&jvpm_bin);
+    configure_command(&mut add, project.path(), home.path())?;
+    add.args([
+        "add",
+        "--non-interactive",
+        "--strategy",
+        "pubgrub",
+        "org.junit.jupiter:junit-jupiter:5.9.2",
+    ]);
+    let output = add.output().context("failed to run jvpm add with pubgrub")?;
+    if !output.status.success() {
+        bail!(
+            "jvpm add (pubgrub) failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let pom = fs::read_to_string(project.path().join("pom.xml"))
+        .context("failed to read pom.xml after add")?;
+    assert!(
+        pom.contains("junit-jupiter"),
+        "pom.xml did not contain junit-jupiter entry"
+    );
+
+    let junit_path = jar_path(project.path(), &junit);
+    let api_path = jar_path(project.path(), &junit_api);
+    assert!(junit_path.exists(), "junit jar missing: {}", junit_path.display());
+    assert!(
+        api_path.exists(),
+        "junit api jar missing: {}",
+        api_path.display()
+    );
+
+    Ok(())
+}
+
+#[test]
+fn wrapper_default_matches_maven_dependency_resolve_jars() -> Result<()> {
+    let jvpm_bin = ensure_jvpm_bin()?;
+    let Some(mvn_bin) = maven_binary() else {
+        eprintln!("skipping wrapper_default_matches_maven_dependency_resolve_jars: maven binary unavailable");
+        return Ok(());
+    };
+
+    let home = tempdir().context("failed to create home tempdir")?;
+    let repo_dir = home.path().join("fake-maven");
+    let specs = parity_specs();
+    StubMavenRepo::create(&repo_dir, &specs)?;
+    let server = StubMavenServer::start(repo_dir)?;
+    write_global_config(home.path(), &server.base_url())?;
+    let settings = write_maven_settings(home.path(), &server.base_url())?;
+
+    let app = specs
+        .iter()
+        .find(|spec| spec.artifact == "parity-app")
+        .cloned()
+        .expect("parity-app spec missing");
+
+    let maven_repo = home.path().join(".m2").join("repository");
+    let maven_project = tempdir().context("failed to create maven tempdir")?;
+    write_dependency_pom(maven_project.path(), &app)?;
+    let mut mvn = Command::new(&mvn_bin);
+    configure_command(&mut mvn, maven_project.path(), home.path())?;
+    mvn.args([
+        "-B",
+        "-s",
+        settings
+            .to_str()
+            .ok_or_else(|| anyhow!("settings path not valid utf-8"))?,
+        &format!("-Dmaven.repo.local={}", maven_repo.display()),
+        "-DincludeProvided=true",
+        "-DincludeOptional=false",
+        "dependency:resolve",
+    ]);
+    let output = mvn
+        .output()
+        .context("failed to run maven dependency:resolve")?;
+    if !output.status.success() {
+        bail!(
+            "maven dependency:resolve failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let maven_jars = collect_relative_jars(&maven_repo)?;
+    assert!(
+        maven_jars.iter().any(|path| path.contains("runtime-core")),
+        "runtime dependency missing from maven resolution: {maven_jars:?}"
+    );
+    assert!(
+        maven_jars.iter().any(|path| path.contains("runtime-leaf")),
+        "transitive dependency missing from maven resolution: {maven_jars:?}"
+    );
+    assert!(
+        maven_jars.iter().any(|path| path.contains("provided-helper")),
+        "provided scope jar missing from maven resolution: {maven_jars:?}"
+    );
+    assert!(
+        !maven_jars.iter().any(|path| path.contains("test-helper")),
+        "test scope jar unexpectedly present in maven resolution: {maven_jars:?}"
+    );
+    assert!(
+        !maven_jars
+            .iter()
+            .any(|path| path.contains("optional-helper")),
+        "optional dependency unexpectedly present in maven resolution: {maven_jars:?}"
+    );
+
+    let wrapper_project = tempdir().context("failed to create wrapper tempdir")?;
+    write_wrapper_pom(wrapper_project.path())?;
+    let mut add = Command::new(&jvpm_bin);
+    configure_command(&mut add, wrapper_project.path(), home.path())?;
+    add.args([
+        "add",
+        "--non-interactive",
+        "com.example:parity-app:1.0.0",
+    ]);
+    let output = add.output().context("failed to run jvpm add for parity-app")?;
+    if !output.status.success() {
+        bail!(
+            "jvpm add failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let wrapper_repo = wrapper_project.path().join(".jv").join("repository");
+    let wrapper_jars = collect_relative_jars(&wrapper_repo)?;
+    assert_jar_sets_match(&maven_jars, &wrapper_jars)?;
+
+    Ok(())
+}
+
+#[test]
+fn wrapper_default_misses_maven_baseline_fixture_set() -> Result<()> {
+    let jvpm_bin = ensure_jvpm_bin()?;
+
+    let coords = load_baseline_fixture()?;
+    let home = tempdir().context("failed to create home tempdir")?;
+    let repo_dir = home.path().join("fake-maven");
+    write_baseline_fixture_repo(&repo_dir, &coords)?;
+    let server = match StubMavenServer::start(repo_dir) {
+        Ok(server) => server,
+        Err(err) => {
+            eprintln!("skipping wrapper_default_misses_maven_baseline_fixture_set: failed to start stub server ({err})");
+            return Ok(());
+        }
+    };
+    write_global_config(home.path(), &server.base_url())?;
+
+    let project = tempdir().context("failed to create project tempdir")?;
+    write_wrapper_pom(project.path())?;
+
+    let mut add = Command::new(&jvpm_bin);
+    configure_command(&mut add, project.path(), home.path())?;
+    add.args([
+        "add",
+        "--non-interactive",
+        "org.apache.commons:commons-lang3:3.14.0",
+    ]);
+    let output = add.output().context("failed to run jvpm add for commons-lang3")?;
+    if !output.status.success() {
+        bail!(
+            "jvpm add failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let wrapper_repo = project.path().join(".jv").join("repository");
+    let wrapper_jars = collect_relative_jars(&wrapper_repo)?;
+
+    let expected_jars: Vec<String> = coords
+        .iter()
+        .map(|(group, artifact, version)| {
+            format!(
+                "{}/{}/{}/{}-{}.jar",
+                group.replace('.', "/"),
+                artifact,
+                version,
+                artifact,
+                version
+            )
+        })
+        .collect();
+
+    assert_jar_sets_match(&expected_jars, &wrapper_jars)?;
+
+    Ok(())
+}
+
+#[test]
+fn jv_native_default_downloads_and_records_lockfile() -> Result<()> {
+    let jv_bin = ensure_jv_bin()?;
+    let jvpm_bin = ensure_jvpm_bin()?;
+
+    let home = tempdir().context("failed to create home tempdir")?;
+    let repo_dir = home.path().join("fake-maven");
+    let specs = sample_specs();
+    StubMavenRepo::create(&repo_dir, &specs)?;
+    let server = StubMavenServer::start(repo_dir)?;
+    write_global_config(home.path(), &server.base_url())?;
+
+    let project = tempdir().context("failed to create project tempdir")?;
+    write_jv_manifest(project.path(), &server.base_url())?;
+
+    let commons = specs
+        .iter()
+        .find(|spec| spec.artifact == "commons-lang3")
+        .cloned()
+        .expect("commons-lang3 spec missing");
+
+    let mut add = Command::new(&jv_bin);
+    configure_command(&mut add, project.path(), home.path())?;
+    add.env("JVPM_BIN", &jvpm_bin);
+    add.args([
+        "add",
+        "--non-interactive",
+        "org.apache.commons:commons-lang3:3.14.0",
+    ]);
+    let output = add.output().context("failed to run jv add")?;
+    if !output.status.success() {
+        bail!(
+            "jv add failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let manifest = fs::read_to_string(project.path().join("jv.toml"))
+        .context("failed to read jv.toml after add")?;
+    assert!(
+        manifest.contains("commons-lang3"),
+        "manifest missing commons-lang3 entry"
+    );
+
+    let lockfile = project.path().join("jv.lock");
+    assert!(lockfile.exists(), "jv.lock was not generated in native mode");
+    assert!(
+        lockfile_contains(&lockfile, "commons-lang3")?,
+        "jv.lock missing commons-lang3 entry"
+    );
+
+    let commons_path = jar_path(project.path(), &commons);
+    assert!(
+        commons_path.exists(),
+        "commons-lang3 jar missing: {}",
+        commons_path.display()
+    );
+
+    Ok(())
+}
+
+#[test]
+fn jv_native_maven_compat_strategy_downloads_via_wrapper_flow() -> Result<()> {
+    let jv_bin = ensure_jv_bin()?;
+    let jvpm_bin = ensure_jvpm_bin()?;
+
+    let home = tempdir().context("failed to create home tempdir")?;
+    let repo_dir = home.path().join("fake-maven");
+    let specs = sample_specs();
+    StubMavenRepo::create(&repo_dir, &specs)?;
+    let server = StubMavenServer::start(repo_dir)?;
+    write_global_config(home.path(), &server.base_url())?;
+
+    let project = tempdir().context("failed to create project tempdir")?;
+    write_jv_manifest(project.path(), &server.base_url())?;
+
+    let junit = specs
+        .iter()
+        .find(|spec| spec.artifact == "junit-jupiter")
+        .cloned()
+        .expect("junit-jupiter spec missing");
+
+    let mut add = Command::new(&jv_bin);
+    configure_command(&mut add, project.path(), home.path())?;
+    add.env("JVPM_BIN", &jvpm_bin);
+    add.args([
+        "add",
+        "--non-interactive",
+        "--strategy",
+        "maven-compat",
+        "org.junit.jupiter:junit-jupiter:5.9.2",
+    ]);
+    let output = add.output().context("failed to run jv add with maven-compat")?;
+    if !output.status.success() {
+        bail!(
+            "jv add (maven-compat) failed: {}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let lockfile = project.path().join("jv.lock");
+    assert!(lockfile.exists(), "jv.lock was not generated");
+    assert!(
+        lockfile_contains(&lockfile, "junit-jupiter")?,
+        "jv.lock missing junit-jupiter entry"
+    );
+
+    let junit_path = jar_path(project.path(), &junit);
+    assert!(junit_path.exists(), "junit jar missing: {}", junit_path.display());
+
+    Ok(())
+}

@@ -1079,6 +1079,7 @@ impl<'tokens> ParserContext<'tokens> {
         let mut bracket_depth = 0usize;
         let mut saw_significant = false;
         let mut pending_whitespace = false;
+        let mut last_significant_kind: Option<TokenKind> = None;
 
         loop {
             let Some(token) = self.current_token() else {
@@ -1107,6 +1108,23 @@ impl<'tokens> ParserContext<'tokens> {
             }
 
             let at_top_level = angle_depth == 0 && paren_depth == 0 && bracket_depth == 0;
+
+            if self.unit_type_annotation_depth > 0
+                && last_significant_kind.is_some()
+                && at_top_level
+            {
+                if kind == TokenKind::At {
+                    break;
+                }
+                if kind == TokenKind::Whitespace {
+                    if let Some((_, next_kind)) = self.peek_significant_kind_from(self.cursor + 1) {
+                        if matches!(next_kind, TokenKind::Identifier | TokenKind::LeftBracket) {
+                            break;
+                        }
+                    }
+                }
+            }
+
             if at_top_level && terminators.contains(&kind) {
                 break;
             }
@@ -1149,6 +1167,9 @@ impl<'tokens> ParserContext<'tokens> {
             }
 
             self.bump_raw();
+            if !kind.is_trivia() {
+                last_significant_kind = Some(kind);
+            }
         }
     }
 
@@ -1305,15 +1326,16 @@ impl<'tokens> ParserContext<'tokens> {
             return false;
         };
 
-        let has_explicit_whitespace =
-            matches!(TokenKind::from_token(next_token), TokenKind::Whitespace);
-        let has_trivia_gap =
-            next_token.leading_trivia.spaces > 0 || next_token.leading_trivia.newlines > 0;
-        let token_width = token.lexeme.chars().count().max(1);
-        let token_end_column = token.column + token_width;
-        let has_inline_gap = next_token.line == token.line && next_token.column > token_end_column;
+        let next_kind = TokenKind::from_token(next_token);
+        let token_end_column = token.column + token.lexeme.len();
+        let has_column_gap = next_token.column > token_end_column;
+        if matches!(next_kind, TokenKind::Whitespace | TokenKind::Newline) || has_column_gap {
+            return true;
+        }
 
-        has_explicit_whitespace || has_trivia_gap || has_inline_gap
+        let trivia = &next_token.leading_trivia;
+        let result = trivia.spaces > 0 || trivia.newlines > 0;
+        result
     }
 
     /// 現在のカーソル位置が `@` であり直後にホワイトスペースが存在するかを判定する。

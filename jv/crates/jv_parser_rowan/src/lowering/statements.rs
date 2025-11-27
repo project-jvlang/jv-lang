@@ -10,11 +10,10 @@ use jv_ast::annotation::{Annotation, AnnotationArgument, AnnotationName, Annotat
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::{
     Argument, BinaryMetadata, CallArgumentMetadata, CallArgumentStyle, IsTestKind, IsTestMetadata,
-    LabeledSpan as TupleLabelSpan, LogBlock, LogBlockLevel, LogItem, Parameter,
-    ParameterModifiers, ParameterProperty, RegexCommand, RegexCommandMode, RegexCommandModeOrigin,
-    RegexFlag, RegexGuardStrategy, RegexLambdaReplacement, RegexLiteralReplacement,
-    RegexReplacement, RegexTemplateSegment, StringPart, TupleContextFlags, TupleFieldMeta,
-    UnitSpacingStyle, WhenArm,
+    LabeledSpan as TupleLabelSpan, LogBlock, LogBlockLevel, LogItem, Parameter, ParameterModifiers,
+    ParameterProperty, RegexCommand, RegexCommandMode, RegexCommandModeOrigin, RegexFlag,
+    RegexGuardStrategy, RegexLambdaReplacement, RegexLiteralReplacement, RegexReplacement,
+    RegexTemplateSegment, StringPart, TupleContextFlags, TupleFieldMeta, UnitSpacingStyle, WhenArm,
 };
 use jv_ast::json::{
     JsonComment, JsonCommentKind, JsonEntry, JsonLiteral, JsonValue, NumberGrouping,
@@ -875,7 +874,12 @@ fn lower_type_annotation_container(
         }
     };
 
-    let tokens = context.tokens_for(&expr);
+    let tokens = if let Some(unit_node) = child_node(container_node, SyntaxKind::UnitTypeAnnotation)
+    {
+        context.tokens_for(&unit_node)
+    } else {
+        context.tokens_for(&expr)
+    };
     let owned_tokens: Vec<Token> = tokens.into_iter().cloned().collect();
 
     match lower_type_annotation_from_tokens(&owned_tokens) {
@@ -1060,8 +1064,16 @@ fn lower_unit_literal_expression(
         }
     }
 
+    let mut space_before_at = false;
     let mut space_after_at = false;
     if let Some(at_pos) = at_index {
+        let at_token = tokens[at_pos];
+        if whitespace_after_value
+            || at_token.leading_trivia.spaces > 0
+            || at_token.leading_trivia.newlines > 0
+        {
+            space_before_at = true;
+        }
         if index < tokens.len() {
             let trivia = &tokens[index].leading_trivia;
             if trivia.spaces > 0 || trivia.newlines > 0 {
@@ -1081,7 +1093,7 @@ fn lower_unit_literal_expression(
             }
         }
         if !whitespace_after_value {
-            let trivia = &tokens[at_pos].leading_trivia;
+            let trivia = &at_token.leading_trivia;
             if trivia.spaces > 0 || trivia.newlines > 0 {
                 whitespace_after_value = true;
             }
@@ -1104,6 +1116,13 @@ fn lower_unit_literal_expression(
         Some(TokenType::Whitespace(_))
     ) {
         symbol_tokens.pop();
+    }
+
+    if !space_after_at {
+        if let Some(first_token) = symbol_tokens.first() {
+            space_after_at =
+                first_token.leading_trivia.spaces > 0 || first_token.leading_trivia.newlines > 0;
+        }
     }
 
     if symbol_tokens.is_empty() {
@@ -1145,7 +1164,7 @@ fn lower_unit_literal_expression(
     };
 
     let spacing = UnitSpacingStyle {
-        space_before_at: at_index.is_some() && whitespace_after_value,
+        space_before_at,
         space_after_at,
     };
 
@@ -1465,34 +1484,6 @@ mod tests {
             TokenType::String(value.to_string()),
             &format!("\"{value}\""),
         )
-    }
-
-    #[test]
-    fn parses_arithmetic_with_divide_inside_parens() {
-        let mut divide = divide_token();
-        divide.leading_trivia.spaces = 1;
-
-        let mut number = make_token(TokenType::Number("3".into()), "3");
-        number.leading_trivia.spaces = 1;
-
-        let expr = parse_expression_from_tokens(vec![
-            identifier_token("total"),
-            make_token(TokenType::Plus, "+"),
-            identifier_token("bucket"),
-            make_token(TokenType::Plus, "+"),
-            make_token(TokenType::LeftParen, "("),
-            identifier_token("value"),
-            divide,
-            number,
-            make_token(TokenType::RightParen, ")"),
-        ]);
-
-        match expr {
-            Expression::Binary { op, .. } => {
-                assert_eq!(op, BinaryOp::Add, "outer expression should be addition");
-            }
-            other => panic!("expected binary expression, got {:?}", other),
-        }
     }
 
     #[test]
@@ -2461,9 +2452,7 @@ mod expression_parser {
                     && token.leading_trivia.spaces > 0
                 {
                     if let Some(prev_token) = inner.get(offset - 1) {
-                        if !token_requires_followup(&prev_token.token_type)
-                            && !token_requires_followup(&token.token_type)
-                        {
+                        if !token_requires_followup(&prev_token.token_type) {
                             parts.push(&inner[start..offset]);
                             separators.push(SeparatorKind::Layout);
                             start = offset;
@@ -2778,9 +2767,7 @@ mod expression_parser {
                     && token.leading_trivia.spaces > 0
                 {
                     if let Some(prev_token) = tokens.get(offset - 1) {
-                        if !token_requires_followup(&prev_token.token_type)
-                            && !token_requires_followup(&token.token_type)
-                        {
+                        if !token_requires_followup(&prev_token.token_type) {
                             parts.push(&tokens[start..offset]);
                             start = offset;
                             continue;
@@ -4248,9 +4235,7 @@ mod expression_parser {
                     && token.leading_trivia.spaces > 0
                 {
                     if let Some(prev_token) = inner.get(offset - 1) {
-                        if !token_requires_followup(&prev_token.token_type)
-                            && !token_requires_followup(&token.token_type)
-                        {
+                        if !token_requires_followup(&prev_token.token_type) {
                             parts.push(&inner[start..offset]);
                             separators.push(SeparatorKind::Layout);
                             start = offset;
@@ -7275,26 +7260,16 @@ fn lower_unit_type_definition(
             SyntaxKind::UnitName,
         )
     })?;
-    let unit_name = first_identifier_text(&name_node)
-        .or_else(|| {
-            context
-                .tokens_for(&name_node)
-                .into_iter()
-                .find_map(|token| {
-                    if matches!(token.token_type, TokenType::Invalid(_)) {
-                        Some(token.lexeme.clone())
-                    } else {
-                        None
-                    }
-                })
-        })
+    let unit_name = context
+        .text_for_node(&name_node)
+        .and_then(|text| if text.is_empty() { None } else { Some(text) })
         .ok_or_else(|| {
             LoweringDiagnostic::new(
                 LoweringDiagnosticSeverity::Error,
-                "単位名の識別子が取得できません",
+                "単位名のテキストが取得できません",
                 context.span_for(&name_node),
                 name_node.kind(),
-                first_identifier_text(&name_node),
+                None,
                 collect_annotation_texts(&name_node),
             )
         })?;

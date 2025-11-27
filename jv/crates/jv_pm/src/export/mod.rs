@@ -135,7 +135,7 @@ fn generate_maven_files(
 ) -> Result<usize, ExportError> {
     let dispatcher = MavenIntegrationDispatcher::new();
     let integration = dispatcher.generate_default(&MavenIntegrationConfig {
-        manifest: request.manifest,
+        manifest: Some(request.manifest),
         resolved,
         lockfile: Some(request.lockfile),
         repositories: request.repositories,
@@ -223,6 +223,7 @@ fn lockfile_package_to_dependency(
         decision: VersionDecision::Exact(package.version.clone()),
         scope,
         source: ResolutionSource::Lockfile,
+        local_artifact: None,
     })
 }
 

@@ -15,6 +15,7 @@ use std::str::FromStr;
 use thiserror::Error;
 
 pub mod cache;
+pub mod cli;
 pub mod download;
 pub mod export;
 pub mod lockfile;
@@ -22,6 +23,7 @@ pub mod maven;
 pub mod registry;
 pub mod repository;
 pub mod resolver;
+pub mod wrapper;
 
 pub use cache::{
     CacheError, CacheStatsSnapshot, CachedArtifact, CachedMetadata, CachedPom, DependencyCache,

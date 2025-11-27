@@ -256,6 +256,84 @@ jv add jv-json           # jv依存関係を追加
 jv audit                 # セキュリティ監査
 ```
 
+## jvpm: Maven ラッパーモード
+
+**jvpm** は jv 言語のパッケージマネージャーですが、単体で利用する場合は `mvn` コマンドの完全なラッパーとして動作し、既存の Java/Maven プロジェクト管理にも利用できます。`pom.xml` のあるディレクトリで実行すると自動的にラッパーモードで動作し、これまで通りの Maven ワークフローに `jv.lock` によるバージョン固定を追加します。
+
+### クイックスタート
+
+```bash
+# 新規 Maven プロジェクトを作成
+jvpm init my-maven-app
+cd my-maven-app
+
+# 依存関係を追加
+jvpm add org.junit.jupiter:junit-jupiter-api:5.9.2
+
+# ビルド（Maven パススルー）
+jvpm install -DskipTests
+```
+
+### init コマンド
+
+新しい Maven プロジェクトを初期化します：
+
+```bash
+# 基本的な JAR プロジェクト
+jvpm init my-app
+
+# WAR プロジェクト（Web アプリケーション）
+jvpm init --packaging war my-webapp
+
+# 親 POM プロジェクト（マルチモジュール）
+jvpm init --packaging pom my-parent
+
+# すべてのオプションを指定
+jvpm init \
+  --group-id com.example \
+  --artifact-id my-app \
+  --version 1.0.0 \
+  --packaging jar \
+  --java-version 21 \
+  my-app
+```
+
+### install コマンド
+
+依存解決と Maven ビルドを実行します：
+
+```bash
+# 依存解決 + ビルド
+jvpm install
+
+# テストをスキップ
+jvpm install -DskipTests
+
+# テストのみ実行
+jvpm test
+
+# クリーンビルド
+jvpm clean install
+
+# オフラインモード
+jvpm install -o
+
+# スナップショット強制更新
+jvpm install -U
+
+# 依存ツリーの表示
+jvpm dependency:tree
+```
+
+### メリット
+
+- **完全な Maven 互換**: `mvn` コマンドを `jvpm` に置き換えるだけで、既存のワークフローがそのまま使える
+- **jv.lock によるバージョン固定**: チーム全体で同じ依存バージョンを保証
+- **自動 pom.xml 同期**: `jvpm add` で依存追加時に pom.xml を自動更新
+- **学習コストゼロ**: Maven の知識がそのまま活用可能
+
+詳細は [jvpm Maven ラッパーガイド](docs/jvpm-maven-wrapper.md) を参照してください。
+
 ## IDE サポート
 
 jvにはIDE統合用のLanguage Server Protocol実装が含まれています：
@@ -317,3 +395,4 @@ IDEA UltimateとCommunity用プラグインが利用可能。
 - [アーキテクチャ概要](jv/docs/architecture.md)
 - [CLIリファレンス](jv/docs/cli-reference.md)
 - [パッケージマネージャーガイド](docs/jv_pm.md)
+- [jvpm Maven ラッパーガイド](docs/jvpm-maven-wrapper.md)

@@ -1,7 +1,7 @@
 //! タプルリテラルと分割代入検証用テスト群。
 #![allow(non_snake_case)]
 
-use jv_ast::{binding_pattern::BindingPatternKind, Expression, Statement};
+use jv_ast::{Expression, Statement, binding_pattern::BindingPatternKind};
 use jv_parser::{DiagnosticSeverity, FrontendDiagnostics, Parser};
 
 fn 解析結果(ソース: &str) -> (jv_ast::Program, FrontendDiagnostics) {
@@ -10,8 +10,10 @@ fn 解析結果(ソース: &str) -> (jv_ast::Program, FrontendDiagnostics) {
     (プログラム, 診断)
 }
 
-fn 最終診断一覧<'a>(診断: &'a FrontendDiagnostics) -> impl Iterator<Item = &'a jv_parser::Diagnostic> {
-   診断.final_diagnostics().iter()
+fn 最終診断一覧<'a>(
+    診断: &'a FrontendDiagnostics,
+) -> impl Iterator<Item = &'a jv_parser::Diagnostic> {
+    診断.final_diagnostics().iter()
 }
 
 #[test]
@@ -61,7 +63,11 @@ fn 空白区切りの括弧はタプルとして解釈される() {
     assert_eq!(名前一覧.next(), Some("second"));
 
     let インデックス: Vec<_> = メタ.iter().map(|meta| meta.fallback_index).collect();
-    assert_eq!(インデックス, vec![1, 2], "後退名称は連番で割り当てられること");
+    assert_eq!(
+        インデックス,
+        vec![1, 2],
+        "後退名称は連番で割り当てられること"
+    );
 }
 
 #[test]
@@ -112,7 +118,11 @@ val labeled = (
         .iter()
         .map(|ラベル| ラベル.name.as_str())
         .collect();
-    assert_eq!(最初の副次ラベル, vec!["account"], "最初の要素にはコメント由来の副次ラベルが付与されること");
+    assert_eq!(
+        最初の副次ラベル,
+        vec!["account"],
+        "最初の要素にはコメント由来の副次ラベルが付与されること"
+    );
     assert_eq!(
         最初.identifier_hint.as_deref(),
         Some("user"),
@@ -130,7 +140,11 @@ val labeled = (
         .iter()
         .map(|ラベル| ラベル.name.as_str())
         .collect();
-    assert_eq!(二番目の副次ラベル, vec!["amount"], "二番目の要素にも副次ラベルが引き継がれること");
+    assert_eq!(
+        二番目の副次ラベル,
+        vec!["amount"],
+        "二番目の要素にも副次ラベルが引き継がれること"
+    );
     assert_eq!(
         二番目.identifier_hint.as_deref(),
         Some("amount"),
@@ -142,7 +156,10 @@ val labeled = (
 fn 空タプルは診断を返す() {
     let (_, 診断) = 解析結果("val invalid = ()");
     let エラー = 最終診断一覧(&診断)
-        .find(|diag| diag.message().contains("空のタプルや句読点のみのタプルリテラルはサポートされません"))
+        .find(|diag| {
+            diag.message()
+                .contains("空のタプルや句読点のみのタプルリテラルはサポートされません")
+        })
         .expect("空タプルに対するエラーメッセージが報告されること");
 
     assert_eq!(
@@ -188,16 +205,17 @@ fn 分割代入ではタプルコンテキストが設定される() {
 
 fn パターン名一覧(パターン: &BindingPatternKind) -> Vec<String> {
     match パターン {
-        BindingPatternKind::Tuple { elements, .. }
-        | BindingPatternKind::List { elements, .. } => elements
-            .iter()
-            .map(|要素| match 要素 {
-                BindingPatternKind::Identifier { name, .. } => name.clone(),
-                BindingPatternKind::Wildcard { .. } => "_".to_string(),
-                BindingPatternKind::Tuple { .. } => "(...)".to_string(),
-                BindingPatternKind::List { .. } => "[...]".to_string(),
-            })
-            .collect(),
+        BindingPatternKind::Tuple { elements, .. } | BindingPatternKind::List { elements, .. } => {
+            elements
+                .iter()
+                .map(|要素| match 要素 {
+                    BindingPatternKind::Identifier { name, .. } => name.clone(),
+                    BindingPatternKind::Wildcard { .. } => "_".to_string(),
+                    BindingPatternKind::Tuple { .. } => "(...)".to_string(),
+                    BindingPatternKind::List { .. } => "[...]".to_string(),
+                })
+                .collect()
+        }
         BindingPatternKind::Identifier { name, .. } => vec![name.clone()],
         BindingPatternKind::Wildcard { .. } => vec!["_".into()],
     }
@@ -215,7 +233,10 @@ fn 分割代入で不足要素を報告する() {
         Statement::ValDeclaration { binding, .. } => binding
             .as_ref()
             .expect("分割代入ではバインディングパターンが存在すること"),
-        予期しない => panic!("分割代入を含むval宣言を期待したが {:?} を受け取った", 予期しない),
+        予期しない => panic!(
+            "分割代入を含むval宣言を期待したが {:?} を受け取った",
+            予期しない
+        ),
     };
     assert_eq!(
         パターン名一覧(パターン),
@@ -245,7 +266,10 @@ fn 分割代入で過剰要素を報告する() {
         Statement::ValDeclaration { binding, .. } => binding
             .as_ref()
             .expect("分割代入ではバインディングパターンが存在すること"),
-        予期しない => panic!("分割代入を含むval宣言を期待したが {:?} を受け取った", 予期しない),
+        予期しない => panic!(
+            "分割代入を含むval宣言を期待したが {:?} を受け取った",
+            予期しない
+        ),
     };
     assert_eq!(
         パターン名一覧(パターン),

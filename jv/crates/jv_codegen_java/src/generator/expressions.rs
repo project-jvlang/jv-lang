@@ -548,7 +548,6 @@ impl JavaCodeGenerator {
         ))
     }
 
-
     fn try_render_collectors_to_list(
         &mut self,
         receiver: Option<&IrExpression>,

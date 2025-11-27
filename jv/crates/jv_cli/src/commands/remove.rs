@@ -2,6 +2,7 @@ use std::ffi::OsString;
 
 use anyhow::{Context, Result};
 use clap::Args;
+use jv_pm::cli::ResolverAlgorithm;
 
 use super::jvpm_bridge::{propagate_status, spawn_jvpm};
 
@@ -14,6 +15,10 @@ pub struct RemoveArgs {
     /// 非対話モード（候補が複数ある場合は一覧表示のみを行って終了）
     #[arg(long = "non-interactive")]
     pub non_interactive: bool,
+
+    /// 使用する依存解決アルゴリズム
+    #[arg(long = "strategy", value_enum)]
+    pub strategy: Option<ResolverAlgorithm>,
 }
 
 pub fn run(args: &RemoveArgs) -> Result<()> {
@@ -28,6 +33,10 @@ fn build_jvpm_args(args: &RemoveArgs) -> Vec<OsString> {
     if args.non_interactive {
         argv.push(OsString::from("--non-interactive"));
     }
+    if let Some(strategy) = args.strategy {
+        argv.push(OsString::from("--strategy"));
+        argv.push(OsString::from(strategy.strategy_name()));
+    }
     argv.extend(args.packages.iter().map(OsString::from));
     argv
 }
@@ -41,6 +50,7 @@ mod tests {
         let args = RemoveArgs {
             packages: vec!["com.example:demo".into()],
             non_interactive: false,
+            strategy: None,
         };
         let built = build_jvpm_args(&args);
         assert_eq!(
@@ -54,6 +64,7 @@ mod tests {
         let args = RemoveArgs {
             packages: vec!["foo".into()],
             non_interactive: true,
+            strategy: None,
         };
         let built = build_jvpm_args(&args);
         assert_eq!(
