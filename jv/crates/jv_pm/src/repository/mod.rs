@@ -1,4 +1,5 @@
 pub mod config;
+pub(crate) mod defaults;
 
 use crate::Manifest;
 use crate::repository::config::{AuthType, MirrorConfig, RepositoryConfig, RepositorySection};
@@ -74,15 +75,22 @@ impl RepositoryManager {
 
     /// プロジェクトルートを指定して初期化する。
     pub fn with_project_root(project_root: impl Into<PathBuf>) -> Result<Self, RepositoryError> {
-        Self::build(project_root.into(), None)
+        let project_root = project_root.into();
+        let local_repo_path = project_root.join(".jv").join("repository");
+        Self::build(local_repo_path, None)
+    }
+
+    /// カスタムローカルリポジトリパスを指定して初期化する（wrapper モード用）。
+    pub fn with_local_repository(local_repository: impl Into<PathBuf>) -> Result<Self, RepositoryError> {
+        Self::build(local_repository.into(), None)
     }
 
     fn build(
-        project_root: PathBuf,
+        local_repo_path: PathBuf,
         home_override: Option<PathBuf>,
     ) -> Result<Self, RepositoryError> {
         let global = load_global_config(home_override)?;
-        let local_repository = local_repository_config(&project_root);
+        let local_repository = local_repository_config_from_path(&local_repo_path);
 
         Ok(Self {
             use_global_repositories: true,
@@ -311,9 +319,8 @@ fn matches_pattern(text: &str, pattern: &str) -> bool {
     pattern.ends_with('*') || remaining.is_empty()
 }
 
-fn local_repository_config(project_root: &Path) -> RepositoryConfig {
-    let path = project_root.join(".jv").join("repository");
-    let url = Url::from_file_path(&path)
+fn local_repository_config_from_path(path: &Path) -> RepositoryConfig {
+    let url = Url::from_file_path(path)
         .map(|url| url.to_string())
         .unwrap_or_else(|_| format!("file://{}", path.display()));
 
@@ -352,7 +359,7 @@ fn load_global_config(home_override: Option<PathBuf>) -> Result<GlobalConfig, Re
     let config_path = home.join(".jv").join("config.toml");
     if !config_path.exists() {
         return Ok(GlobalConfig {
-            repositories: default_global_repositories(),
+            repositories: defaults::embedded_global_repositories(),
             mirrors: Vec::new(),
         });
     }
@@ -361,7 +368,7 @@ fn load_global_config(home_override: Option<PathBuf>) -> Result<GlobalConfig, Re
     let parsed: GlobalConfigFile = toml::from_str(&contents)?;
 
     let repositories = if parsed.repositories.is_empty() {
-        default_global_repositories()
+        defaults::embedded_global_repositories()
     } else {
         parsed.repositories
     };
@@ -372,23 +379,8 @@ fn load_global_config(home_override: Option<PathBuf>) -> Result<GlobalConfig, Re
     })
 }
 
-fn default_global_repositories() -> Vec<RepositoryConfig> {
-    vec![
-        RepositoryConfig {
-            name: "jv-registry".to_string(),
-            url: "https://registry.jvlang.org".to_string(),
-            priority: 50,
-            auth: None,
-            filter: None,
-        },
-        RepositoryConfig {
-            name: "maven-central".to_string(),
-            url: "https://repo.maven.apache.org/maven2".to_string(),
-            priority: 100,
-            auth: None,
-            filter: None,
-        },
-    ]
+pub fn builtin_global_repositories() -> Vec<RepositoryConfig> {
+    defaults::embedded_global_repositories()
 }
 
 #[derive(Debug, Clone, serde::Deserialize, Default)]
@@ -474,7 +466,6 @@ mod tests {
         let handles = manager.list();
 
         assert!(handles.iter().any(|h| h.name() == "local"));
-        assert!(handles.iter().any(|h| h.name() == "jv-registry"));
         assert!(handles.iter().any(|h| h.name() == "maven-central"));
     }
 
@@ -518,7 +509,6 @@ mod tests {
         assert_eq!(names[0], "local");
         assert!(names.contains(&"corp-private".to_string()));
         assert!(names.contains(&"jitpack".to_string()));
-        assert!(!names.contains(&"jv-registry".to_string()));
         assert!(!names.contains(&"maven-central".to_string()));
     }
 

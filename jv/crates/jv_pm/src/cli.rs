@@ -1,0 +1,313 @@
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use serde::Serialize;
+use std::ffi::OsString;
+
+use crate::repository::config::AuthType;
+
+#[derive(Parser, Debug)]
+#[command(name = "jvpm")]
+#[command(
+    about = "jv package manager helper",
+    long_about = "jvpm は Maven ラッパーモードで、pom.xml/settings.xml/jv.lock を同期しながら `WrapperUpdateSummary` で更新ファイルを報告します。`--strategy <pubgrub|breadth-first|maven-compat>` を渡せばアルゴリズムを選択でき、その結果が `jv.lock` に記録されます。resolver/repo 系コマンドは jv CLI を案内して終了し、それ以外の引数は mvn に転送されます。"
+)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Commands {
+    /// 依存関係を追加する
+    Add(AddArgs),
+    /// 依存関係を削除する
+    Remove(RemoveArgs),
+    /// Inspect resolver strategies
+    #[command(subcommand)]
+    Resolver(ResolverCommand),
+    /// Manage repository definitions and mirrors
+    #[command(subcommand)]
+    Repo(RepoCommand),
+    /// 新規プロジェクトを初期化する
+    Init(InitArgs),
+    /// プロジェクトをビルドしてローカルリポジトリにインストールする
+    Install(InstallArgs),
+    /// 未定義コマンドはMavenへフォワード
+    #[command(external_subcommand)]
+    Maven(Vec<OsString>),
+}
+
+/// Resolver algorithm selection exposed to wrapper and native commands.
+#[derive(ValueEnum, Clone, Copy, Debug)]
+pub enum ResolverAlgorithm {
+    /// PubGrub (default) resolver.
+    #[value(name = "pubgrub")]
+    PubGrub,
+    /// Breadth-first resolution strategy.
+    #[value(name = "breadth-first")]
+    BreadthFirst,
+    /// Maven-compatible resolution path.
+    #[value(name = "maven-compat", alias = "maven")]
+    MavenCompat,
+}
+
+impl ResolverAlgorithm {
+    pub fn strategy_name(self) -> &'static str {
+        match self {
+            ResolverAlgorithm::PubGrub => "pubgrub",
+            ResolverAlgorithm::BreadthFirst => "breadth-first",
+            ResolverAlgorithm::MavenCompat => "maven-compat",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct AddArgs {
+    /// 追加する依存関係（group:artifact[:version] または group:artifact@version 形式）
+    #[arg(value_name = "package", required = true)]
+    pub packages: Vec<String>,
+    /// 非対話モード（候補のみ表示して終了）
+    #[arg(long = "non-interactive")]
+    pub non_interactive: bool,
+    /// 使用する依存解決アルゴリズム（wrapperモードでも有効）
+    #[arg(long = "strategy", value_enum)]
+    pub strategy: Option<ResolverAlgorithm>,
+}
+
+
+/// 新規プロジェクトを初期化する
+#[derive(Debug, Clone, Args)]
+pub struct InitArgs {
+    /// Maven groupId (例: com.example)
+    #[arg(long = "group-id")]
+    pub group_id: Option<String>,
+    /// Maven artifactId (例: my-app)
+    #[arg(long = "artifact-id")]
+    pub artifact_id: Option<String>,
+    /// プロジェクトバージョン (例: 0.1.0-SNAPSHOT)
+    #[arg(long = "version")]
+    pub version: Option<String>,
+    /// パッケージングタイプ (jar, war, pom)
+    #[arg(long = "packaging")]
+    pub packaging: Option<String>,
+    /// Java バージョン (17, 21, 25)
+    #[arg(long = "java-version")]
+    pub java_version: Option<String>,
+    /// 非対話モード（デフォルト値を使用）
+    #[arg(short = 'n', long = "non-interactive")]
+    pub non_interactive: bool,
+    /// プロジェクトを作成するディレクトリ
+    pub directory: Option<std::path::PathBuf>,
+}
+
+/// プロジェクトをビルドしてローカルリポジトリにインストールする
+///
+/// 追加の Maven オプションを渡すことができます:
+/// - `-DskipTests`: テストをスキップ
+/// - `-o`: オフラインモード
+/// - `-U`: スナップショットを強制更新
+#[derive(Debug, Clone, Args)]
+pub struct InstallArgs {
+    /// Maven に渡す追加の引数
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub maven_args: Vec<std::ffi::OsString>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct RemoveArgs {
+    /// 削除する依存関係（名前または group:artifact 形式）
+    #[arg(value_name = "package", required = true)]
+    pub packages: Vec<String>,
+    /// 非対話モード（候補のみ表示して終了）
+    #[arg(long = "non-interactive")]
+    pub non_interactive: bool,
+    /// 使用する依存解決アルゴリズム（wrapperモードでも有効）
+    #[arg(long = "strategy", value_enum)]
+    pub strategy: Option<ResolverAlgorithm>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ResolverCommand {
+    /// List every registered resolver strategy
+    List {
+        /// Emit machine-readable JSON instead of a human table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show extended metadata for a single strategy
+    Info {
+        /// Strategy name or alias (see `jv resolver list`)
+        name: String,
+        /// Emit machine-readable JSON instead of a textual block
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RepoCommand {
+    /// 現在有効なリポジトリ一覧を表示する
+    List {
+        /// グローバル設定に登録済みのリポジトリも含める
+        #[arg(long = "include-global")]
+        include_global: bool,
+        /// JSON形式で出力する
+        #[arg(long)]
+        json: bool,
+    },
+    /// 指定したリポジトリの詳細を表示する
+    Show {
+        /// 対象となるリポジトリ名
+        name: String,
+        /// グローバル設定の一覧も検索対象に含める
+        #[arg(long = "include-global")]
+        include_global: bool,
+        /// JSON形式で出力する
+        #[arg(long)]
+        json: bool,
+    },
+    /// 新しいリポジトリ定義を追加する
+    Add {
+        /// 追加するリポジトリ名
+        name: String,
+        /// 追加するリポジトリURL
+        url: String,
+        /// 優先度（小さいほど優先）
+        #[arg(long)]
+        priority: Option<u32>,
+        /// 書き込み先のスコープ
+        #[arg(long = "scope", value_enum, default_value_t = RepoScope::Project)]
+        scope: RepoScope,
+        /// 認証方式
+        #[arg(long, value_enum, default_value_t = RepoAuthKind::None)]
+        auth: RepoAuthKind,
+        /// BASIC認証のユーザー名環境変数
+        #[arg(long = "username-env")]
+        username_env: Option<String>,
+        /// BASIC認証のパスワード環境変数
+        #[arg(long = "password-env")]
+        password_env: Option<String>,
+        /// トークン認証の環境変数
+        #[arg(long = "token-env")]
+        token_env: Option<String>,
+        /// include-groups フィルタ
+        #[arg(long = "include-group")]
+        include_groups: Vec<String>,
+        /// exclude-groups フィルタ
+        #[arg(long = "exclude-group")]
+        exclude_groups: Vec<String>,
+    },
+    /// 既存リポジトリ定義を削除する
+    Remove {
+        /// 削除するリポジトリ名
+        name: String,
+        /// 削除対象のスコープ
+        #[arg(long = "scope", value_enum, default_value_t = RepoScope::Project)]
+        scope: RepoScope,
+    },
+    /// ミラー設定を表示・編集する
+    Mirror {
+        /// mirror-of対象名
+        target: Option<String>,
+        /// ミラーURL（設定/更新時）
+        url: Option<String>,
+        /// 表示名（省略可）
+        #[arg(long = "name")]
+        display_name: Option<String>,
+        /// 指定時は該当設定を削除する
+        #[arg(long)]
+        remove: bool,
+        /// JSON形式で出力する
+        #[arg(long)]
+        json: bool,
+        /// 操作対象スコープ
+        #[arg(long = "scope", value_enum, default_value_t = RepoScope::Project)]
+        scope: RepoScope,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum RepoScope {
+    Project,
+    Global,
+}
+
+impl RepoScope {
+    pub fn label(self) -> &'static str {
+        match self {
+            RepoScope::Project => "プロジェクト",
+            RepoScope::Global => "グローバル",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum RepoAuthKind {
+    None,
+    Basic,
+    Token,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RepoOrigin {
+    Local,
+    Project,
+    Global,
+}
+
+impl RepoOrigin {
+    pub fn label(self) -> &'static str {
+        match self {
+            RepoOrigin::Local => "ローカル",
+            RepoOrigin::Project => "プロジェクト",
+            RepoOrigin::Global => "グローバル",
+        }
+    }
+}
+
+impl Serialize for RepoOrigin {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(match self {
+            RepoOrigin::Local => "local",
+            RepoOrigin::Project => "project",
+            RepoOrigin::Global => "global",
+        })
+    }
+}
+
+impl Serialize for RepoScope {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(match self {
+            RepoScope::Project => "project",
+            RepoScope::Global => "global",
+        })
+    }
+}
+
+impl Serialize for RepoAuthKind {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(match self {
+            RepoAuthKind::None => "none",
+            RepoAuthKind::Basic => "basic",
+            RepoAuthKind::Token => "token",
+        })
+    }
+}
+
+impl From<AuthType> for RepoAuthKind {
+    fn from(value: AuthType) -> Self {
+        match value {
+            AuthType::None => RepoAuthKind::None,
+            AuthType::Basic => RepoAuthKind::Basic,
+            AuthType::Token => RepoAuthKind::Token,
+        }
+    }
+}

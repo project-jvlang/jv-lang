@@ -8,8 +8,8 @@
 
 use crate::inference::type_parser;
 use jv_ast::expression::{
-    Argument, Expression, LogBlock, LogItem, RegexCommand, RegexReplacement,
-    RegexTemplateSegment, StringPart, TryCatchClause, TupleFieldMeta, WhenArm,
+    Argument, Expression, LogBlock, LogItem, RegexCommand, RegexReplacement, RegexTemplateSegment,
+    StringPart, TryCatchClause, TupleFieldMeta, WhenArm,
 };
 use jv_ast::types::{Span, TupleTypeDescriptor, TypeAnnotation};
 use jv_ast::{

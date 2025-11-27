@@ -367,3 +367,6 @@ fn project_pipeline_builds_unit_syntax_sources() {
 mod jv_pm_phase2_e2e {
     include!("../../../../tests/e2e/jv_pm_phase2_e2e.rs");
 }
+mod jvpm_wrapper_mode {
+    include!("../../../../tests/e2e/jvpm_wrapper_mode.rs");
+}

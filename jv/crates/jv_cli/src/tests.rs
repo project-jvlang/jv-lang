@@ -865,7 +865,6 @@ include = ["src/**/*.jv"]
         overrides.java_only = true;
         overrides.target = Some(target);
 
-
         let plan =
             pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
                 .expect("plan composition succeeds");
