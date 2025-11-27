@@ -874,12 +874,7 @@ fn lower_type_annotation_container(
         }
     };
 
-    let tokens = if let Some(unit_node) = child_node(container_node, SyntaxKind::UnitTypeAnnotation)
-    {
-        context.tokens_for(&unit_node)
-    } else {
-        context.tokens_for(&expr)
-    };
+    let tokens = context.tokens_for(&expr);
     let owned_tokens: Vec<Token> = tokens.into_iter().cloned().collect();
 
     match lower_type_annotation_from_tokens(&owned_tokens) {
@@ -1064,16 +1059,8 @@ fn lower_unit_literal_expression(
         }
     }
 
-    let mut space_before_at = false;
     let mut space_after_at = false;
     if let Some(at_pos) = at_index {
-        let at_token = tokens[at_pos];
-        if whitespace_after_value
-            || at_token.leading_trivia.spaces > 0
-            || at_token.leading_trivia.newlines > 0
-        {
-            space_before_at = true;
-        }
         if index < tokens.len() {
             let trivia = &tokens[index].leading_trivia;
             if trivia.spaces > 0 || trivia.newlines > 0 {
@@ -1093,7 +1080,7 @@ fn lower_unit_literal_expression(
             }
         }
         if !whitespace_after_value {
-            let trivia = &at_token.leading_trivia;
+            let trivia = &tokens[at_pos].leading_trivia;
             if trivia.spaces > 0 || trivia.newlines > 0 {
                 whitespace_after_value = true;
             }
@@ -1116,13 +1103,6 @@ fn lower_unit_literal_expression(
         Some(TokenType::Whitespace(_))
     ) {
         symbol_tokens.pop();
-    }
-
-    if !space_after_at {
-        if let Some(first_token) = symbol_tokens.first() {
-            space_after_at =
-                first_token.leading_trivia.spaces > 0 || first_token.leading_trivia.newlines > 0;
-        }
     }
 
     if symbol_tokens.is_empty() {
@@ -1164,7 +1144,7 @@ fn lower_unit_literal_expression(
     };
 
     let spacing = UnitSpacingStyle {
-        space_before_at,
+        space_before_at: at_index.is_some() && whitespace_after_value,
         space_after_at,
     };
 
@@ -7260,16 +7240,26 @@ fn lower_unit_type_definition(
             SyntaxKind::UnitName,
         )
     })?;
-    let unit_name = context
-        .text_for_node(&name_node)
-        .and_then(|text| if text.is_empty() { None } else { Some(text) })
+    let unit_name = first_identifier_text(&name_node)
+        .or_else(|| {
+            context
+                .tokens_for(&name_node)
+                .into_iter()
+                .find_map(|token| {
+                    if matches!(token.token_type, TokenType::Invalid(_)) {
+                        Some(token.lexeme.clone())
+                    } else {
+                        None
+                    }
+                })
+        })
         .ok_or_else(|| {
             LoweringDiagnostic::new(
                 LoweringDiagnosticSeverity::Error,
-                "単位名のテキストが取得できません",
+                "単位名の識別子が取得できません",
                 context.span_for(&name_node),
                 name_node.kind(),
-                None,
+                first_identifier_text(&name_node),
                 collect_annotation_texts(&name_node),
             )
         })?;

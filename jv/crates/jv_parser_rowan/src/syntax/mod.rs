@@ -126,9 +126,9 @@ RightBracket = ']'
 Less = '<'
 Greater = '>'
 Arrow = '->'
-Bang = '!'
 Identifier = 'IDENTIFIER'
 ExpressionToken = 'EXPRESSION'
+Bang = '!'
 "#;
 
 #[cfg(test)]
