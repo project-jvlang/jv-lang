@@ -5,39 +5,32 @@ use crate::support::{
     literals::regex_literal_from_token,
     spans::{expression_span, merge_spans, span_from_token},
 };
-use crate::syntax::{SyntaxKind, TokenKind};
-use jv_ast::annotation::{Annotation, AnnotationArgument, AnnotationName, AnnotationValue};
+use crate::syntax::SyntaxKind;
 use jv_ast::comments::{CommentKind, CommentStatement, CommentVisibility};
 use jv_ast::expression::{
-    Argument, BinaryMetadata, CallArgumentMetadata, CallArgumentStyle, IsTestKind, IsTestMetadata,
-    LabeledSpan as TupleLabelSpan, LogBlock, LogBlockLevel, LogItem, Parameter, ParameterModifiers,
-    ParameterProperty, RegexCommand, RegexCommandMode, RegexCommandModeOrigin, RegexFlag,
-    RegexGuardStrategy, RegexLambdaReplacement, RegexLiteralReplacement, RegexReplacement,
-    RegexTemplateSegment, StringPart, TupleContextFlags, TupleFieldMeta, UnitSpacingStyle, WhenArm,
+    Argument, CallArgumentMetadata, CallArgumentStyle, Parameter, ParameterModifiers,
+    ParameterProperty, StringPart, UnitSpacingStyle, WhenArm,
 };
 use jv_ast::json::{
     JsonComment, JsonCommentKind, JsonEntry, JsonLiteral, JsonValue, NumberGrouping,
 };
 use jv_ast::statement::{
     ConcurrencyConstruct, ExtensionFunction, ForInStatement, LoopBinding, LoopStrategy,
-    NumericRangeLoop, Property, ResourceManagement, TestDataset, TestDatasetRow, TestDeclaration,
-    TestParameter, TestSampleMetadata, UnitConversionBlock, UnitConversionKind, UnitDependency,
-    UnitRelation, UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
+    NumericRangeLoop, Property, ResourceManagement, UnitConversionBlock, UnitConversionKind,
+    UnitDependency, UnitRelation, UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
 };
-use jv_ast::strings::{MultilineKind, MultilineStringLiteral, RawStringFlavor};
+use jv_ast::strings::{MultilineKind, MultilineStringLiteral};
 use jv_ast::types::{
-    BinaryOp, GenericParameter, GenericSignature, Literal, Modifiers, Pattern, PatternOrigin,
-    RegexLiteral, TypeAnnotation, UnaryOp, UnitSymbol, VarianceMarker,
+    BinaryOp, GenericParameter, GenericSignature, Literal, Modifiers, Pattern, TypeAnnotation,
+    UnaryOp, UnitSymbol, VarianceMarker,
 };
 use jv_ast::{BindingPatternKind, Expression, SequenceDelimiter, Span, Statement};
 use jv_lexer::{
-    FieldNameLabelToken, JsonCommentTrivia, JsonCommentTriviaKind, JsonConfidence,
-    LabeledSpan as LexerLabelSpan, LayoutMode, Lexer, NumberGroupingKind, StringDelimiterKind,
-    StringInterpolationSegment, StringLiteralMetadata, Token, TokenMetadata, TokenTrivia,
-    TokenType,
+    JsonCommentTrivia, JsonCommentTriviaKind, JsonConfidence, LayoutMode, Lexer,
+    NumberGroupingKind, StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata,
+    Token, TokenMetadata, TokenTrivia, TokenType,
 };
 use jv_type_inference_java::{lower_type_annotation_from_tokens, TypeLoweringErrorKind};
-use std::cmp::Ordering;
 
 /// ローワリング結果。
 #[derive(Debug)]
@@ -144,7 +137,6 @@ fn is_top_level_statement(kind: SyntaxKind) -> bool {
             | SyntaxKind::ValDeclaration
             | SyntaxKind::VarDeclaration
             | SyntaxKind::UnitTypeDefinition
-            | SyntaxKind::TestDeclaration
             | SyntaxKind::FunctionDeclaration
             | SyntaxKind::ClassDeclaration
             | SyntaxKind::WhenStatement
@@ -218,7 +210,6 @@ fn lower_single_statement(
         SyntaxKind::ValDeclaration => lower_value(context, node, true, diagnostics),
         SyntaxKind::VarDeclaration => lower_value(context, node, false, diagnostics),
         SyntaxKind::FunctionDeclaration => lower_function(context, node, diagnostics),
-        SyntaxKind::TestDeclaration => lower_test(context, node, diagnostics),
         SyntaxKind::UnitTypeDefinition => lower_unit_type_definition(context, node, diagnostics),
         SyntaxKind::ClassDeclaration => lower_class(context, node, diagnostics),
         SyntaxKind::ForStatement => lower_for(context, node, diagnostics),
@@ -335,8 +326,7 @@ fn import_alias_from_tokens(tokens: &[&Token]) -> Option<String> {
             TokenType::Whitespace(_) | TokenType::Newline => continue,
             TokenType::LineComment(_)
             | TokenType::BlockComment(_)
-            | TokenType::JavaDocComment(_)
-            | TokenType::FieldNameLabel(_) => continue,
+            | TokenType::JavaDocComment(_) => continue,
             TokenType::Dot => {
                 previous_was_dot = true;
                 if awaiting_alias_name {
@@ -403,15 +393,6 @@ fn lower_comment(
             text: format!("/*{}*/", raw),
             span,
         }),
-        TokenType::FieldNameLabel(_) => {
-            let text = comment_token.lexeme.trim();
-            Statement::Comment(CommentStatement {
-                kind: CommentKind::Line,
-                visibility: CommentVisibility::Passthrough,
-                text: format!("// {}", text),
-                span,
-            })
-        }
         other => {
             return Err(LoweringDiagnostic::new(
                 LoweringDiagnosticSeverity::Error,
@@ -459,11 +440,8 @@ fn lower_assignment(
         )
     })?;
 
-    let mut pattern_syntax_node: Option<JvSyntaxNode> = None;
-
     let (target, binding_pattern) =
         if let Some(pattern_node) = child_node(&target_node, SyntaxKind::BindingPattern) {
-            pattern_syntax_node = Some(pattern_node.clone());
             let pattern = lower_binding_pattern(context, &pattern_node)?;
             let expr = binding_pattern_primary_expression(&pattern);
             (expr, Some(pattern))
@@ -483,65 +461,7 @@ fn lower_assignment(
             )
         })?;
 
-    let mut value = lower_expression(context, &value_node)?;
-
-    if binding_pattern.is_some() {
-        if let Expression::Tuple {
-            context: tuple_context,
-            ..
-        } = &mut value
-        {
-            tuple_context.in_destructuring_pattern = true;
-        }
-    }
-
-    if let (
-        Some(pattern),
-        Expression::Tuple {
-            elements, fields, ..
-        },
-    ) = (binding_pattern.as_ref(), &value)
-    {
-        if let Some(pattern_len) = destructuring_element_count(pattern) {
-            let tuple_len = elements.len();
-            match pattern_len.cmp(&tuple_len) {
-                Ordering::Less => {
-                    let example = tuple_field_example(fields, pattern_len)
-                        .unwrap_or_else(|| format!("{}番目", pattern_len + 1));
-                    let message = format!(
-                        "分割代入の要素が不足しています: パターンは {} 要素ですが、タプルは {} 要素です (例: `{}` が未割り当てです)",
-                        pattern_len, tuple_len, example
-                    );
-                    let diagnostic_node = pattern_syntax_node.as_ref().unwrap_or(node);
-                    push_diagnostic(
-                        diagnostics,
-                        LoweringDiagnosticSeverity::Error,
-                        message,
-                        context,
-                        diagnostic_node,
-                    );
-                }
-                Ordering::Greater => {
-                    let example = pattern_element_example(pattern, tuple_len)
-                        .unwrap_or_else(|| format!("{}番目", tuple_len + 1));
-                    let message = format!(
-                        "分割代入の要素が多すぎます: パターンは {} 要素ですが、タプルは {} 要素です (例: `{}` が余剰です)",
-                        pattern_len, tuple_len, example
-                    );
-                    let diagnostic_node = pattern_syntax_node.as_ref().unwrap_or(node);
-                    push_diagnostic(
-                        diagnostics,
-                        LoweringDiagnosticSeverity::Error,
-                        message,
-                        context,
-                        diagnostic_node,
-                    );
-                }
-                Ordering::Equal => {}
-            }
-        }
-    }
-
+    let value = lower_expression(context, &value_node)?;
     let span = context.span_for(node).unwrap_or_else(Span::dummy);
 
     if let Some(pattern) = binding_pattern.clone() {
@@ -874,7 +794,12 @@ fn lower_type_annotation_container(
         }
     };
 
-    let tokens = context.tokens_for(&expr);
+    let tokens = if let Some(unit_node) = child_node(container_node, SyntaxKind::UnitTypeAnnotation)
+    {
+        context.tokens_for(&unit_node)
+    } else {
+        context.tokens_for(&expr)
+    };
     let owned_tokens: Vec<Token> = tokens.into_iter().cloned().collect();
 
     match lower_type_annotation_from_tokens(&owned_tokens) {
@@ -953,7 +878,7 @@ fn lower_expression_from_tokens(
     let filtered: Vec<&Token> = tokens
         .iter()
         .copied()
-        .filter(|token| !is_expression_trivia(token) && !matches!(token.token_type, TokenType::Eof))
+        .filter(|token| !is_trivia_token(token) && !matches!(token.token_type, TokenType::Eof))
         .collect();
 
     if filtered.is_empty() {
@@ -983,8 +908,6 @@ fn lower_expression_from_tokens(
                     first_identifier_text(span_node),
                     collect_annotation_texts(span_node),
                 ))
-            } else if let Some(cast) = try_parse_type_cast_fallback(&filtered) {
-                Ok(cast)
             } else {
                 let span = span
                     .or_else(|| context.span_for(span_node))
@@ -1047,10 +970,6 @@ fn lower_unit_literal_expression(
                 index += 1;
             }
             TokenType::At => {
-                let trivia = &tokens[index].leading_trivia;
-                if trivia.spaces > 0 || trivia.newlines > 0 {
-                    whitespace_after_value = true;
-                }
                 at_index = Some(index);
                 index += 1;
                 break;
@@ -1059,31 +978,19 @@ fn lower_unit_literal_expression(
         }
     }
 
+    let mut space_before_at = false;
     let mut space_after_at = false;
-    if let Some(at_pos) = at_index {
-        if index < tokens.len() {
-            let trivia = &tokens[index].leading_trivia;
-            if trivia.spaces > 0 || trivia.newlines > 0 {
-                space_after_at = true;
-            }
+    if let Some(at_idx) = at_index {
+        let at_token = tokens[at_idx];
+        if whitespace_after_value
+            || at_token.leading_trivia.spaces > 0
+            || at_token.leading_trivia.newlines > 0
+        {
+            space_before_at = true;
         }
         while index < tokens.len() && matches!(tokens[index].token_type, TokenType::Whitespace(_)) {
             space_after_at = true;
             index += 1;
-        }
-        if !space_after_at {
-            if let Some(symbol_token) = tokens.get(index) {
-                let trivia = &symbol_token.leading_trivia;
-                if trivia.spaces > 0 || trivia.newlines > 0 {
-                    space_after_at = true;
-                }
-            }
-        }
-        if !whitespace_after_value {
-            let trivia = &tokens[at_pos].leading_trivia;
-            if trivia.spaces > 0 || trivia.newlines > 0 {
-                whitespace_after_value = true;
-            }
         }
     }
 
@@ -1103,6 +1010,13 @@ fn lower_unit_literal_expression(
         Some(TokenType::Whitespace(_))
     ) {
         symbol_tokens.pop();
+    }
+
+    if !space_after_at {
+        if let Some(first_token) = symbol_tokens.first() {
+            space_after_at =
+                first_token.leading_trivia.spaces > 0 || first_token.leading_trivia.newlines > 0;
+        }
     }
 
     if symbol_tokens.is_empty() {
@@ -1144,7 +1058,7 @@ fn lower_unit_literal_expression(
     };
 
     let spacing = UnitSpacingStyle {
-        space_before_at: at_index.is_some() && whitespace_after_value,
+        space_before_at,
         space_after_at,
     };
 
@@ -1154,104 +1068,6 @@ fn lower_unit_literal_expression(
         spacing,
         span: context.span_for(node).unwrap_or_else(Span::dummy),
     })
-}
-
-fn try_parse_type_cast_fallback(tokens: &[&Token]) -> Option<Expression> {
-    fn parse_expression_slice(tokens: &[&Token]) -> Option<Expression> {
-        if tokens.is_empty() {
-            return None;
-        }
-
-        if let Ok(expr) = expression_parser::parse_expression(tokens) {
-            return Some(expr);
-        }
-
-        if matches!(
-            tokens.first().map(|token| &token.token_type),
-            Some(TokenType::LeftParen)
-        ) {
-            if let Some(close_index) = find_matching_paren_in_slice(tokens, 0) {
-                if close_index == tokens.len() - 1 {
-                    return parse_expression_slice(&tokens[1..close_index]);
-                }
-            }
-        }
-
-        None
-    }
-
-    fn find_matching_paren_in_slice(tokens: &[&Token], open_index: usize) -> Option<usize> {
-        let mut depth = 0isize;
-        for (idx, token) in tokens.iter().enumerate().skip(open_index) {
-            match token.token_type {
-                TokenType::LeftParen => depth += 1,
-                TokenType::RightParen => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Some(idx);
-                    }
-                }
-                _ => {}
-            }
-        }
-        None
-    }
-
-    for (index, token) in tokens.iter().enumerate().rev() {
-        if !matches!(
-            token.token_type,
-            TokenType::Identifier(ref value) if value == "as"
-        ) {
-            continue;
-        }
-
-        let left_tokens = &tokens[..index];
-        let right_tokens = &tokens[index + 1..];
-
-        if left_tokens.is_empty() || right_tokens.is_empty() {
-            continue;
-        }
-
-        let left_expr = match parse_expression_slice(left_tokens) {
-            Some(expr) => expr,
-            None => continue,
-        };
-
-        let owned_right: Vec<Token> = right_tokens.iter().map(|token| (*token).clone()).collect();
-        if owned_right.is_empty() {
-            continue;
-        }
-
-        let lowered = match lower_type_annotation_from_tokens(&owned_right) {
-            Ok(result) => result,
-            Err(_) => continue,
-        };
-
-        let annotation_span = lowered
-            .span()
-            .cloned()
-            .or_else(|| {
-                right_tokens.first().map(|first| {
-                    let last = right_tokens.last().unwrap_or(first);
-                    merge_spans(&span_from_token(first), &span_from_token(last))
-                })
-            })
-            .unwrap_or_else(|| expression_span(&left_expr));
-
-        let left_outer_span = left_tokens.first().map(|first| {
-            let last = left_tokens.last().unwrap_or(first);
-            merge_spans(&span_from_token(first), &span_from_token(last))
-        });
-
-        let left_span = left_outer_span.unwrap_or_else(|| expression_span(&left_expr));
-        let span = merge_spans(&left_span, &annotation_span);
-        return Some(Expression::TypeCast {
-            expr: Box::new(left_expr),
-            target: lowered.into_annotation(),
-            span,
-        });
-    }
-    None
 }
 
 fn qualified_name_segments(
@@ -1273,21 +1089,6 @@ fn qualified_name_segments(
             .or_else(|| tokens.first().map(|token| token.lexeme.clone()))?;
         segments.push(text);
     }
-
-    if segments.is_empty() {
-        if let Some(identifier) =
-            context
-                .tokens_for(node)
-                .iter()
-                .find_map(|token| match &token.token_type {
-                    TokenType::Identifier(value) => Some(value.clone()),
-                    _ => None,
-                })
-        {
-            segments.push(identifier);
-        }
-    }
-
     if segments.is_empty() {
         None
     } else {
@@ -1320,18 +1121,6 @@ fn join_tokens(tokens: &[&Token]) -> String {
         .iter()
         .map(|token| token.lexeme.as_str())
         .collect::<String>()
-}
-
-fn log_level_from_token_kind(token_type: &TokenType) -> Option<LogBlockLevel> {
-    match token_type {
-        TokenType::Log => Some(LogBlockLevel::Default),
-        TokenType::Trace => Some(LogBlockLevel::Trace),
-        TokenType::Debug => Some(LogBlockLevel::Debug),
-        TokenType::Info => Some(LogBlockLevel::Info),
-        TokenType::Warn => Some(LogBlockLevel::Warn),
-        TokenType::Error => Some(LogBlockLevel::Error),
-        _ => None,
-    }
 }
 
 fn identifier_texts(context: &LoweringContext<'_>, node: &JvSyntaxNode) -> Vec<String> {
@@ -1388,117 +1177,22 @@ fn is_trivia_token(token: &Token) -> bool {
             | TokenType::LineComment(_)
             | TokenType::BlockComment(_)
             | TokenType::JavaDocComment(_)
-            | TokenType::FieldNameLabel(_)
-    )
-}
-
-fn is_expression_trivia(token: &Token) -> bool {
-    matches!(
-        token.token_type,
-        TokenType::Whitespace(_)
-            | TokenType::Newline
-            | TokenType::LineComment(_)
-            | TokenType::BlockComment(_)
-            | TokenType::JavaDocComment(_)
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_lexer::{LayoutMode, Lexer, Token, TokenMetadata, TokenTrivia, TokenType};
+    use jv_lexer::Lexer;
 
-    fn try_parse_expression_from_source(
-        source: &str,
-    ) -> Result<Expression, expression_parser::ExpressionError> {
+    fn parse_expression_from_source(source: &str) -> Expression {
         let mut lexer = Lexer::with_layout_mode(source.to_string(), LayoutMode::Enabled);
         let tokens = lexer.tokenize().expect("tokenize expression");
         let filtered: Vec<&Token> = tokens
             .iter()
             .filter(|token| !matches!(token.token_type, TokenType::Eof))
             .collect();
-        expression_parser::parse_expression(&filtered)
-    }
-
-    fn parse_expression_from_source(source: &str) -> Expression {
-        try_parse_expression_from_source(source).expect("parse expression")
-    }
-
-    fn parse_expression_from_tokens(tokens: Vec<Token>) -> Expression {
-        let owned = tokens;
-        let refs: Vec<&Token> = owned.iter().collect();
-        expression_parser::parse_expression(&refs).expect("parse expression")
-    }
-
-    fn make_token(token_type: TokenType, lexeme: &str) -> Token {
-        Token {
-            token_type,
-            lexeme: lexeme.to_string(),
-            line: 1,
-            column: 1,
-            leading_trivia: TokenTrivia::default(),
-            diagnostic: None,
-            metadata: Vec::new(),
-        }
-    }
-
-    fn divide_token() -> Token {
-        make_token(TokenType::Divide, "/")
-    }
-
-    fn identifier_token(name: &str) -> Token {
-        make_token(TokenType::Identifier(name.to_string()), name)
-    }
-
-    fn regex_literal_token(raw: &str, pattern: &str) -> Token {
-        let mut token = make_token(TokenType::RegexLiteral(pattern.to_string()), raw);
-        token.metadata.push(TokenMetadata::RegexLiteral {
-            raw: raw.into(),
-            pattern: pattern.into(),
-        });
-        token
-    }
-
-    fn string_token(value: &str) -> Token {
-        make_token(
-            TokenType::String(value.to_string()),
-            &format!("\"{value}\""),
-        )
-    }
-
-    #[test]
-    fn parses_log_block_expression() {
-        let expr = parse_expression_from_source("LOG { \"start\" }");
-        match expr {
-            Expression::LogBlock(block) => {
-                assert_eq!(block.items.len(), 1);
-                match &block.items[0] {
-                    LogItem::Expression(Expression::Literal(Literal::String(value), _)) => {
-                        assert_eq!(value, "start");
-                    }
-                    other => panic!("expected literal log message, got {:?}", other),
-                }
-            }
-            other => panic!("expected log block expression, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_nested_log_block_expression() {
-        let expr = parse_expression_from_source("LOG { TRACE { \"nested\" } }");
-        match expr {
-            Expression::LogBlock(block) => {
-                assert_eq!(block.items.len(), 1);
-                match &block.items[0] {
-                    LogItem::Nested(inner) => {
-                        assert_eq!(inner.level, LogBlockLevel::Trace);
-                        assert_eq!(inner.items.len(), 1);
-                    }
-                    other => panic!("expected nested log block, got {:?}", other),
-                }
-            }
-            other => panic!("expected outer log block expression, got {:?}", other),
-        }
+        expression_parser::parse_expression(&filtered).expect("parse expression")
     }
 
     #[test]
@@ -1519,16 +1213,6 @@ mod tests {
             Expression::TypeCast { .. } => {}
             other => panic!("expected type cast expression, got {:?}", other),
         }
-    }
-
-    #[test]
-    fn parses_parenthesized_cast_expression() {
-        let expr = parse_expression_from_source("(value) as Int");
-        assert!(
-            matches!(expr, Expression::TypeCast { .. }),
-            "expected type cast expression, got {:?}",
-            expr
-        );
     }
 
     #[test]
@@ -1568,221 +1252,10 @@ mod tests {
             ),
         }
     }
-
-    #[test]
-    fn pattern_expression_is_expression_carries_metadata() {
-        let expr = parse_expression_from_source("subject is provider().pattern()");
-        match expr {
-            Expression::Binary { metadata, .. } => {
-                let Some(is_test) = metadata.is_test else {
-                    panic!("expected is-test metadata for pattern expression");
-                };
-                assert!(matches!(is_test.kind, IsTestKind::PatternExpression));
-                assert!(is_test.regex.is_none());
-                assert!(
-                    is_test.pattern_expr.is_some(),
-                    "パターン式が保存されていません"
-                );
-            }
-            other => panic!("expected binary expression, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn tuple_literal_with_whitespace_separators_parses() {
-        let expr = parse_expression_from_source("(left right)");
-        match expr {
-            Expression::Tuple {
-                elements, fields, ..
-            } => {
-                assert_eq!(elements.len(), 2);
-                assert_eq!(fields.len(), 2);
-                assert!(matches!(elements[0], Expression::Identifier(_, _)));
-                assert!(matches!(elements[1], Expression::Identifier(_, _)));
-            }
-            other => panic!("expected tuple literal, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn regex_command_without_explicit_mode_defaults_to_match() {
-        let expr = parse_expression_from_tokens(vec![
-            divide_token(),
-            identifier_token("text"),
-            regex_literal_token("/\\d+/", "\\d+"),
-        ]);
-        match expr {
-            Expression::RegexCommand(command) => {
-                assert_eq!(command.mode, RegexCommandMode::Match);
-                assert!(command.replacement.is_none());
-                assert!(command.flags.is_empty());
-                assert!(matches!(
-                    command.mode_origin,
-                    RegexCommandModeOrigin::DefaultMatch
-                ));
-            }
-            other => panic!("expected regex command expression, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn tuple_literal_spanning_multiple_lines_parses() {
-        let expr = parse_expression_from_source("(alpha\n beta\n gamma)");
-        match expr {
-            Expression::Tuple {
-                elements, fields, ..
-            } => {
-                assert_eq!(elements.len(), 3);
-                assert_eq!(fields.len(), 3);
-            }
-            other => panic!("expected tuple literal across lines, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn regex_command_with_replacement_defaults_to_all() {
-        let expr = parse_expression_from_tokens(vec![
-            divide_token(),
-            identifier_token("text"),
-            regex_literal_token("/\\d+/", "\\d+"),
-            divide_token(),
-            divide_token(),
-        ]);
-        match expr {
-            Expression::RegexCommand(command) => {
-                assert_eq!(command.mode, RegexCommandMode::All);
-                assert!(matches!(
-                    command.mode_origin,
-                    RegexCommandModeOrigin::DefaultReplacement
-                ));
-                let replacement = command
-                    .replacement
-                    .as_ref()
-                    .expect("replacement should exist for empty string");
-                match replacement {
-                    RegexReplacement::Literal(literal) => {
-                        assert!(literal.raw.is_empty());
-                        assert!(literal.template_segments.is_empty());
-                    }
-                    other => panic!("expected literal replacement, got {:?}", other),
-                }
-            }
-            other => panic!("expected regex command expression, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parenthesized_single_expression_does_not_become_tuple() {
-        let expr = parse_expression_from_source("(value)");
-        assert!(
-            matches!(expr, Expression::Identifier(_, _)),
-            "single expression must remain grouping: {:?}",
-            expr
-        );
-    }
-
-    #[test]
-    fn tuple_literal_captures_comment_labels() {
-        let source = "(
-                left // quotient
-                right // remainder
-            )";
-        let expr = parse_expression_from_source(source);
-        match expr {
-            Expression::Tuple { fields, .. } => {
-                assert_eq!(fields.len(), 2);
-                assert_eq!(fields[0].primary_label.as_deref(), Some("quotient"));
-                assert_eq!(fields[0].identifier_hint.as_deref(), Some("left"));
-                assert_eq!(fields[0].fallback_index, 1);
-                assert_eq!(fields[1].primary_label.as_deref(), Some("remainder"));
-                assert_eq!(fields[1].identifier_hint.as_deref(), Some("right"));
-                assert_eq!(fields[1].fallback_index, 2);
-            }
-            other => panic!("expected tuple literal with metadata, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn regex_command_with_short_mode_and_flags_parses() {
-        let expr = parse_expression_from_tokens(vec![
-            identifier_token("a"),
-            divide_token(),
-            identifier_token("sub"),
-            regex_literal_token("/\\d+/", "\\d+"),
-            divide_token(),
-            string_token("X"),
-            divide_token(),
-            make_token(TokenType::Identifier("ims".into()), "ims"),
-        ]);
-        match expr {
-            Expression::RegexCommand(command) => {
-                assert_eq!(command.mode, RegexCommandMode::All);
-                assert!(matches!(
-                    command.mode_origin,
-                    RegexCommandModeOrigin::ShortMode
-                ));
-                assert_eq!(command.flags.len(), 3);
-            }
-            other => panic!("expected regex command expression, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn regex_command_short_mode_expression_parses() {
-        let expr = parse_expression_from_tokens(vec![
-            identifier_token("m"),
-            divide_token(),
-            identifier_token("text"),
-            regex_literal_token("/pattern/", "pattern"),
-        ]);
-        match expr {
-            Expression::RegexCommand(command) => {
-                assert!(
-                    matches!(command.mode, RegexCommandMode::Match),
-                    "短縮 `m/` は Match モードへ解決される想定です: {:?}",
-                    command.mode
-                );
-            }
-            other => panic!("expected regex command expression, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn regex_command_explicit_match_expression_parses() {
-        let expr = parse_expression_from_tokens(vec![
-            make_token(TokenType::LeftBracket, "["),
-            identifier_token("match"),
-            make_token(TokenType::RightBracket, "]"),
-            divide_token(),
-            identifier_token("text"),
-            regex_literal_token("/pattern/", "pattern"),
-        ]);
-        match expr {
-            Expression::RegexCommand(command) => {
-                assert!(
-                    matches!(command.mode, RegexCommandMode::Match),
-                    "`[match]` モードは Match として扱われる想定です: {:?}",
-                    command.mode
-                );
-            }
-            other => panic!("expected regex command expression, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn empty_tuple_literal_reports_error() {
-        let err = try_parse_expression_from_source("()").expect_err("expected parse error");
-        assert!(
-            err.message.contains("空のタプル"),
-            "unexpected error: {}",
-            err.message
-        );
-    }
 }
 
 mod expression_parser {
     use super::*;
-    use crate::syntax::TokenKind;
 
     #[derive(Debug)]
     #[allow(dead_code)]
@@ -1813,23 +1286,6 @@ mod expression_parser {
     }
 
     #[derive(Clone)]
-    enum ParsedMode {
-        Short(RegexCommandMode),
-        Explicit(RegexCommandMode),
-        ExplicitUnknown { raw: String, span: Span },
-    }
-
-    #[derive(Clone)]
-    struct RegexCommandSegments {
-        mode: Option<ParsedMode>,
-        subject_range: (usize, usize),
-        pattern_index: usize,
-        replacement_range: Option<(usize, usize)>,
-        flags_index: Option<usize>,
-        end_index: usize,
-    }
-
-    #[derive(Clone)]
     struct ParsedExpr {
         expr: Expression,
         start: usize,
@@ -1840,40 +1296,6 @@ mod expression_parser {
         fn span(&self) -> Span {
             expression_span(&self.expr)
         }
-    }
-
-    const STATEMENT_BOUNDARY_KINDS: &[TokenKind] = &[
-        TokenKind::Semicolon,
-        TokenKind::Newline,
-        TokenKind::RightBrace,
-        TokenKind::PackageKw,
-        TokenKind::ImportKw,
-        TokenKind::ValKw,
-        TokenKind::VarKw,
-        TokenKind::FunKw,
-        TokenKind::ClassKw,
-        TokenKind::DataKw,
-        TokenKind::WhenKw,
-        TokenKind::ForKw,
-        TokenKind::ReturnKw,
-        TokenKind::ThrowKw,
-        TokenKind::BreakKw,
-        TokenKind::ContinueKw,
-        TokenKind::UseKw,
-        TokenKind::DeferKw,
-        TokenKind::SpawnKw,
-        TokenKind::Eof,
-    ];
-
-    fn token_starts_new_statement(token: &Token) -> bool {
-        let kind = TokenKind::from_token(token);
-        if kind == TokenKind::RightBrace {
-            return false;
-        }
-        if token.leading_trivia.newlines > 0 && token.column == 1 {
-            return true;
-        }
-        STATEMENT_BOUNDARY_KINDS.contains(&kind)
     }
 
     #[derive(Clone, Copy)]
@@ -1904,88 +1326,6 @@ mod expression_parser {
                 pos: 0,
                 pending_type_arguments: None,
             }
-        }
-
-        fn try_parse_regex_command(&mut self) -> Result<Option<ParsedExpr>, ExpressionError> {
-            let start = self.pos;
-            let segments = match detect_regex_command_segments(self.tokens, start)? {
-                Some(segments) => segments,
-                None => return Ok(None),
-            };
-
-            let subject_tokens = &self.tokens[segments.subject_range.0..segments.subject_range.1];
-            let subject_expr = parse_expression(subject_tokens)?;
-
-            let pattern_token = self.tokens[segments.pattern_index];
-            let pattern_span = span_from_token(pattern_token);
-            let mut regex_literal = build_regex_literal(pattern_token, pattern_span.clone())?;
-
-            let replacement = if let Some(range) = segments.replacement_range.clone() {
-                Some(self.parse_regex_replacement(range)?)
-            } else {
-                None
-            };
-
-            let (flags, raw_flags) = if let Some(idx) = segments.flags_index {
-                let (flags, raw) = parse_regex_flags(self.tokens[idx]);
-                (flags, Some(raw))
-            } else {
-                (Vec::new(), None)
-            };
-
-            let (mode, origin) = match segments.mode {
-                Some(ParsedMode::Short(mode)) => (mode, RegexCommandModeOrigin::ShortMode),
-                Some(ParsedMode::Explicit(mode)) => (mode, RegexCommandModeOrigin::ExplicitToken),
-                Some(ParsedMode::ExplicitUnknown { raw, span }) => {
-                    return Err(ExpressionError::new(
-                        format!("未知の正規表現モード `{raw}` です"),
-                        Some(span),
-                    ));
-                }
-                None => {
-                    if segments.replacement_range.is_some() {
-                        (
-                            RegexCommandMode::All,
-                            RegexCommandModeOrigin::DefaultReplacement,
-                        )
-                    } else {
-                        (
-                            RegexCommandMode::Match,
-                            RegexCommandModeOrigin::DefaultMatch,
-                        )
-                    }
-                }
-            };
-
-            let start_span = span_from_token(self.tokens[start]);
-            let end_index = segments
-                .end_index
-                .saturating_sub(1)
-                .min(self.tokens.len().saturating_sub(1));
-            let end_span = span_from_token(self.tokens[end_index]);
-            let span = merge_spans(&start_span, &end_span);
-
-            regex_literal.origin = Some(PatternOrigin::command(span.clone()));
-
-            let command = RegexCommand {
-                mode,
-                mode_origin: origin,
-                subject: Box::new(subject_expr),
-                pattern: regex_literal,
-                pattern_expr: None,
-                replacement,
-                flags,
-                raw_flags,
-                span: span.clone(),
-            };
-
-            self.pos = segments.end_index;
-
-            Ok(Some(ParsedExpr {
-                expr: Expression::RegexCommand(Box::new(command)),
-                start,
-                end: segments.end_index,
-            }))
         }
 
         fn parse_expression_bp(&mut self, min_prec: u8) -> Result<ParsedExpr, ExpressionError> {
@@ -2027,103 +1367,6 @@ mod expression_parser {
             Ok(left)
         }
 
-        fn parse_regex_replacement(
-            &self,
-            range: (usize, usize),
-        ) -> Result<RegexReplacement, ExpressionError> {
-            let (start, end) = range;
-            if start >= end {
-                let anchor_index = start
-                    .saturating_sub(1)
-                    .min(self.tokens.len().saturating_sub(1));
-                let span = span_from_token(self.tokens[anchor_index]);
-                return Ok(RegexReplacement::Literal(RegexLiteralReplacement {
-                    raw: String::new(),
-                    normalized: String::new(),
-                    template_segments: Vec::new(),
-                    span,
-                }));
-            }
-
-            let slice = &self.tokens[start..end];
-            if slice.len() == 1
-                && matches!(
-                    slice[0].token_type,
-                    TokenType::String(_) | TokenType::StringInterpolation(_)
-                )
-            {
-                let token = slice[0];
-                let span = span_from_token(token);
-                let literal = build_regex_literal_replacement(token, span)?;
-                return Ok(RegexReplacement::Literal(literal));
-            }
-
-            if slice.len() >= 3
-                && TokenKind::from_token(slice[0]) == TokenKind::Unknown
-                && slice[0].lexeme == "$"
-                && TokenKind::from_token(slice[1]) == TokenKind::LeftBrace
-            {
-                let mut depth = 1usize;
-                let mut idx = 2usize;
-                while idx < slice.len() {
-                    match TokenKind::from_token(slice[idx]) {
-                        TokenKind::LeftBrace => depth = depth.saturating_add(1),
-                        TokenKind::RightBrace => {
-                            depth = depth.saturating_sub(1);
-                            if depth == 0 {
-                                let body_tokens = &slice[2..idx];
-                                let body_expr = if body_tokens.is_empty() {
-                                    Expression::Literal(
-                                        Literal::String(String::new()),
-                                        span_from_token(slice[idx]),
-                                    )
-                                } else {
-                                    parse_expression(body_tokens)?
-                                };
-                                let lambda_span = merge_spans(
-                                    &span_from_token(slice[0]),
-                                    &span_from_token(slice[idx]),
-                                );
-                                let param = Parameter {
-                                    name: "it".to_string(),
-                                    type_annotation: None,
-                                    default_value: None,
-                                    modifiers: ParameterModifiers::default(),
-                                    span: span_from_token(slice[0]),
-                                };
-                                return Ok(RegexReplacement::Lambda(RegexLambdaReplacement {
-                                    params: vec![param],
-                                    body: Box::new(body_expr),
-                                    span: lambda_span,
-                                }));
-                            }
-                        }
-                        _ => {}
-                    }
-                    idx += 1;
-                }
-
-                return Err(ExpressionError::new(
-                    "`${...}` 形式の置換が閉じられていません",
-                    Some(span_from_token(slice[0])),
-                ));
-            }
-
-            let expr = parse_expression(slice)?;
-            match expr.clone() {
-                Expression::Lambda {
-                    parameters,
-                    body,
-                    span,
-                } => Ok(RegexReplacement::Lambda(RegexLambdaReplacement {
-                    params: parameters,
-                    body,
-                    span,
-                })),
-                _ => Ok(RegexReplacement::Expression(expr)),
-            }
-        }
-
         fn consume_postfix_if_any(
             &mut self,
             mut expr: ParsedExpr,
@@ -2132,17 +1375,7 @@ mod expression_parser {
                 expr = self.parse_postfix(expr, kind)?;
             }
 
-            while let Some(token) = self.peek_token() {
-                let kind = TokenKind::from_token(token);
-                if kind.is_trivia() {
-                    self.pos += 1;
-                    continue;
-                }
-
-                if STATEMENT_BOUNDARY_KINDS.contains(&kind) {
-                    return Ok(expr.expr);
-                }
-
+            if self.peek_token().is_some() {
                 let span = self.span_at(self.pos);
                 return Err(ExpressionError::new(
                     "式の末尾に解釈できないトークンがあります",
@@ -2154,10 +1387,6 @@ mod expression_parser {
         }
 
         fn parse_prefix(&mut self) -> Result<ParsedExpr, ExpressionError> {
-            if let Some(regex_expr) = self.try_parse_regex_command()? {
-                return Ok(regex_expr);
-            }
-
             let Some((token, index)) = self.peek_with_index() else {
                 return Err(ExpressionError::new("式が必要です", None));
             };
@@ -2220,16 +1449,6 @@ mod expression_parser {
                 }
                 TokenType::LeftBracket => self.parse_array_expression(index),
                 TokenType::When => self.parse_when_expression(),
-                TokenType::Log
-                | TokenType::Trace
-                | TokenType::Debug
-                | TokenType::Info
-                | TokenType::Warn
-                | TokenType::Error => {
-                    let level = log_level_from_token_kind(&token.token_type)
-                        .expect("log keyword should map to level");
-                    self.parse_log_block_expression(level, index)
-                }
                 _ => self.parse_primary(),
             }
         }
@@ -2324,24 +1543,10 @@ mod expression_parser {
                         end: index + 1,
                     })
                 }
-                TokenType::RegexLiteral(_) => {
-                    let span = span_from_token(token);
-                    let mut literal = build_regex_literal(token, span.clone())?;
-                    literal.origin = Some(PatternOrigin::literal(span.clone()));
-                    Ok(ParsedExpr {
-                        expr: Expression::RegexLiteral(literal),
-                        start: index,
-                        end: index + 1,
-                    })
-                }
                 TokenType::LeftParen => {
                     let close_index = self.find_matching_paren(index).ok_or_else(|| {
                         ExpressionError::new("')' が必要です", self.span_at(index))
                     })?;
-                    if let Some(tuple_expr) = self.try_parse_tuple_literal(index, close_index)? {
-                        self.pos = close_index + 1;
-                        return Ok(tuple_expr);
-                    }
                     let inner_tokens = &self.tokens[index + 1..close_index];
                     let expr = Self::parse_nested_expression(inner_tokens)?;
                     self.pos = close_index + 1;
@@ -2539,339 +1744,6 @@ mod expression_parser {
                 start: start_index,
                 end: closing_index + 1,
             })
-        }
-
-        fn parse_log_block_expression(
-            &mut self,
-            level: LogBlockLevel,
-            keyword_index: usize,
-        ) -> Result<ParsedExpr, ExpressionError> {
-            if self.pos < keyword_index + 1 {
-                self.pos = keyword_index + 1;
-            }
-
-            while matches!(
-                self.peek_token().map(|token| &token.token_type),
-                Some(TokenType::LayoutComma)
-            ) {
-                self.pos += 1;
-            }
-
-            let brace_index = self.pos;
-            let brace_token = self.peek_token().ok_or_else(|| {
-                ExpressionError::new("ログブロックには '{' が必要です", self.span_at(brace_index))
-            })?;
-            if brace_token.token_type != TokenType::LeftBrace {
-                return Err(ExpressionError::new(
-                    "ログブロックには '{' が必要です",
-                    Some(span_from_token(brace_token)),
-                ));
-            }
-
-            let closing_index = self.find_matching_brace(brace_index).ok_or_else(|| {
-                ExpressionError::new(
-                    "ログブロックが閉じられていません",
-                    self.span_at(brace_index),
-                )
-            })?;
-            let body_tokens = &self.tokens[brace_index + 1..closing_index];
-            let items = self.parse_log_block_items(body_tokens, brace_index + 1)?;
-            let span = span_for_range(self.tokens, keyword_index, closing_index + 1);
-            self.pos = closing_index + 1;
-
-            Ok(ParsedExpr {
-                expr: Expression::LogBlock(LogBlock {
-                    level,
-                    items,
-                    span: span.clone(),
-                }),
-                start: keyword_index,
-                end: closing_index + 1,
-            })
-        }
-
-        fn parse_log_block_items(
-            &mut self,
-            tokens: &[&'a Token],
-            absolute_start: usize,
-        ) -> Result<Vec<LogItem>, ExpressionError> {
-            if tokens.is_empty() {
-                return Ok(Vec::new());
-            }
-
-            let ranges = Self::split_lambda_body_statements(tokens);
-            if ranges.is_empty() {
-                return Ok(Vec::new());
-            }
-
-            let mut items = Vec::new();
-            for (rel_start, rel_end) in ranges {
-                if rel_start >= rel_end {
-                    continue;
-                }
-                let slice = &tokens[rel_start..rel_end];
-                let statement = self.parse_lambda_statement(slice, absolute_start + rel_start)?;
-                match statement {
-                    Statement::Expression { expr, .. } => match expr {
-                        Expression::LogBlock(block) => items.push(LogItem::Nested(block)),
-                        other => items.push(LogItem::Expression(other)),
-                    },
-                    other => items.push(LogItem::Statement(other)),
-                }
-            }
-
-            Ok(items)
-        }
-
-        fn try_parse_tuple_literal(
-            &mut self,
-            open_index: usize,
-            close_index: usize,
-        ) -> Result<Option<ParsedExpr>, ExpressionError> {
-            let inner = &self.tokens[open_index + 1..close_index];
-            if inner.is_empty()
-                || inner
-                    .iter()
-                    .all(|token| Self::is_tuple_separator_or_trivia(token))
-            {
-                let span = span_for_range(self.tokens, open_index, close_index + 1);
-                return Err(ExpressionError::new(
-                    "空のタプルや句読点のみのタプルリテラルはサポートされません",
-                    Some(span),
-                ));
-            }
-
-            let slices = Self::tuple_candidate_parts(inner);
-            let mut elements = Vec::new();
-            let mut field_meta = Vec::new();
-            let mut fallback_counter = 0usize;
-            let mut leading_labels: Vec<&FieldNameLabelToken> = Vec::new();
-
-            for slice in slices.iter() {
-                let (labels, filtered) = Self::partition_tuple_slice_tokens(slice);
-                if filtered.is_empty() {
-                    if !labels.is_empty() {
-                        if field_meta.is_empty() {
-                            leading_labels.extend(labels);
-                        } else if let Some(last) = field_meta.last_mut() {
-                            Self::merge_labels_into_meta(last, &labels);
-                        }
-                    }
-                    continue;
-                }
-
-                let mut effective_labels: Vec<&FieldNameLabelToken> = Vec::new();
-                if !leading_labels.is_empty() {
-                    effective_labels.extend(leading_labels.drain(..));
-                }
-                effective_labels.extend(labels);
-
-                let parsed = Self::parse_nested_expression(filtered.as_slice())?;
-                let element_span = parsed.span();
-                let ParsedExpr {
-                    expr: element_expr, ..
-                } = parsed;
-                let identifier_hint = match &element_expr {
-                    Expression::Identifier(name, _) => Some(name.clone()),
-                    _ => None,
-                };
-                let (primary_label, secondary_labels) =
-                    Self::collect_tuple_labels(&effective_labels);
-
-                fallback_counter += 1;
-                let meta = TupleFieldMeta {
-                    primary_label,
-                    secondary_labels,
-                    identifier_hint,
-                    fallback_index: fallback_counter,
-                    span: element_span.clone(),
-                };
-
-                field_meta.push(meta);
-                elements.push(element_expr);
-            }
-
-            if elements.is_empty() {
-                let span = span_for_range(self.tokens, open_index, close_index + 1);
-                return Err(ExpressionError::new(
-                    "タプル要素を解析できませんでした。少なくとも1つの式を記述してください",
-                    Some(span),
-                ));
-            }
-
-            if elements.len() < 2 {
-                return Ok(None);
-            }
-
-            let span = span_for_range(self.tokens, open_index, close_index + 1);
-            let expr = Expression::Tuple {
-                elements,
-                fields: field_meta,
-                context: TupleContextFlags::default(),
-                span: span.clone(),
-            };
-
-            Ok(Some(ParsedExpr {
-                expr,
-                start: open_index,
-                end: close_index + 1,
-            }))
-        }
-
-        fn tuple_candidate_parts<'slice>(
-            tokens: &'slice [&'slice Token],
-        ) -> Vec<&'slice [&'slice Token]> {
-            if tokens.is_empty() {
-                return Vec::new();
-            }
-
-            let mut parts = Vec::new();
-            let mut start = 0usize;
-            let mut depth_paren = 0usize;
-            let mut depth_brace = 0usize;
-            let mut depth_bracket = 0usize;
-
-            for (offset, token) in tokens.iter().enumerate() {
-                let at_top_level = depth_paren == 0 && depth_brace == 0 && depth_bracket == 0;
-
-                if at_top_level
-                    && has_layout_break(token)
-                    && !matches!(token.token_type, TokenType::Comma | TokenType::LayoutComma)
-                    && start < offset
-                {
-                    parts.push(&tokens[start..offset]);
-                    start = offset;
-                } else if at_top_level
-                    && start < offset
-                    && token.leading_trivia.newlines == 0
-                    && token.leading_trivia.spaces > 0
-                {
-                    if let Some(prev_token) = tokens.get(offset - 1) {
-                        if !token_requires_followup(&prev_token.token_type) {
-                            parts.push(&tokens[start..offset]);
-                            start = offset;
-                            continue;
-                        }
-                    }
-                }
-
-                match token.token_type {
-                    TokenType::LeftParen => depth_paren += 1,
-                    TokenType::RightParen if depth_paren > 0 => depth_paren -= 1,
-                    TokenType::LeftBrace => depth_brace += 1,
-                    TokenType::RightBrace if depth_brace > 0 => depth_brace -= 1,
-                    TokenType::LeftBracket => depth_bracket += 1,
-                    TokenType::RightBracket if depth_bracket > 0 => depth_bracket -= 1,
-                    TokenType::Comma | TokenType::LayoutComma if at_top_level => {
-                        if start != offset {
-                            parts.push(&tokens[start..offset]);
-                        }
-                        start = offset + 1;
-                        continue;
-                    }
-                    _ => {}
-                }
-            }
-
-            if start < tokens.len() {
-                parts.push(&tokens[start..]);
-            }
-
-            parts
-        }
-
-        fn is_tuple_separator_or_trivia(token: &Token) -> bool {
-            is_expression_trivia(token)
-                || matches!(token.token_type, TokenType::LayoutComma | TokenType::Comma)
-        }
-
-        fn partition_tuple_slice_tokens<'slice>(
-            slice: &'slice [&'slice Token],
-        ) -> (Vec<&'slice FieldNameLabelToken>, Vec<&'slice Token>) {
-            let mut labels = Vec::new();
-            let mut filtered = Vec::new();
-
-            for token in slice.iter().copied() {
-                if let TokenType::FieldNameLabel(payload) = &token.token_type {
-                    labels.push(payload);
-                    continue;
-                }
-
-                if Self::is_tuple_separator_or_trivia(token) {
-                    continue;
-                }
-
-                filtered.push(token);
-            }
-
-            (labels, filtered)
-        }
-
-        fn collect_tuple_labels(
-            labels: &[&FieldNameLabelToken],
-        ) -> (Option<String>, Vec<TupleLabelSpan>) {
-            let mut primary_label: Option<String> = None;
-            let mut secondary = Vec::new();
-
-            for (idx, label) in labels.iter().enumerate() {
-                if idx == 0 {
-                    if let Some(value) = &label.primary {
-                        primary_label = Some(value.clone());
-                    }
-                    Self::push_secondary_labels(&mut secondary, label.secondary.iter());
-                } else {
-                    if let Some(primary_span) = label.primary_span.as_ref() {
-                        secondary.push(Self::convert_label_span(primary_span));
-                    } else if let Some(value) = &label.primary {
-                        secondary.push(Self::virtual_label_from_text(value));
-                    }
-                    Self::push_secondary_labels(&mut secondary, label.secondary.iter());
-                }
-            }
-
-            (primary_label, secondary)
-        }
-
-        fn merge_labels_into_meta(meta: &mut TupleFieldMeta, labels: &[&FieldNameLabelToken]) {
-            if labels.is_empty() {
-                return;
-            }
-
-            let (primary_label, mut secondary_labels) = Self::collect_tuple_labels(labels);
-            if let Some(label) = primary_label {
-                if meta.primary_label.is_none() {
-                    meta.primary_label = Some(label);
-                } else {
-                    meta.secondary_labels
-                        .push(Self::virtual_label_from_text(&label));
-                }
-            }
-
-            meta.secondary_labels.append(&mut secondary_labels);
-        }
-
-        fn push_secondary_labels<'label>(
-            target: &mut Vec<TupleLabelSpan>,
-            spans: impl IntoIterator<Item = &'label LexerLabelSpan>,
-        ) {
-            for span in spans {
-                target.push(Self::convert_label_span(span));
-            }
-        }
-
-        fn convert_label_span(label: &LexerLabelSpan) -> TupleLabelSpan {
-            let end_column = label.column + label.length;
-            TupleLabelSpan {
-                name: label.name.clone(),
-                span: Span::new(label.line, label.column, label.line, end_column),
-            }
-        }
-
-        fn virtual_label_from_text(name: &str) -> TupleLabelSpan {
-            TupleLabelSpan {
-                name: name.to_string(),
-                span: Span::dummy(),
-            }
         }
 
         fn parse_brace_expression(&mut self) -> Result<ParsedExpr, ExpressionError> {
@@ -3336,12 +2208,7 @@ mod expression_parser {
                             self.span_at(self.pos),
                         ));
                     }
-                    let body_expr = match parsed_body.expr {
-                        Expression::Lambda {
-                            parameters, body, ..
-                        } if parameters.is_empty() => *body,
-                        other => other,
-                    };
+                    let body_expr = parsed_body.expr;
                     else_arm = Some(body_expr);
                     self.pos += parsed_body.end;
                     while self.pos < closing_index
@@ -3424,12 +2291,7 @@ mod expression_parser {
                         self.span_at(self.pos),
                     ));
                 }
-                let body_expr = match parsed_body.expr {
-                    Expression::Lambda {
-                        parameters, body, ..
-                    } if parameters.is_empty() => *body,
-                    other => other,
-                };
+                let body_expr = parsed_body.expr;
                 let body_end = self.pos + parsed_body.end;
                 let body_span = expression_span(&body_expr);
                 let arm_span = merge_spans(&pattern_span, &body_span);
@@ -3633,7 +2495,6 @@ mod expression_parser {
                             op: BinaryOp::RangeExclusive,
                             right,
                             span,
-                            ..
                         } => Ok(Pattern::Range {
                             start: left,
                             end: right,
@@ -3645,7 +2506,6 @@ mod expression_parser {
                             op: BinaryOp::RangeInclusive,
                             right,
                             span,
-                            ..
                         } => Ok(Pattern::Range {
                             start: left,
                             end: right,
@@ -3680,8 +2540,7 @@ mod expression_parser {
                 }
                 TokenType::RegexLiteral(_) => {
                     let span = span_from_token(first);
-                    let mut literal = build_regex_literal(first, span.clone())?;
-                    literal.origin = Some(PatternOrigin::literal(span.clone()));
+                    let literal = regex_literal_from_token(first, span.clone());
                     let literal_span = literal.span.clone();
                     Ok(Pattern::Literal(Literal::Regex(literal), literal_span))
                 }
@@ -3910,7 +2769,6 @@ mod expression_parser {
             let (token, name_index) = self.advance_with_index_or_error("メンバー名が必要です")?;
             let property = match &token.token_type {
                 TokenType::Identifier(value) => value.clone(),
-                TokenType::ImplicitParam(index) => format!("_{}", index),
                 _ => {
                     return Err(ExpressionError::new(
                         "メンバーアクセスには識別子が必要です",
@@ -3940,7 +2798,6 @@ mod expression_parser {
             let (token, name_index) = self.advance_with_index_or_error("メンバー名が必要です")?;
             let property = match &token.token_type {
                 TokenType::Identifier(value) => value.clone(),
-                TokenType::ImplicitParam(index) => format!("_{}", index),
                 _ => {
                     return Err(ExpressionError::new(
                         "メンバーアクセスには識別子が必要です",
@@ -4075,8 +2932,7 @@ mod expression_parser {
                     | TokenType::LayoutComma
                     | TokenType::LineComment(_)
                     | TokenType::BlockComment(_)
-                    | TokenType::JavaDocComment(_)
-                    | TokenType::FieldNameLabel(_) => self.pos += 1,
+                    | TokenType::JavaDocComment(_) => self.pos += 1,
                     _ => break,
                 }
             }
@@ -4580,20 +3436,11 @@ mod expression_parser {
                 }
             }
 
-            let metadata = if matches!(op, BinaryOp::Is) {
-                BinaryMetadata {
-                    is_test: detect_is_test_metadata(&right.expr, &span),
-                }
-            } else {
-                BinaryMetadata::default()
-            };
-
             let expr = Expression::Binary {
                 left: Box::new(left.expr),
                 op,
                 right: Box::new(right.expr),
                 span: span.clone(),
-                metadata,
             };
             Ok(ParsedExpr {
                 expr,
@@ -4729,8 +3576,7 @@ mod expression_parser {
                     | TokenType::LayoutComma
                     | TokenType::LineComment(_)
                     | TokenType::BlockComment(_)
-                    | TokenType::JavaDocComment(_)
-                    | TokenType::FieldNameLabel(_) => idx += 1,
+                    | TokenType::JavaDocComment(_) => idx += 1,
                     _ => return Some(&token.token_type),
                 }
             }
@@ -4738,37 +3584,13 @@ mod expression_parser {
         }
 
         fn peek_is_as_keyword(&self) -> bool {
-            let mut index = self.pos;
-            while let Some(token) = self.tokens.get(index) {
-                match &token.token_type {
-                    TokenType::Whitespace(_)
-                    | TokenType::Newline
-                    | TokenType::LayoutComma
-                    | TokenType::LineComment(_)
-                    | TokenType::BlockComment(_)
-                    | TokenType::JavaDocComment(_)
-                    | TokenType::FieldNameLabel(_) => index += 1,
-                    TokenType::Identifier(text) if text == "as" => return true,
-                    _ => return false,
-                }
-            }
-            false
+            matches!(
+                self.peek_token().map(|token| &token.token_type),
+                Some(TokenType::Identifier(text)) if text == "as"
+            )
         }
 
         fn parse_type_cast(&mut self, left: ParsedExpr) -> Result<ParsedExpr, ExpressionError> {
-            while let Some(token) = self.tokens.get(self.pos) {
-                match token.token_type {
-                    TokenType::Whitespace(_)
-                    | TokenType::Newline
-                    | TokenType::LayoutComma
-                    | TokenType::LineComment(_)
-                    | TokenType::BlockComment(_)
-                    | TokenType::JavaDocComment(_)
-                    | TokenType::FieldNameLabel(_) => self.pos += 1,
-                    _ => break,
-                }
-            }
-
             let (as_token, _as_index) = self.advance_with_index_or_error("`as` が必要です")?;
             let as_span = span_from_token(as_token);
 
@@ -4779,8 +3601,7 @@ mod expression_parser {
                     | TokenType::LayoutComma
                     | TokenType::LineComment(_)
                     | TokenType::BlockComment(_)
-                    | TokenType::JavaDocComment(_)
-                    | TokenType::FieldNameLabel(_) => self.pos += 1,
+                    | TokenType::JavaDocComment(_) => self.pos += 1,
                     _ => break,
                 }
             }
@@ -5209,15 +4030,7 @@ mod expression_parser {
 
         if let Some(metadata) = string_literal_metadata(token) {
             if let Some(kind) = multiline_kind_from_metadata(metadata) {
-                let normalized = raw.clone();
-                let literal = build_multiline_literal(
-                    kind,
-                    normalized,
-                    raw_lexeme_from_metadata(token, Some(metadata)),
-                    parts,
-                    span.clone(),
-                    Some(metadata),
-                );
+                let literal = build_multiline_literal(kind, raw, parts, span.clone());
                 return Ok((Expression::MultilineString(literal), token_consumption));
             }
         }
@@ -5276,432 +4089,17 @@ mod expression_parser {
 
     fn build_multiline_literal(
         kind: MultilineKind,
-        normalized: String,
         raw: String,
         parts: Vec<StringPart>,
         span: Span,
-        metadata: Option<&StringLiteralMetadata>,
     ) -> MultilineStringLiteral {
         MultilineStringLiteral {
             kind,
-            normalized,
+            normalized: raw.clone(),
             raw,
             parts,
             indent: None,
-            raw_flavor: metadata.and_then(raw_flavor_from_metadata),
             span,
-        }
-    }
-
-    fn raw_flavor_from_metadata(_metadata: &StringLiteralMetadata) -> Option<RawStringFlavor> {
-        None
-    }
-
-    fn raw_lexeme_from_metadata(
-        token: &Token,
-        _metadata: Option<&StringLiteralMetadata>,
-    ) -> String {
-        token.lexeme.clone()
-    }
-
-    fn detect_regex_command_segments(
-        tokens: &[&Token],
-        start: usize,
-    ) -> Result<Option<RegexCommandSegments>, ExpressionError> {
-        let len = tokens.len();
-        if start >= len {
-            return Ok(None);
-        }
-
-        let mut idx = start;
-        let mut mode = None;
-
-        if let Some(short_mode) = parse_short_mode_token(tokens[idx]) {
-            mode = Some(ParsedMode::Short(short_mode));
-            idx += 1;
-        } else if let Some((parsed_mode, next_idx)) = parse_explicit_mode(tokens, idx)? {
-            mode = Some(parsed_mode);
-            idx = next_idx;
-        } else if !matches!(tokens[idx].token_type, TokenType::Divide) {
-            return Ok(None);
-        }
-
-        if idx >= len || !matches!(tokens[idx].token_type, TokenType::Divide) {
-            return Ok(None);
-        }
-
-        idx += 1;
-        if idx >= len {
-            return Ok(None);
-        }
-
-        let subject_start = idx;
-        let mut pattern_index = None;
-
-        while idx < len {
-            if matches!(tokens[idx].token_type, TokenType::RegexLiteral(_)) {
-                pattern_index = Some(idx);
-                break;
-            }
-            idx += 1;
-        }
-
-        let Some(pattern_index) = pattern_index else {
-            return Ok(None);
-        };
-
-        if subject_start == pattern_index {
-            return Ok(None);
-        }
-
-        let mut end_index = pattern_index + 1;
-        let mut replacement_range = None;
-        let mut flags_index = None;
-        let boundary_due_to_layout = |index: usize| -> bool {
-            if index >= len {
-                return false;
-            }
-            let token = tokens[index];
-            if token.leading_trivia.newlines > 0 && token.column == 1 {
-                let next_is_slash =
-                    index + 1 < len && matches!(tokens[index + 1].token_type, TokenType::Divide);
-                return !next_is_slash;
-            }
-            false
-        };
-
-        if end_index < len && matches!(tokens[end_index].token_type, TokenType::Divide) {
-            end_index += 1;
-            let mut paren_depth = 0usize;
-            let mut brace_depth = 0usize;
-            let mut bracket_depth = 0usize;
-            let replacement_start = end_index;
-            let mut ended_by_closing_slash = false;
-
-            while end_index < len {
-                let kind = TokenKind::from_token(tokens[end_index]);
-                if boundary_due_to_layout(end_index)
-                    || token_starts_new_statement(tokens[end_index])
-                {
-                    break;
-                }
-
-                match kind {
-                    TokenKind::LeftParen => paren_depth += 1,
-                    TokenKind::RightParen => {
-                        if paren_depth == 0 {
-                            break;
-                        }
-                        paren_depth -= 1;
-                    }
-                    TokenKind::LeftBrace => brace_depth += 1,
-                    TokenKind::RightBrace => {
-                        if brace_depth == 0 {
-                            break;
-                        }
-                        brace_depth -= 1;
-                    }
-                    TokenKind::LeftBracket => bracket_depth += 1,
-                    TokenKind::RightBracket => {
-                        if bracket_depth == 0 {
-                            break;
-                        }
-                        bracket_depth -= 1;
-                    }
-                    TokenKind::Slash
-                        if paren_depth == 0 && brace_depth == 0 && bracket_depth == 0 =>
-                    {
-                        ended_by_closing_slash = true;
-                        break;
-                    }
-                    _ => {}
-                }
-
-                end_index += 1;
-            }
-
-            if ended_by_closing_slash {
-                if replacement_start < end_index {
-                    replacement_range = Some((replacement_start, end_index));
-                } else if replacement_start == end_index {
-                    replacement_range = Some((replacement_start, replacement_start));
-                }
-                end_index += 1;
-                if end_index < len
-                    && !boundary_due_to_layout(end_index)
-                    && !token_starts_new_statement(tokens[end_index])
-                    && extract_flag_string(tokens[end_index]).is_some()
-                {
-                    flags_index = Some(end_index);
-                    end_index += 1;
-                }
-            }
-        }
-
-        Ok(Some(RegexCommandSegments {
-            mode,
-            subject_range: (subject_start, pattern_index),
-            pattern_index,
-            replacement_range,
-            flags_index,
-            end_index,
-        }))
-    }
-
-    fn parse_short_mode_token(token: &Token) -> Option<RegexCommandMode> {
-        match &token.token_type {
-            TokenType::Identifier(value) if value.len() == 1 => match value.as_bytes()[0] {
-                b'a' | b'A' => Some(RegexCommandMode::All),
-                b'f' | b'F' => Some(RegexCommandMode::First),
-                b'm' | b'M' => Some(RegexCommandMode::Match),
-                b's' | b'S' => Some(RegexCommandMode::Split),
-                b'i' | b'I' => Some(RegexCommandMode::Iterate),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-
-    fn parse_explicit_mode(
-        tokens: &[&Token],
-        start: usize,
-    ) -> Result<Option<(ParsedMode, usize)>, ExpressionError> {
-        let len = tokens.len();
-        if start >= len || !matches!(tokens[start].token_type, TokenType::LeftBracket) {
-            return Ok(None);
-        }
-
-        let mut idx = start + 1;
-        let mut buffer = String::new();
-
-        while idx < len {
-            match &tokens[idx].token_type {
-                TokenType::RightBracket => break,
-                TokenType::Identifier(value) => buffer.push_str(value),
-                TokenType::Minus => buffer.push('-'),
-                TokenType::String(value) | TokenType::StringInterpolation(value) => {
-                    buffer.push_str(value)
-                }
-                TokenType::Number(value) => buffer.push_str(value),
-                TokenType::Dot => buffer.push('.'),
-                _ => buffer.push_str(&tokens[idx].lexeme),
-            }
-            idx += 1;
-        }
-
-        if idx >= len || !matches!(tokens[idx].token_type, TokenType::RightBracket) {
-            let span = span_from_token(tokens[start]);
-            return Err(ExpressionError::new(
-                "`[` で始まるモード指定が閉じられていません",
-                Some(span),
-            ));
-        }
-
-        let raw = buffer.trim().to_string();
-        let normalized = buffer
-            .replace(|c: char| c == '-' || c == '_' || c == ' ', "")
-            .to_lowercase();
-        let span = span_from_token(tokens[start]);
-        let parsed_mode = match normalized.as_str() {
-            "replace" | "replaceall" | "all" => ParsedMode::Explicit(RegexCommandMode::All),
-            "first" | "replacefirst" => ParsedMode::Explicit(RegexCommandMode::First),
-            "match" | "matches" => ParsedMode::Explicit(RegexCommandMode::Match),
-            "split" => ParsedMode::Explicit(RegexCommandMode::Split),
-            "iterate" | "results" => ParsedMode::Explicit(RegexCommandMode::Iterate),
-            _ => ParsedMode::ExplicitUnknown { raw, span },
-        };
-
-        Ok(Some((parsed_mode, idx + 1)))
-    }
-
-    fn extract_flag_string(token: &Token) -> Option<String> {
-        let value = match &token.token_type {
-            TokenType::Identifier(value)
-            | TokenType::String(value)
-            | TokenType::StringInterpolation(value) => value.clone(),
-            _ => return None,
-        };
-
-        if value.chars().all(|ch| {
-            matches!(
-                ch,
-                'i' | 'I'
-                    | 'm'
-                    | 'M'
-                    | 's'
-                    | 'S'
-                    | 'u'
-                    | 'U'
-                    | 'd'
-                    | 'D'
-                    | 'x'
-                    | 'X'
-                    | 'l'
-                    | 'L'
-                    | 'c'
-                    | 'C'
-            )
-        }) {
-            Some(value)
-        } else {
-            None
-        }
-    }
-
-    fn parse_regex_flags(token: &Token) -> (Vec<RegexFlag>, String) {
-        let content = extract_flag_string(token).unwrap_or_else(|| match &token.token_type {
-            TokenType::Identifier(value)
-            | TokenType::String(value)
-            | TokenType::StringInterpolation(value) => value.clone(),
-            _ => token.lexeme.clone(),
-        });
-
-        let mut seen = Vec::new();
-        for ch in content.chars() {
-            let flag = match ch {
-                'i' | 'I' => Some(RegexFlag::CaseInsensitive),
-                'm' | 'M' => Some(RegexFlag::Multiline),
-                's' | 'S' => Some(RegexFlag::DotAll),
-                'u' | 'U' => Some(RegexFlag::UnicodeCase),
-                'd' | 'D' => Some(RegexFlag::UnixLines),
-                'x' | 'X' => Some(RegexFlag::Comments),
-                'l' | 'L' => Some(RegexFlag::Literal),
-                'c' | 'C' => Some(RegexFlag::CanonEq),
-                _ => None,
-            };
-            if let Some(flag) = flag {
-                if !seen.contains(&flag) {
-                    seen.push(flag);
-                }
-            }
-        }
-
-        (seen, content)
-    }
-
-    fn build_regex_literal(token: &Token, span: Span) -> Result<RegexLiteral, ExpressionError> {
-        let mut literal = regex_literal_from_token(token, span.clone());
-
-        let interpolation = token.metadata.iter().find_map(|meta| match meta {
-            TokenMetadata::StringInterpolation { segments } => Some(segments.clone()),
-            _ => None,
-        });
-
-        if let Some(segments) = interpolation {
-            let mut template_segments = Vec::new();
-            let mut aggregated = String::new();
-
-            for segment in segments {
-                match segment {
-                    StringInterpolationSegment::Literal(text) => {
-                        if !text.is_empty() {
-                            aggregated.push_str(&text);
-                            template_segments.push(RegexTemplateSegment::Text(text));
-                        }
-                    }
-                    StringInterpolationSegment::Expression(expr_source) => {
-                        let (expr, _) = parse_expression_from_text(&expr_source, span.clone())?;
-                        template_segments.push(RegexTemplateSegment::Expression(expr));
-                    }
-                }
-            }
-
-            if !template_segments.is_empty() {
-                literal.pattern = aggregated;
-                literal.template_segments = template_segments;
-            }
-        }
-
-        Ok(literal)
-    }
-
-    fn build_regex_literal_replacement(
-        token: &Token,
-        span: Span,
-    ) -> Result<RegexLiteralReplacement, ExpressionError> {
-        let metadata = string_literal_metadata(token);
-        let raw = raw_lexeme_from_metadata(token, metadata);
-        let normalized = match &token.token_type {
-            TokenType::String(value) | TokenType::StringInterpolation(value) => value.clone(),
-            _ => token.lexeme.clone(),
-        };
-
-        let interpolation_segments = token.metadata.iter().find_map(|meta| match meta {
-            TokenMetadata::StringInterpolation { segments } => Some(segments.clone()),
-            _ => None,
-        });
-
-        let mut template_segments = Vec::new();
-        let mut aggregated = String::new();
-
-        if let Some(segments) = interpolation_segments {
-            for segment in segments {
-                match segment {
-                    StringInterpolationSegment::Literal(text) => {
-                        append_literal_segments(&mut template_segments, &text);
-                        aggregated.push_str(&text);
-                    }
-                    StringInterpolationSegment::Expression(expr_source) => {
-                        let (expr, _) = parse_expression_from_text(&expr_source, span.clone())?;
-                        template_segments.push(RegexTemplateSegment::Expression(expr));
-                    }
-                }
-            }
-        } else {
-            append_literal_segments(&mut template_segments, &normalized);
-            aggregated.push_str(&normalized);
-        }
-
-        Ok(RegexLiteralReplacement {
-            raw,
-            normalized: aggregated,
-            template_segments,
-            span,
-        })
-    }
-
-    fn append_literal_segments(segments: &mut Vec<RegexTemplateSegment>, text: &str) {
-        if text.is_empty() {
-            return;
-        }
-
-        let mut buffer = String::new();
-        let mut chars = text.chars().peekable();
-        while let Some(ch) = chars.next() {
-            if ch == '$' {
-                if let Some(next) = chars.peek() {
-                    if next.is_ascii_digit() {
-                        if !buffer.is_empty() {
-                            segments.push(RegexTemplateSegment::Text(buffer.clone()));
-                            buffer.clear();
-                        }
-                        let mut digits = String::new();
-                        while let Some(digit) = chars.peek().cloned() {
-                            if digit.is_ascii_digit() {
-                                digits.push(digit);
-                                chars.next();
-                            } else {
-                                break;
-                            }
-                        }
-
-                        if digits.is_empty() {
-                            buffer.push('$');
-                        } else if let Ok(index) = digits.parse::<u32>() {
-                            segments.push(RegexTemplateSegment::BackReference(index));
-                        } else {
-                            buffer.push('$');
-                            buffer.push_str(&digits);
-                        }
-                        continue;
-                    }
-                }
-            }
-            buffer.push(ch);
-        }
-
-        if !buffer.is_empty() {
-            segments.push(RegexTemplateSegment::Text(buffer));
         }
     }
 
@@ -6061,8 +4459,7 @@ mod expression_parser {
                     | TokenType::Newline
                     | TokenType::LineComment(_)
                     | TokenType::BlockComment(_)
-                    | TokenType::JavaDocComment(_)
-                    | TokenType::FieldNameLabel(_) => self.pos += 1,
+                    | TokenType::JavaDocComment(_) => self.pos += 1,
                     _ => break,
                 }
             }
@@ -6102,68 +4499,6 @@ mod expression_parser {
             token
         }
     }
-}
-
-fn detect_is_test_metadata(right: &Expression, span: &Span) -> Option<IsTestMetadata> {
-    if let Some(literal) = extract_regex_literal(right) {
-        return Some(IsTestMetadata {
-            kind: IsTestKind::RegexLiteral,
-            regex: Some(literal),
-            pattern_expr: None,
-            diagnostics: Vec::new(),
-            guard_strategy: RegexGuardStrategy::None,
-            span: span.clone(),
-        });
-    }
-
-    if expression_looks_like_type_reference(right) {
-        return Some(IsTestMetadata {
-            kind: IsTestKind::Type,
-            regex: None,
-            pattern_expr: None,
-            diagnostics: Vec::new(),
-            guard_strategy: RegexGuardStrategy::None,
-            span: span.clone(),
-        });
-    }
-
-    Some(IsTestMetadata {
-        kind: IsTestKind::PatternExpression,
-        regex: None,
-        pattern_expr: Some(Box::new(right.clone())),
-        diagnostics: Vec::new(),
-        guard_strategy: RegexGuardStrategy::None,
-        span: span.clone(),
-    })
-}
-
-fn extract_regex_literal(expr: &Expression) -> Option<RegexLiteral> {
-    match expr {
-        Expression::RegexLiteral(literal) => Some(literal.clone()),
-        Expression::Literal(Literal::Regex(literal), _) => Some(literal.clone()),
-        _ => None,
-    }
-}
-
-fn expression_looks_like_type_reference(expr: &Expression) -> bool {
-    match expr {
-        Expression::Identifier(name, _) => is_probably_type_name(name),
-        Expression::MemberAccess {
-            object, property, ..
-        } => {
-            is_probably_type_name(property)
-                && matches!(
-                    object.as_ref(),
-                    Expression::Identifier(_, _) | Expression::MemberAccess { .. }
-                )
-        }
-        _ => false,
-    }
-}
-
-fn is_probably_type_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    matches!(chars.next(), Some(first) if first.is_uppercase())
 }
 
 fn push_diagnostic(
@@ -6730,438 +5065,6 @@ fn lower_function(
     }
 }
 
-fn lower_test(
-    context: &LoweringContext<'_>,
-    node: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
-) -> Result<Statement, LoweringDiagnostic> {
-    let span = context.span_for(node).unwrap_or_else(Span::dummy);
-
-    let annotations = child_node(node, SyntaxKind::AnnotationList)
-        .map(|list| lower_annotation_list_node(context, &list, diagnostics))
-        .unwrap_or_default();
-
-    let display_name = extract_test_display_name(context, node).ok_or_else(|| {
-        LoweringDiagnostic::new(
-            LoweringDiagnosticSeverity::Error,
-            "テスト表示名の文字列が必要です",
-            context.span_for(node),
-            node.kind(),
-            first_identifier_text(node),
-            collect_annotation_texts(node),
-        )
-    })?;
-
-    let dataset = child_node(node, SyntaxKind::TestDataset)
-        .and_then(|dataset| lower_test_dataset(context, &dataset, diagnostics));
-
-    let parameters = child_node(node, SyntaxKind::TestParameterList)
-        .map(|list| lower_test_parameters(context, &list, diagnostics))
-        .unwrap_or_default();
-
-    let body = match child_node(node, SyntaxKind::Block) {
-        Some(block) => lower_block_expression(context, &block, diagnostics),
-        None => {
-            diagnostics.push(LoweringDiagnostic::new(
-                LoweringDiagnosticSeverity::Error,
-                "テスト本体のブロックが見つかりません",
-                context.span_for(node),
-                node.kind(),
-                first_identifier_text(node),
-                collect_annotation_texts(node),
-            ));
-            Expression::Block {
-                statements: Vec::new(),
-                span: span.clone(),
-            }
-        }
-    };
-
-    let declaration = TestDeclaration {
-        display_name,
-        normalized: None,
-        dataset,
-        parameters,
-        annotations,
-        body,
-        span,
-    };
-
-    Ok(Statement::TestDeclaration(declaration))
-}
-
-fn extract_test_display_name(context: &LoweringContext<'_>, node: &JvSyntaxNode) -> Option<String> {
-    context
-        .tokens_for(node)
-        .into_iter()
-        .find_map(|token| match &token.token_type {
-            TokenType::String(value) => Some(value.clone()),
-            _ => None,
-        })
-}
-
-fn lower_annotation_list_node(
-    context: &LoweringContext<'_>,
-    list_node: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
-) -> Vec<Annotation> {
-    let mut annotations = Vec::new();
-    for child in list_node.children() {
-        if child.kind() != SyntaxKind::Annotation {
-            continue;
-        }
-        if let Some(annotation) = lower_annotation_node(context, &child, diagnostics) {
-            annotations.push(annotation);
-        }
-    }
-    annotations
-}
-
-fn lower_annotation_node(
-    context: &LoweringContext<'_>,
-    node: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
-) -> Option<Annotation> {
-    let name_node = child_node(node, SyntaxKind::QualifiedName)?;
-    let segments = match qualified_name_segments(context, &name_node) {
-        Some(segments) => segments,
-        None => {
-            diagnostics.push(LoweringDiagnostic::new(
-                LoweringDiagnosticSeverity::Error,
-                "アノテーション名を解決できません",
-                context.span_for(node),
-                node.kind(),
-                first_identifier_text(node),
-                collect_annotation_texts(node),
-            ));
-            return None;
-        }
-    };
-
-    let name_span = context.span_for(&name_node).unwrap_or_else(Span::dummy);
-    let arguments = child_node(node, SyntaxKind::AnnotationArgumentList)
-        .map(|arg_list| lower_annotation_arguments(context, &arg_list, diagnostics))
-        .unwrap_or_default();
-    let span = context.span_for(node).unwrap_or_else(Span::dummy);
-
-    Some(Annotation {
-        name: AnnotationName::new(segments, name_span),
-        arguments,
-        span,
-    })
-}
-
-fn lower_annotation_arguments(
-    context: &LoweringContext<'_>,
-    list_node: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
-) -> Vec<AnnotationArgument> {
-    let mut arguments = Vec::new();
-    for child in list_node.children() {
-        if child.kind() != SyntaxKind::AnnotationArgument {
-            continue;
-        }
-        if let Some(argument) = lower_annotation_argument_node(context, &child, diagnostics) {
-            arguments.push(argument);
-        }
-    }
-    arguments
-}
-
-fn lower_annotation_argument_node(
-    context: &LoweringContext<'_>,
-    node: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
-) -> Option<AnnotationArgument> {
-    let span = context.span_for(node).unwrap_or_else(Span::dummy);
-
-    let expression_node = child_node(node, SyntaxKind::Expression);
-    let expression = match expression_node {
-        Some(expr_node) => match lower_expression(context, &expr_node) {
-            Ok(expr) => expr,
-            Err(diagnostic) => {
-                diagnostics.push(diagnostic);
-                return None;
-            }
-        },
-        None => {
-            diagnostics.push(LoweringDiagnostic::new(
-                LoweringDiagnosticSeverity::Error,
-                "アノテーション引数の式が見つかりません",
-                context.span_for(node),
-                node.kind(),
-                first_identifier_text(node),
-                collect_annotation_texts(node),
-            ));
-            return None;
-        }
-    };
-
-    let value = match annotation_value_from_expression(&expression) {
-        Some(value) => value,
-        None => {
-            diagnostics.push(LoweringDiagnostic::new(
-                LoweringDiagnosticSeverity::Error,
-                "アノテーション引数を値に変換できません",
-                context.span_for(node),
-                node.kind(),
-                first_identifier_text(node),
-                collect_annotation_texts(node),
-            ));
-            return None;
-        }
-    };
-
-    let is_named = context
-        .tokens_for(node)
-        .iter()
-        .filter(|token| !TokenKind::from_token(token).is_trivia())
-        .any(|token| matches!(token.token_type, TokenType::Assign));
-
-    if is_named {
-        let mut tokens = context.tokens_for(node).into_iter();
-        let name = tokens
-            .find_map(|token| match &token.token_type {
-                TokenType::Identifier(name) => Some(name.clone()),
-                TokenType::Assign => None,
-                _ => None,
-            })
-            .unwrap_or_default();
-        Some(AnnotationArgument::Named { name, value, span })
-    } else {
-        Some(AnnotationArgument::Positional { value, span })
-    }
-}
-
-fn annotation_value_from_expression(expr: &Expression) -> Option<AnnotationValue> {
-    match expr {
-        Expression::Literal(literal, _) => Some(AnnotationValue::Literal(literal.clone())),
-        Expression::Array { elements, .. } => {
-            let mut values = Vec::with_capacity(elements.len());
-            for element in elements {
-                values.push(annotation_value_from_expression(element)?);
-            }
-            Some(AnnotationValue::Array(values))
-        }
-        Expression::MemberAccess { .. } | Expression::Identifier(_, _) => {
-            enum_constant_from_expression(expr).map(|(type_path, constant)| {
-                AnnotationValue::EnumConstant {
-                    type_path,
-                    constant,
-                }
-            })
-        }
-        _ => None,
-    }
-}
-
-fn enum_constant_from_expression(expr: &Expression) -> Option<(Vec<String>, String)> {
-    let mut segments = Vec::new();
-    if !collect_member_segments(expr, &mut segments) {
-        return None;
-    }
-    if segments.is_empty() {
-        return None;
-    }
-    let constant = segments.pop().unwrap();
-    Some((segments, constant))
-}
-
-fn collect_member_segments(expr: &Expression, segments: &mut Vec<String>) -> bool {
-    match expr {
-        Expression::Identifier(name, _) => {
-            segments.push(name.clone());
-            true
-        }
-        Expression::MemberAccess {
-            object, property, ..
-        } => {
-            if !collect_member_segments(object, segments) {
-                return false;
-            }
-            segments.push(property.clone());
-            true
-        }
-        _ => false,
-    }
-}
-
-fn lower_test_dataset(
-    context: &LoweringContext<'_>,
-    dataset_node: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
-) -> Option<TestDataset> {
-    let span = context.span_for(dataset_node).unwrap_or_else(Span::dummy);
-    let mut rows = Vec::new();
-    let mut sample: Option<TestSampleMetadata> = None;
-
-    for row_node in dataset_node.children() {
-        if row_node.kind() != SyntaxKind::TestDatasetRow {
-            continue;
-        }
-
-        if let Some(annotation_node) = child_node(&row_node, SyntaxKind::Annotation) {
-            if sample.is_some() {
-                diagnostics.push(LoweringDiagnostic::new(
-                    LoweringDiagnosticSeverity::Error,
-                    "データセットに複数の @Sample 注釈が含まれています",
-                    context.span_for(&row_node),
-                    row_node.kind(),
-                    first_identifier_text(&row_node),
-                    collect_annotation_texts(&row_node),
-                ));
-                continue;
-            }
-
-            let annotation = match lower_annotation_node(context, &annotation_node, diagnostics) {
-                Some(annotation) => annotation,
-                None => continue,
-            };
-
-            if annotation.name.simple_name() != "Sample" {
-                diagnostics.push(LoweringDiagnostic::new(
-                    LoweringDiagnosticSeverity::Error,
-                    "データセットで使用できるアノテーションは @Sample のみです",
-                    Some(annotation.span.clone()),
-                    annotation_node.kind(),
-                    first_identifier_text(&annotation_node),
-                    collect_annotation_texts(&annotation_node),
-                ));
-                continue;
-            }
-
-            let mut arguments = annotation.arguments.clone();
-            let source_index = arguments.iter().position(|argument| {
-                matches!(
-                    argument,
-                    AnnotationArgument::Positional {
-                        value: AnnotationValue::Literal(Literal::String(_)),
-                        ..
-                    }
-                )
-            });
-
-            let Some(pos) = source_index else {
-                diagnostics.push(LoweringDiagnostic::new(
-                    LoweringDiagnosticSeverity::Error,
-                    "@Sample 注釈には文字列の第一引数が必要です",
-                    Some(annotation.span.clone()),
-                    annotation_node.kind(),
-                    first_identifier_text(&annotation_node),
-                    collect_annotation_texts(&annotation_node),
-                ));
-                continue;
-            };
-
-            let argument = arguments.remove(pos);
-            let source = match argument {
-                AnnotationArgument::Positional {
-                    value: AnnotationValue::Literal(Literal::String(value)),
-                    ..
-                } => value,
-                _ => unreachable!(),
-            };
-
-            sample = Some(TestSampleMetadata {
-                source,
-                arguments,
-                span: annotation.span,
-            });
-        } else if sample.is_some() {
-            diagnostics.push(LoweringDiagnostic::new(
-                LoweringDiagnosticSeverity::Error,
-                "@Sample を使用するデータセットにインライン行を混在させることはできません",
-                context.span_for(&row_node),
-                row_node.kind(),
-                first_identifier_text(&row_node),
-                collect_annotation_texts(&row_node),
-            ));
-        } else if let Some(row) = lower_inline_dataset_row(context, &row_node, diagnostics) {
-            rows.push(row);
-        }
-    }
-
-    if let Some(metadata) = sample {
-        return Some(TestDataset::Sample(metadata));
-    }
-
-    Some(TestDataset::InlineArray { rows, span })
-}
-
-fn lower_inline_dataset_row(
-    context: &LoweringContext<'_>,
-    row_node: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
-) -> Option<TestDatasetRow> {
-    let span = context.span_for(row_node).unwrap_or_else(Span::dummy);
-    let expr_node = child_node(row_node, SyntaxKind::Expression)?;
-    match lower_expression(context, &expr_node) {
-        Ok(Expression::Array { elements, .. }) => Some(TestDatasetRow {
-            values: elements,
-            span,
-        }),
-        Ok(expression) => Some(TestDatasetRow {
-            values: vec![expression],
-            span,
-        }),
-        Err(diagnostic) => {
-            diagnostics.push(diagnostic);
-            None
-        }
-    }
-}
-
-fn lower_test_parameters(
-    context: &LoweringContext<'_>,
-    list_node: &JvSyntaxNode,
-    diagnostics: &mut Vec<LoweringDiagnostic>,
-) -> Vec<TestParameter> {
-    let mut parameters = Vec::new();
-    for parameter_node in list_node.children() {
-        if parameter_node.kind() != SyntaxKind::TestParameter {
-            continue;
-        }
-
-        let span = context
-            .span_for(&parameter_node)
-            .unwrap_or_else(Span::dummy);
-        let binding_node = match child_node(&parameter_node, SyntaxKind::BindingPattern) {
-            Some(node) => node,
-            None => {
-                diagnostics.push(LoweringDiagnostic::new(
-                    LoweringDiagnosticSeverity::Error,
-                    "テストパラメータのバインディングが見つかりません",
-                    context.span_for(&parameter_node),
-                    parameter_node.kind(),
-                    first_identifier_text(&parameter_node),
-                    collect_annotation_texts(&parameter_node),
-                ));
-                continue;
-            }
-        };
-
-        let pattern = match lower_binding_pattern(context, &binding_node) {
-            Ok(pattern) => pattern,
-            Err(diagnostic) => {
-                diagnostics.push(diagnostic);
-                continue;
-            }
-        };
-
-        let type_annotation =
-            child_node(&parameter_node, SyntaxKind::TypeAnnotation).and_then(|type_node| {
-                lower_type_annotation_container(context, &type_node, &parameter_node, diagnostics)
-            });
-
-        parameters.push(TestParameter {
-            pattern,
-            type_annotation,
-            span,
-        });
-    }
-    parameters
-}
-
 fn lower_unit_type_definition(
     context: &LoweringContext<'_>,
     node: &JvSyntaxNode,
@@ -7240,26 +5143,16 @@ fn lower_unit_type_definition(
             SyntaxKind::UnitName,
         )
     })?;
-    let unit_name = first_identifier_text(&name_node)
-        .or_else(|| {
-            context
-                .tokens_for(&name_node)
-                .into_iter()
-                .find_map(|token| {
-                    if matches!(token.token_type, TokenType::Invalid(_)) {
-                        Some(token.lexeme.clone())
-                    } else {
-                        None
-                    }
-                })
-        })
+    let unit_name = context
+        .text_for_node(&name_node)
+        .and_then(|text| if text.is_empty() { None } else { Some(text) })
         .ok_or_else(|| {
             LoweringDiagnostic::new(
                 LoweringDiagnosticSeverity::Error,
-                "単位名の識別子が取得できません",
+                "単位名のテキストが取得できません",
                 context.span_for(&name_node),
                 name_node.kind(),
-                first_identifier_text(&name_node),
+                None,
                 collect_annotation_texts(&name_node),
             )
         })?;
@@ -7794,7 +5687,6 @@ fn infer_loop_strategy(iterable: &Expression) -> LoopStrategy {
             op,
             right,
             span,
-            ..
         } if matches!(op, BinaryOp::RangeExclusive | BinaryOp::RangeInclusive) => {
             let start = (*left.as_ref()).clone();
             let end = (*right.as_ref()).clone();
@@ -8107,46 +5999,4 @@ fn binding_pattern_primary_expression(pattern: &BindingPatternKind) -> Expressio
     } else {
         Expression::Identifier("_".to_string(), span)
     }
-}
-
-fn destructuring_element_count(pattern: &BindingPatternKind) -> Option<usize> {
-    match pattern {
-        BindingPatternKind::Tuple { elements, .. } | BindingPatternKind::List { elements, .. } => {
-            Some(elements.len())
-        }
-        _ => None,
-    }
-}
-
-fn tuple_field_example(fields: &[TupleFieldMeta], index: usize) -> Option<String> {
-    fields.get(index).map(tuple_field_label)
-}
-
-fn tuple_field_label(meta: &TupleFieldMeta) -> String {
-    meta.primary_label
-        .as_ref()
-        .cloned()
-        .or_else(|| meta.identifier_hint.clone())
-        .unwrap_or_else(|| format!("_{}", meta.fallback_index))
-}
-
-fn pattern_element_example(pattern: &BindingPatternKind, index: usize) -> Option<String> {
-    match pattern {
-        BindingPatternKind::Tuple { elements, .. } | BindingPatternKind::List { elements, .. } => {
-            elements.get(index).map(pattern_binding_label)
-        }
-        _ => None,
-    }
-}
-
-fn pattern_binding_label(pattern: &BindingPatternKind) -> String {
-    pattern
-        .first_identifier()
-        .map(|text| text.to_string())
-        .unwrap_or_else(|| match pattern {
-            BindingPatternKind::Wildcard { .. } => "_".to_string(),
-            BindingPatternKind::Tuple { .. } => "(...)".to_string(),
-            BindingPatternKind::List { .. } => "[...]".to_string(),
-            BindingPatternKind::Identifier { name, .. } => name.clone(),
-        })
 }

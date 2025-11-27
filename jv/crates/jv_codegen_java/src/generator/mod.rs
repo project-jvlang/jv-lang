@@ -1,37 +1,29 @@
 use crate::builder::{JavaCompilationUnit, JavaSourceBuilder};
 use crate::config::JavaCodeGenConfig;
 use crate::error::CodeGenError;
-use crate::java21;
-use crate::record::{self, TupleRecord};
 use crate::target_version::TargetedJavaEmitter;
-use jv_ast::expression::TupleFieldMeta;
 use jv_ast::{BinaryOp, CallArgumentStyle, Literal, SequenceDelimiter, Span, UnaryOp};
 use jv_build::metadata::SymbolIndex;
 use jv_ir::{
     CompletableFutureOp, ConversionHelper, ConversionKind, ConversionMetadata, IrCaseLabel,
     IrCatchClause, IrDeconstructionComponent, IrDeconstructionPattern, IrExpression, IrForEachKind,
     IrForLoopMetadata, IrGenericMetadata, IrImplicitWhenEnd, IrImport, IrImportDetail, IrModifiers,
-    IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrRegexReplacement,
-    IrRegexTemplateSegment, IrResource, IrSampleDeclaration, IrStatement, IrSwitchCase,
-    IrTypeParameter, IrVariance, IrVisibility, JavaType, LogGuardKind, LogInvocationItem,
-    LogInvocationPlan, LogLevel, LogMessage, LoggerFieldId, LoggerFieldSpec, LoggingFrameworkKind,
-    MethodOverload, NullableGuard, NullableGuardReason, SequencePipeline, SequenceSource,
-    SequenceStage, SequenceTerminalKind, TupleRecordPlan, UtilityClass, VirtualThreadOp,
+    IrNumericRangeLoop, IrParameter, IrProgram, IrRecordComponent, IrResource, IrSampleDeclaration,
+    IrStatement, IrSwitchCase, IrTypeParameter, IrVariance, IrVisibility, JavaType, MethodOverload,
+    NullableGuard, NullableGuardReason, SequencePipeline, SequenceSource, SequenceStage,
+    SequenceTerminalKind, UtilityClass, VirtualThreadOp, unit::UnitRegistrySummary,
 };
 use jv_mapper::{
     JavaPosition, JavaSpan, MappingCategory, MappingError, SourceMap, SourceMapBuilder,
 };
-use jv_pm::JavaTarget;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 mod declarations;
 mod expressions;
 mod formatting;
-mod logging;
 mod sample;
 mod statements;
-mod tests;
 mod types;
 
 pub use types::ErasurePlan;
@@ -55,10 +47,7 @@ pub struct JavaCodeGenerator {
     current_return_type: Option<JavaType>,
     mutable_captures: HashSet<String>,
     record_components: HashMap<String, HashSet<String>>,
-    logging_framework: LoggingFrameworkKind,
-    logger_fields: HashMap<LoggerFieldId, LoggerFieldSpec>,
-    trace_context_enabled: bool,
-    tuple_usages: HashMap<SpanKey, TuplePlanUsage>,
+    unit_registry_summary: Option<UnitRegistrySummary>,
 }
 
 impl JavaCodeGenerator {
@@ -87,15 +76,20 @@ impl JavaCodeGenerator {
             current_return_type: None,
             mutable_captures: HashSet::new(),
             record_components: HashMap::new(),
-            logging_framework: LoggingFrameworkKind::default(),
-            logger_fields: HashMap::new(),
-            trace_context_enabled: false,
-            tuple_usages: HashMap::new(),
+            unit_registry_summary: None,
         }
     }
 
     pub fn set_symbol_index(&mut self, index: Option<Arc<SymbolIndex>>) {
         self.symbol_index = index;
+    }
+
+    pub fn set_unit_registry_summary(&mut self, summary: Option<UnitRegistrySummary>) {
+        self.unit_registry_summary = summary;
+    }
+
+    pub fn unit_registry_summary(&self) -> Option<&UnitRegistrySummary> {
+        self.unit_registry_summary.as_ref()
     }
 
     pub fn generate_compilation_unit(
@@ -105,14 +99,6 @@ impl JavaCodeGenerator {
         self.reset();
         self.package = program.package.clone();
         self.generic_metadata = program.generic_metadata.clone();
-        self.logging_framework = program.logging.framework.clone();
-        self.trace_context_enabled = program.logging.trace_context;
-        self.logger_fields = program
-            .logging
-            .logger_fields
-            .iter()
-            .map(|spec| (spec.id, spec.clone()))
-            .collect();
         self.metadata_path.clear();
         self.conversion_metadata.clear();
         self.register_record_components_from_declarations(&program.type_declarations, &[]);
@@ -122,7 +108,6 @@ impl JavaCodeGenerator {
                 .or_default()
                 .push(entry.metadata.clone());
         }
-        self.populate_tuple_usages(&program.tuple_record_plans);
 
         let mut unit = JavaCompilationUnit::new();
         unit.package_declaration = program.package.clone();
@@ -157,48 +142,25 @@ impl JavaCodeGenerator {
             }
         }
 
-        let mut hoisted_fields = Vec::new();
+        let mut hoisted_regex_fields = Vec::new();
         let mut retained_statements = Vec::new();
         for statement in script_statements.drain(..) {
-            if let Some(field) = Self::hoist_script_field(&statement) {
-                hoisted_fields.push(field);
+            if let Some(field) = Self::hoist_regex_pattern_field(&statement) {
+                hoisted_regex_fields.push(field);
             } else {
                 retained_statements.push(statement);
             }
         }
         script_statements = retained_statements;
-        let mut hoisted_variable_fields =
-            Self::hoist_script_variable_fields(&mut script_statements);
 
         let has_entry_method = script_methods.iter().any(Self::is_entry_point_method);
         let needs_wrapper = !script_statements.is_empty() || !has_entry_method;
 
         if !script_statements.is_empty()
             || !script_methods.is_empty()
-            || !hoisted_variable_fields.is_empty()
-            || !hoisted_fields.is_empty()
+            || !hoisted_regex_fields.is_empty()
         {
             let script_class = self.config.script_main_class.clone();
-            let qualified_script_class = if let Some(pkg) = &program.package {
-                format!("{}.{}", pkg, script_class)
-            } else {
-                script_class.clone()
-            };
-            let script_logger_fields: Vec<String> = program
-                .logging
-                .logger_fields
-                .iter()
-                .filter(|spec| {
-                    spec.class_id
-                        .as_ref()
-                        .and_then(|id| id.local_name.last())
-                        .map(|name| name == &script_class)
-                        .unwrap_or(true)
-                })
-                .filter_map(|spec| {
-                    self.render_script_logger_field(spec, &script_class, &qualified_script_class)
-                })
-                .collect();
 
             self.script_method_names = script_methods
                 .iter()
@@ -215,17 +177,8 @@ impl JavaCodeGenerator {
             builder.push_line(&format!("public final class {} {{", script_class));
             builder.indent();
 
-            if !script_logger_fields.is_empty() {
-                for field in &script_logger_fields {
-                    builder.push_line(field);
-                }
-                if needs_wrapper || !script_methods.is_empty() || !hoisted_fields.is_empty() {
-                    builder.push_line("");
-                }
-            }
-
-            if !hoisted_fields.is_empty() {
-                for field in &hoisted_fields {
+            if !hoisted_regex_fields.is_empty() {
+                for field in &hoisted_regex_fields {
                     let code = self.generate_statement(field)?;
                     Self::push_lines(&mut builder, &code);
                 }
@@ -278,26 +231,6 @@ impl JavaCodeGenerator {
             builder.push_line("}");
 
             unit.type_declarations.push(builder.build());
-        }
-
-        let tuple_records = record::collect_tuple_records(&program.tuple_record_plans);
-        let mut emitted_tuple_records: HashSet<String> = HashSet::new();
-        for record in tuple_records {
-            if !emitted_tuple_records.insert(record.name.clone()) {
-                continue;
-            }
-            if self.has_tuple_record_definition(&record.name) {
-                continue;
-            }
-
-            let rendered = if self.targeting.target() == JavaTarget::Java21 {
-                java21::render_tuple_record_java21(&record, &self.config.indent)
-            } else {
-                record::render_tuple_record(&record, &self.config.indent)
-            };
-
-            self.register_tuple_record(&record);
-            unit.type_declarations.push(rendered);
         }
 
         for declaration in remaining_declarations {
@@ -358,19 +291,6 @@ impl JavaCodeGenerator {
         JavaSourceBuilder::new(self.config.indent.clone())
     }
 
-    fn resolve_logger_field_name(&self, id: LoggerFieldId) -> Option<&str> {
-        self.logger_fields
-            .get(&id)
-            .map(|spec| spec.field_name.as_str())
-    }
-
-    fn generate_log_invocation(
-        &mut self,
-        plan: &LogInvocationPlan,
-    ) -> Result<String, CodeGenError> {
-        logging::emit_log_plan(self, plan)
-    }
-
     fn add_import(&mut self, import_path: &str) {
         self.imports
             .insert(import_path.to_string(), import_path.to_string());
@@ -389,10 +309,6 @@ impl JavaCodeGenerator {
         self.current_return_type = None;
         self.mutable_captures.clear();
         self.record_components.clear();
-        self.logging_framework = LoggingFrameworkKind::default();
-        self.logger_fields.clear();
-        self.trace_context_enabled = false;
-        self.tuple_usages.clear();
     }
 
     fn register_record_components_from_declarations(
@@ -432,103 +348,6 @@ impl JavaCodeGenerator {
             }
             _ => {}
         }
-    }
-
-    fn has_tuple_record_definition(&self, name: &str) -> bool {
-        if self.record_components.contains_key(name) {
-            return true;
-        }
-        if let Some(pkg) = &self.package {
-            if !pkg.is_empty() {
-                let fq = format!("{pkg}.{name}");
-                if self.record_components.contains_key(&fq) {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    fn populate_tuple_usages(&mut self, plans: &[TupleRecordPlan]) {
-        self.tuple_usages.clear();
-        for plan in plans {
-            let record_name = plan
-                .specific_name
-                .as_ref()
-                .cloned()
-                .unwrap_or_else(|| plan.generic_name.clone());
-            let component_names = record::component_names_for_plan(plan);
-            let source_positions = Self::tuple_source_positions(plan);
-            for usage in &plan.usage_sites {
-                self.tuple_usages.insert(
-                    SpanKey::from(&usage.span),
-                    TuplePlanUsage {
-                        record_name: record_name.clone(),
-                        component_names: component_names.clone(),
-                        source_positions: source_positions.clone(),
-                    },
-                );
-            }
-        }
-    }
-
-    fn tuple_source_positions(plan: &TupleRecordPlan) -> Vec<usize> {
-        (0..plan.arity)
-            .map(|index| {
-                let preferred = plan
-                    .fields
-                    .get(index)
-                    .map(|meta| Self::normalized_fallback_index(meta, index))
-                    .unwrap_or(index);
-                preferred
-            })
-            .collect()
-    }
-
-    fn normalized_fallback_index(meta: &TupleFieldMeta, default_index: usize) -> usize {
-        if meta.fallback_index == 0 {
-            default_index
-        } else {
-            meta.fallback_index.saturating_sub(1)
-        }
-    }
-
-    fn select_tuple_element_index(
-        preferred_index: usize,
-        slot_index: usize,
-        element_count: usize,
-        used: &[bool],
-    ) -> Option<usize> {
-        if preferred_index < element_count && !used[preferred_index] {
-            return Some(preferred_index);
-        }
-        if slot_index < element_count && !used[slot_index] {
-            return Some(slot_index);
-        }
-        (0..element_count).find(|idx| !used[*idx])
-    }
-
-    fn register_tuple_record(&mut self, record: &TupleRecord) {
-        let component_names: Vec<String> = record.component_names();
-
-        self.record_components
-            .entry(record.name.clone())
-            .or_insert_with(HashSet::new)
-            .extend(component_names.iter().cloned());
-
-        if let Some(pkg) = &self.package {
-            if !pkg.is_empty() {
-                let fq = format!("{pkg}.{}", record.name);
-                self.record_components
-                    .entry(fq)
-                    .or_insert_with(HashSet::new)
-                    .extend(component_names.iter().cloned());
-            }
-        }
-    }
-
-    pub(crate) fn is_mutable_capture(&self, name: &str) -> bool {
-        self.mutable_captures.contains(name)
     }
 
     fn add_record_components(
@@ -877,14 +696,6 @@ impl JavaCodeGenerator {
                     scope_locals,
                 );
             }
-            IrExpression::LogInvocation { plan, .. } => {
-                self.collect_mutable_captures_in_log_plan(
-                    plan,
-                    method_locals,
-                    captures,
-                    scope_locals,
-                );
-            }
             IrExpression::Conditional {
                 condition,
                 then_expr,
@@ -920,16 +731,6 @@ impl JavaCodeGenerator {
                     );
                 }
             }
-            IrExpression::TupleLiteral { elements, .. } => {
-                for element in elements {
-                    self.collect_mutable_captures_in_expression(
-                        element,
-                        method_locals,
-                        captures,
-                        scope_locals,
-                    );
-                }
-            }
             IrExpression::ArrayCreation { initializer, .. } => {
                 if let Some(values) = initializer {
                     for value in values {
@@ -950,38 +751,8 @@ impl JavaCodeGenerator {
                     scope_locals,
                 );
             }
-            IrExpression::RegexCommand {
-                subject,
-                pattern_expr,
-                replacement,
-                ..
-            } => {
-                self.collect_mutable_captures_in_expression(
-                    subject,
-                    method_locals,
-                    captures,
-                    scope_locals,
-                );
-                if let Some(pattern_expr) = pattern_expr {
-                    self.collect_mutable_captures_in_expression(
-                        pattern_expr,
-                        method_locals,
-                        captures,
-                        scope_locals,
-                    );
-                }
-                if let Some(replacement) = replacement {
-                    self.collect_mutable_captures_in_regex_replacement(
-                        replacement,
-                        method_locals,
-                        captures,
-                        scope_locals,
-                    );
-                }
-            }
             IrExpression::Literal(_, _)
             | IrExpression::RegexPattern { .. }
-            | IrExpression::TextBlock { .. }
             | IrExpression::Identifier { .. }
             | IrExpression::Switch { .. }
             | IrExpression::TryWithResources { .. }
@@ -995,74 +766,6 @@ impl JavaCodeGenerator {
             | IrExpression::StringFormat { .. }
             | IrExpression::InstanceOf { .. }
             | IrExpression::Cast { .. } => {}
-        }
-    }
-
-    fn collect_mutable_captures_in_regex_replacement(
-        &self,
-        replacement: &IrRegexReplacement,
-        method_locals: &HashSet<String>,
-        captures: &mut HashSet<String>,
-        scope_locals: &HashSet<String>,
-    ) {
-        match replacement {
-            IrRegexReplacement::Literal(literal) => {
-                for segment in &literal.segments {
-                    if let IrRegexTemplateSegment::Expression(expr) = segment {
-                        self.collect_mutable_captures_in_expression(
-                            expr,
-                            method_locals,
-                            captures,
-                            scope_locals,
-                        );
-                    }
-                }
-            }
-            IrRegexReplacement::Expression(expr) => {
-                self.collect_mutable_captures_in_expression(
-                    expr,
-                    method_locals,
-                    captures,
-                    scope_locals,
-                );
-            }
-        }
-    }
-
-    fn collect_mutable_captures_in_log_plan(
-        &self,
-        plan: &LogInvocationPlan,
-        method_locals: &HashSet<String>,
-        captures: &mut HashSet<String>,
-        scope_locals: &HashSet<String>,
-    ) {
-        for item in &plan.items {
-            match item {
-                LogInvocationItem::Statement(statement) => {
-                    self.collect_mutable_captures_in_statement(
-                        statement,
-                        method_locals,
-                        captures,
-                        scope_locals,
-                    );
-                }
-                LogInvocationItem::Message(message) => {
-                    self.collect_mutable_captures_in_expression(
-                        &message.expression,
-                        method_locals,
-                        captures,
-                        scope_locals,
-                    );
-                }
-                LogInvocationItem::Nested(nested) => {
-                    self.collect_mutable_captures_in_log_plan(
-                        nested,
-                        method_locals,
-                        captures,
-                        scope_locals,
-                    );
-                }
-            }
         }
     }
 
@@ -1320,8 +1023,8 @@ impl JavaCodeGenerator {
                     captures,
                     scope_locals,
                 );
-                let then_scope = scope_locals.clone();
-                let _ = self.collect_mutable_captures_in_statement(
+                let mut then_scope = scope_locals.clone();
+                then_scope = self.collect_mutable_captures_in_statement(
                     then_stmt,
                     method_locals,
                     captures,
@@ -1748,14 +1451,14 @@ impl JavaCodeGenerator {
         }
     }
 
-    fn hoist_script_field(statement: &IrStatement) -> Option<IrStatement> {
+    fn hoist_regex_pattern_field(statement: &IrStatement) -> Option<IrStatement> {
         match statement {
             IrStatement::Commented {
                 statement,
                 comment,
                 kind,
                 comment_span,
-            } => Self::hoist_script_field(statement).map(|inner| IrStatement::Commented {
+            } => Self::hoist_regex_pattern_field(statement).map(|inner| IrStatement::Commented {
                 statement: Box::new(inner),
                 comment: comment.clone(),
                 kind: kind.clone(),
@@ -1768,124 +1471,24 @@ impl JavaCodeGenerator {
                 is_final,
                 modifiers,
                 span,
-            } => {
-                let mut field_modifiers = modifiers.clone();
-                field_modifiers.is_static = true;
-                field_modifiers.is_final = *is_final;
-                return Some(IrStatement::FieldDeclaration {
-                    name: name.clone(),
-                    java_type: java_type.clone(),
-                    initializer: initializer.clone(),
-                    modifiers: field_modifiers,
-                    span: span.clone(),
-                });
-            }
-            IrStatement::FieldDeclaration { .. } => Some(statement.clone()),
-            _ => None,
-        }
-    }
-
-    fn hoist_script_variable_fields(statements: &mut Vec<IrStatement>) -> Vec<IrStatement> {
-        let mut hoisted = Vec::new();
-        let mut retained = Vec::new();
-
-        for statement in statements.drain(..) {
-            match statement {
-                IrStatement::VariableDeclaration { .. } => {
-                    hoisted.push(Self::variable_declaration_to_field(statement));
-                }
-                IrStatement::Commented {
-                    statement: inner,
-                    comment,
-                    kind,
-                    comment_span,
-                } => {
-                    if matches!(inner.as_ref(), IrStatement::VariableDeclaration { .. }) {
-                        let field = Self::variable_declaration_to_field(*inner);
-                        hoisted.push(IrStatement::Commented {
-                            statement: Box::new(field),
-                            comment,
-                            kind,
-                            comment_span,
-                        });
-                    } else {
-                        retained.push(IrStatement::Commented {
-                            statement: inner,
-                            comment,
-                            kind,
-                            comment_span,
+            } if *is_final => {
+                if let Some(expr) = initializer {
+                    if matches!(expr, IrExpression::RegexPattern { .. }) {
+                        let mut field_modifiers = modifiers.clone();
+                        field_modifiers.is_static = true;
+                        field_modifiers.is_final = true;
+                        return Some(IrStatement::FieldDeclaration {
+                            name: name.clone(),
+                            java_type: java_type.clone(),
+                            initializer: Some(expr.clone()),
+                            modifiers: field_modifiers,
+                            span: span.clone(),
                         });
                     }
                 }
-                other => retained.push(other),
+                None
             }
-        }
-
-        *statements = retained;
-        hoisted
-    }
-
-    fn variable_declaration_to_field(statement: IrStatement) -> IrStatement {
-        match statement {
-            IrStatement::VariableDeclaration {
-                name,
-                java_type,
-                initializer,
-                is_final,
-                mut modifiers,
-                span,
-            } => {
-                if matches!(modifiers.visibility, IrVisibility::Package) {
-                    modifiers.visibility = IrVisibility::Private;
-                }
-                modifiers.is_static = true;
-                modifiers.is_final = is_final;
-                IrStatement::FieldDeclaration {
-                    name,
-                    java_type,
-                    initializer,
-                    modifiers,
-                    span,
-                }
-            }
-            other => other,
-        }
-    }
-
-    fn render_script_logger_field(
-        &self,
-        spec: &LoggerFieldSpec,
-        simple_class: &str,
-        fqcn: &str,
-    ) -> Option<String> {
-        let field_name = &spec.field_name;
-        match &self.logging_framework {
-            LoggingFrameworkKind::Slf4j => Some(format!(
-                "private static final org.slf4j.Logger {name} = org.slf4j.LoggerFactory.getLogger({class}.class);",
-                name = field_name,
-                class = simple_class
-            )),
-            LoggingFrameworkKind::Log4j2 => Some(format!(
-                "private static final org.apache.logging.log4j.Logger {name} = org.apache.logging.log4j.LogManager.getLogger({class}.class);",
-                name = field_name,
-                class = simple_class
-            )),
-            LoggingFrameworkKind::JbossLogging => Some(format!(
-                "private static final org.jboss.logging.Logger {name} = org.jboss.logging.Logger.getLogger({class}.class);",
-                name = field_name,
-                class = simple_class
-            )),
-            LoggingFrameworkKind::CommonsLogging => Some(format!(
-                "private static final org.apache.commons.logging.Log {name} = org.apache.commons.logging.LogFactory.getLog({class}.class);",
-                name = field_name,
-                class = simple_class
-            )),
-            LoggingFrameworkKind::Jul => Some(format!(
-                "private static final java.util.logging.Logger {name} = java.util.logging.Logger.getLogger(\"{fqcn}\");",
-                name = field_name,
-                fqcn = fqcn
-            )),
-            LoggingFrameworkKind::Custom { .. } => None,
+            _ => None,
         }
     }
 
@@ -1964,13 +1567,6 @@ impl JavaCodeGenerator {
             .remove(type_name)
             .unwrap_or_default()
     }
-}
-
-#[derive(Debug, Clone)]
-struct TuplePlanUsage {
-    record_name: String,
-    component_names: Vec<String>,
-    source_positions: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]

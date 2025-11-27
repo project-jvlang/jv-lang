@@ -211,7 +211,6 @@ fn multiline_string_literal_roundtrips_through_serde() {
             StringPart::Text("!".to_string()),
         ],
         indent: Some(IndentMetadata::new(4, true)),
-        raw_flavor: None,
         span: span.clone(),
     };
 
@@ -229,9 +228,6 @@ fn regex_literal_roundtrips_through_serde() {
         pattern: "a/b".to_string(),
         raw: "/a\\/b/".to_string(),
         span: span.clone(),
-        origin: Some(PatternOrigin::literal(span.clone())),
-        const_key: None,
-        template_segments: Vec::new(),
     };
 
     let variant = Literal::Regex(literal.clone());
@@ -244,80 +240,6 @@ fn regex_literal_roundtrips_through_serde() {
     let expr_decoded: Expression =
         serde_json::from_str(&expr_serialized).expect("deserialize regex expression");
     assert_eq!(expr_decoded, expr);
-}
-
-#[test]
-fn test_declaration_roundtrips_through_serde() {
-    let annotation_span = Span::new(1, 0, 1, 7);
-    let annotations = vec![Annotation {
-        name: AnnotationName::new(vec!["Sample".to_string()], annotation_span.clone()),
-        arguments: Vec::new(),
-        span: annotation_span.clone(),
-    }];
-
-    let parameter_span = Span::new(2, 4, 2, 10);
-    let parameter = TestParameter {
-        pattern: BindingPatternKind::identifier("input", parameter_span.clone()),
-        type_annotation: Some(TypeAnnotation::Simple("Int".to_string())),
-        span: parameter_span.clone(),
-    };
-
-    let dataset_row = TestDatasetRow {
-        values: vec![Expression::Literal(
-            Literal::Number("1".to_string()),
-            Span::new(3, 8, 3, 9),
-        )],
-        span: Span::new(3, 4, 3, 11),
-    };
-
-    let dataset = TestDataset::InlineArray {
-        rows: vec![dataset_row],
-        span: Span::new(3, 2, 4, 3),
-    };
-
-    let body_span = Span::new(5, 2, 7, 3);
-    let body = Expression::Block {
-        statements: Vec::new(),
-        span: body_span.clone(),
-    };
-
-    let declaration = TestDeclaration {
-        display_name: "サンプルケース".to_string(),
-        normalized: None,
-        dataset: Some(dataset),
-        parameters: vec![parameter],
-        annotations,
-        body,
-        span: Span::new(1, 0, 7, 3),
-    };
-
-    let statement = Statement::TestDeclaration(declaration);
-    let serialized = serde_json::to_string(&statement).expect("serialize test declaration");
-    let decoded: Statement =
-        serde_json::from_str(&serialized).expect("deserialize test declaration");
-
-    assert_eq!(decoded, statement);
-}
-
-#[test]
-fn raw_single_literal_roundtrips_with_empty_parts() {
-    let span = Span::new(3, 1, 3, 20);
-    let literal = MultilineStringLiteral {
-        kind: MultilineKind::RawSingle,
-        normalized: "C:\\Users\\dev".to_string(),
-        raw: "'C:\\Users\\dev'".to_string(),
-        parts: Vec::new(),
-        indent: None,
-        raw_flavor: Some(RawStringFlavor::SingleLine),
-        span: span.clone(),
-    };
-
-    let serialized = serde_json::to_string(&literal).expect("serialize raw literal");
-    let decoded: MultilineStringLiteral =
-        serde_json::from_str(&serialized).expect("deserialize raw literal");
-
-    assert_eq!(decoded, literal);
-    assert!(decoded.parts.is_empty());
 }
 
 #[test]
@@ -403,10 +325,10 @@ fn 単位型注釈がシリアライズ往復する() {
     let 復元: TypeAnnotation =
         serde_json::from_str(&シリアライズ).expect("単位型注釈のデシリアライズに成功する");
 
-    match 復元 {
+    match &復元 {
         TypeAnnotation::Unit {
-            ref base,
-            ref unit,
+            base,
+            unit,
             implicit,
         } => {
             assert!(!implicit);
@@ -469,8 +391,8 @@ fn 単位定義文がシリアライズ往復する() {
     let 復元: Statement =
         serde_json::from_str(&シリアライズ).expect("単位定義文のデシリアライズに成功する");
 
-    match 復元 {
-        Statement::UnitTypeDefinition(ref 復元定義) => {
+    match &復元 {
+        Statement::UnitTypeDefinition(復元定義) => {
             assert_eq!(復元定義.category, "長さ");
             assert!(matches!(
                 復元定義.base_type,

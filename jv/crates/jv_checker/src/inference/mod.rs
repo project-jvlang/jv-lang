@@ -18,6 +18,7 @@ pub mod type_factory;
 pub mod type_parser;
 pub mod types;
 pub mod unify;
+pub mod unit_integration;
 pub mod utils;
 
 pub use crate::java::{JavaBoxingTable, JavaNullabilityPolicy, JavaPrimitive};

@@ -1,4 +1,4 @@
-use jv_lexer::{Token, TokenType};
+use jv_lexer::Token;
 
 use crate::{
     frontend::DIAGNOSTIC_JV_UNIT_005_DEFAULT_MARKER_FORBIDDEN,
@@ -12,7 +12,6 @@ const SYNC_TOKENS: &[TokenKind] = &[
     TokenKind::Semicolon,
     TokenKind::Newline,
     TokenKind::RightBrace,
-    TokenKind::Arrow,
     TokenKind::PackageKw,
     TokenKind::ImportKw,
     TokenKind::ValKw,
@@ -32,18 +31,11 @@ const SYNC_TOKENS: &[TokenKind] = &[
     TokenKind::Eof,
 ];
 
-const MAX_LOG_BLOCK_DEPTH: usize = 2;
-/// ジェネリック引数シーケンスの先読み最大トークン数（無限ループ防止）
-const MAX_GENERIC_LOOKAHEAD: usize = 100;
-/// 式のネスト最大深度（メモリ消費制限）
-const MAX_EXPRESSION_DEPTH: usize = 50;
-
 #[derive(Default)]
 struct WhenBlockState {
     brace_depth: usize,
 }
 
-/// 式解析時の `when` ブロック状態を保持し、`->` を誤った同期境界として扱わないようにする。
 #[derive(Default)]
 struct ExpressionState {
     pending_when: bool,
@@ -80,8 +72,8 @@ impl ExpressionState {
         }
     }
 
-    fn inside_when_block(&self) -> bool {
-        !self.when_blocks.is_empty()
+    fn is_in_when_context(&self) -> bool {
+        self.pending_when || !self.when_blocks.is_empty()
     }
 
     fn reset(&mut self) {
@@ -107,7 +99,6 @@ pub(crate) struct ParserContext<'tokens> {
     recovered: bool,
     block_depth: usize,
     expression_states: Vec<ExpressionState>,
-    log_block_depth: usize,
     unit_type_annotation_depth: usize,
 }
 
@@ -122,7 +113,6 @@ impl<'tokens> ParserContext<'tokens> {
             recovered: false,
             block_depth: 0,
             expression_states: Vec::new(),
-            log_block_depth: 0,
             unit_type_annotation_depth: 0,
         }
     }
@@ -275,65 +265,6 @@ impl<'tokens> ParserContext<'tokens> {
         self.block_depth = self.block_depth.saturating_sub(1);
         self.finish_node(); // outer_kind
         true
-    }
-
-    pub(crate) fn parse_log_block_expression(&mut self, keyword: TokenKind) -> Option<usize> {
-        debug_assert!(matches!(
-            keyword,
-            TokenKind::LogKw
-                | TokenKind::TraceKw
-                | TokenKind::DebugKw
-                | TokenKind::InfoKw
-                | TokenKind::WarnKw
-                | TokenKind::ErrorKw
-        ));
-
-        let start = self.position();
-        self.consume_trivia();
-        self.start_node(SyntaxKind::LogBlockExpression);
-
-        let keyword_line = self.bump_raw().map(|token| token.line).unwrap_or_default();
-
-        let previous_depth = self.log_block_depth;
-        self.log_block_depth = self.log_block_depth.saturating_add(1);
-        if self.log_block_depth > MAX_LOG_BLOCK_DEPTH {
-            let message = "ログブロックのネストは1段までです";
-            self.report_error(message, start, self.cursor);
-        }
-
-        let mut last_line = Some(keyword_line);
-
-        self.consume_trivia();
-        if self.peek_significant_kind() == Some(TokenKind::LeftBrace) {
-            let parsed = self.parse_braced_statements(SyntaxKind::Block);
-            if parsed {
-                if let Some(token) = self.tokens.get(self.cursor.saturating_sub(1)) {
-                    last_line = Some(token.line);
-                }
-            }
-        } else {
-            let message = format!(
-                "{} ブロックは'{{'で開始する必要があります",
-                Self::log_keyword_label(keyword)
-            );
-            self.report_error(message, start, self.cursor);
-        }
-
-        self.log_block_depth = previous_depth;
-        self.finish_node();
-        last_line
-    }
-
-    fn log_keyword_label(keyword: TokenKind) -> &'static str {
-        match keyword {
-            TokenKind::LogKw => "LOG",
-            TokenKind::TraceKw => "TRACE",
-            TokenKind::DebugKw => "DEBUG",
-            TokenKind::InfoKw => "INFO",
-            TokenKind::WarnKw => "WARN",
-            TokenKind::ErrorKw => "ERROR",
-            _ => "LOG",
-        }
     }
 
     /// バインディングパターンを解析する。
@@ -616,13 +547,6 @@ impl<'tokens> ParserContext<'tokens> {
         terminators: &[TokenKind],
         respect_statement_boundaries: bool,
     ) -> bool {
-        // ネストの深さ制限チェック（スタックオーバーフロー・メモリ不足防止）
-        if self.expression_states.len() >= MAX_EXPRESSION_DEPTH {
-            let message = format!("式のネストが深すぎます（最大{}段）", MAX_EXPRESSION_DEPTH);
-            self.report_error(message, self.cursor, self.cursor);
-            return false;
-        }
-
         self.expression_states.push(ExpressionState::default());
         self.consume_trivia();
         let start = self.cursor;
@@ -640,12 +564,6 @@ impl<'tokens> ParserContext<'tokens> {
             let kind = TokenKind::from_token(token);
             if kind == TokenKind::Eof {
                 break;
-            }
-            if kind == TokenKind::IfKw {
-                let message = "JV3103: jv 言語では `if`/`else` 式はサポートされていません。`when` を使用してください。";
-                self.report_error(message, self.cursor, self.cursor + 1);
-                self.bump_raw();
-                continue;
             }
             let at_top_level = depth_paren == 0 && depth_brace == 0 && depth_bracket == 0;
             if at_top_level && terminators.contains(&kind) {
@@ -695,22 +613,22 @@ impl<'tokens> ParserContext<'tokens> {
                     if let Some(state) = self.expression_states.last_mut() {
                         state.register_when();
                     }
+                } else if kind == TokenKind::ElseKw {
+                    let inside_when = self
+                        .expression_states
+                        .last()
+                        .map(ExpressionState::is_in_when_context)
+                        .unwrap_or(false);
+                    if !inside_when {
+                        should_break_on_sync = true;
+                    }
                 } else if matches!(
                     kind,
                     TokenKind::LineComment | TokenKind::BlockComment | TokenKind::DocComment
                 ) {
                     should_break_on_sync = true;
                 } else if SYNC_TOKENS.contains(&kind) {
-                    // `when` 式のアーム内では `->` はステートメント境界にならない。
-                    let allow_arrow_within_when = kind == TokenKind::Arrow
-                        && self
-                            .expression_states
-                            .last()
-                            .map(|state| state.inside_when_block())
-                            .unwrap_or(false);
-                    if !allow_arrow_within_when {
-                        should_break_on_sync = true;
-                    }
+                    should_break_on_sync = true;
                 }
             }
 
@@ -749,7 +667,7 @@ impl<'tokens> ParserContext<'tokens> {
                             self.consume_inline_whitespace();
                             if let Some(token) = self.current_token() {
                                 debug_assert!(
-                                    Self::token_supports_unit_symbol(token),
+                                    TokenKind::from_token(token) == TokenKind::Identifier,
                                     "`@` の直後には単位識別子が必要です"
                                 );
                             }
@@ -761,7 +679,7 @@ impl<'tokens> ParserContext<'tokens> {
                         UnitSuffixDescriptor::SimpleWithoutAt => {
                             if let Some(token) = self.current_token() {
                                 debug_assert!(
-                                    Self::token_supports_unit_symbol(token),
+                                    TokenKind::from_token(token) == TokenKind::Identifier,
                                     "単位リテラルの末尾には単位識別子が必要です"
                                 );
                             }
@@ -840,31 +758,6 @@ impl<'tokens> ParserContext<'tokens> {
                         started_when_block = true;
                     }
                 }
-            }
-
-            if at_top_level
-                && matches!(
-                    kind,
-                    TokenKind::LogKw
-                        | TokenKind::TraceKw
-                        | TokenKind::DebugKw
-                        | TokenKind::InfoKw
-                        | TokenKind::WarnKw
-                        | TokenKind::ErrorKw
-                )
-            {
-                let consumed_line = self.parse_log_block_expression(kind);
-                if let Some(line) = consumed_line {
-                    if line > 0 {
-                        last_line = Some(line);
-                    }
-                    second_last_significant_kind = last_significant_kind;
-                    last_significant_kind = Some(TokenKind::RightBrace);
-                } else {
-                    second_last_significant_kind = last_significant_kind;
-                    last_significant_kind = Some(kind);
-                }
-                continue;
             }
 
             match kind {
@@ -965,9 +858,7 @@ impl<'tokens> ParserContext<'tokens> {
 
         let mut depth = 1usize;
         let mut index = start_index + 1;
-        let max_index = (start_index + MAX_GENERIC_LOOKAHEAD).min(self.tokens.len());
-
-        while index < max_index {
+        while index < self.tokens.len() {
             let token = &self.tokens[index];
             let kind = TokenKind::from_token(token);
             if kind.is_trivia() {
@@ -984,8 +875,7 @@ impl<'tokens> ParserContext<'tokens> {
                     depth -= 1;
                     if depth == 0 {
                         let mut lookahead = index + 1;
-                        let max_lookahead = lookahead.saturating_add(10).min(self.tokens.len());
-                        while lookahead < max_lookahead {
+                        while lookahead < self.tokens.len() {
                             let next_kind = TokenKind::from_token(&self.tokens[lookahead]);
                             if next_kind.is_trivia() {
                                 lookahead += 1;
@@ -1050,9 +940,6 @@ impl<'tokens> ParserContext<'tokens> {
                 self.bump_raw();
                 consumed = true;
             } else {
-                if token.leading_trivia.spaces > 0 {
-                    consumed = true;
-                }
                 break;
             }
         }
@@ -1077,52 +964,35 @@ impl<'tokens> ParserContext<'tokens> {
         let mut angle_depth = 0usize;
         let mut paren_depth = 0usize;
         let mut bracket_depth = 0usize;
-        let mut saw_significant = false;
-        let mut pending_whitespace = false;
+        let mut last_significant_kind: Option<TokenKind> = None;
 
         loop {
-            let Some(token) = self.current_token() else {
+            self.consume_trivia();
+            let Some(kind) = self.peek_significant_kind() else {
                 break;
             };
-            let kind = TokenKind::from_token(token);
-
-            if kind.is_trivia() {
-                if matches!(kind, TokenKind::Whitespace)
-                    && saw_significant
-                    && angle_depth == 0
-                    && paren_depth == 0
-                    && bracket_depth == 0
-                {
-                    pending_whitespace = true;
-                } else if matches!(kind, TokenKind::Newline)
-                    && saw_significant
-                    && angle_depth == 0
-                    && paren_depth == 0
-                    && bracket_depth == 0
-                {
-                    break;
-                }
-                self.bump_raw();
-                continue;
-            }
 
             let at_top_level = angle_depth == 0 && paren_depth == 0 && bracket_depth == 0;
-            if at_top_level && terminators.contains(&kind) {
-                break;
-            }
-            if at_top_level && self.unit_type_annotation_depth > 0 && saw_significant {
+
+            if self.unit_type_annotation_depth > 0
+                && last_significant_kind.is_some()
+                && at_top_level
+            {
                 if kind == TokenKind::At {
                     break;
                 }
-                if pending_whitespace
-                    && (Self::token_supports_unit_symbol(token) || kind == TokenKind::LeftBracket)
-                {
-                    break;
+                if kind == TokenKind::Whitespace {
+                    if let Some((_, next_kind)) = self.peek_significant_kind_from(self.cursor + 1) {
+                        if matches!(next_kind, TokenKind::Identifier | TokenKind::LeftBracket) {
+                            break;
+                        }
+                    }
                 }
             }
 
-            pending_whitespace = false;
-            saw_significant = true;
+            if at_top_level && terminators.contains(&kind) {
+                break;
+            }
 
             match kind {
                 TokenKind::Less => angle_depth = angle_depth.saturating_add(1),
@@ -1133,22 +1003,23 @@ impl<'tokens> ParserContext<'tokens> {
                 }
                 TokenKind::LeftParen => paren_depth = paren_depth.saturating_add(1),
                 TokenKind::RightParen => {
-                    if paren_depth == 0 {
-                        break;
+                    if paren_depth > 0 {
+                        paren_depth -= 1;
                     }
-                    paren_depth -= 1;
                 }
                 TokenKind::LeftBracket => bracket_depth = bracket_depth.saturating_add(1),
                 TokenKind::RightBracket => {
-                    if bracket_depth == 0 {
-                        break;
+                    if bracket_depth > 0 {
+                        bracket_depth -= 1;
                     }
-                    bracket_depth -= 1;
                 }
                 _ => {}
             }
 
             self.bump_raw();
+            if !kind.is_trivia() {
+                last_significant_kind = Some(kind);
+            }
         }
     }
 
@@ -1200,18 +1071,14 @@ impl<'tokens> ParserContext<'tokens> {
         let mut index = literal_index.saturating_add(1);
         let len = self.tokens.len();
         let mut saw_whitespace = false;
-        let literal_line = self
-            .tokens
-            .get(literal_index)
-            .map(|token| token.line)
-            .unwrap_or(0);
+        let literal_line = self.tokens[literal_index].line;
 
         while index < len {
             let token = &self.tokens[index];
-            if token.line != literal_line {
+            let kind = TokenKind::from_token(token);
+            if token.line > literal_line {
                 return None;
             }
-            let kind = TokenKind::from_token(token);
             match kind {
                 TokenKind::Whitespace => {
                     saw_whitespace = true;
@@ -1226,6 +1093,9 @@ impl<'tokens> ParserContext<'tokens> {
                         match kind_after {
                             TokenKind::Whitespace => index += 1,
                             TokenKind::Newline => return None,
+                            TokenKind::Identifier => {
+                                return Some(UnitSuffixDescriptor::SimpleWithAt);
+                            }
                             TokenKind::LeftBracket => {
                                 if self.find_matching_right_bracket(index).is_some() {
                                     return Some(UnitSuffixDescriptor::BracketWithAt);
@@ -1233,13 +1103,21 @@ impl<'tokens> ParserContext<'tokens> {
                                     return None;
                                 }
                             }
-                            _ if Self::token_supports_unit_symbol(token_after) => {
-                                return Some(UnitSuffixDescriptor::SimpleWithAt);
-                            }
                             _ => return None,
                         }
                     }
                     return None;
+                }
+                TokenKind::Identifier => {
+                    if saw_whitespace {
+                        return None;
+                    }
+                    if let Some((_, next_kind)) = self.peek_significant_kind_from(index + 1) {
+                        if matches!(next_kind, TokenKind::Colon | TokenKind::Assign) {
+                            return None;
+                        }
+                    }
+                    return Some(UnitSuffixDescriptor::SimpleWithoutAt);
                 }
                 TokenKind::LeftBracket => {
                     if saw_whitespace {
@@ -1250,12 +1128,6 @@ impl<'tokens> ParserContext<'tokens> {
                     } else {
                         return None;
                     }
-                }
-                _ if Self::token_supports_unit_symbol(token) => {
-                    if saw_whitespace {
-                        return None;
-                    }
-                    return Some(UnitSuffixDescriptor::SimpleWithoutAt);
                 }
                 _ => return None,
             }
@@ -1305,26 +1177,22 @@ impl<'tokens> ParserContext<'tokens> {
             return false;
         };
 
-        let has_explicit_whitespace =
-            matches!(TokenKind::from_token(next_token), TokenKind::Whitespace);
-        let has_trivia_gap =
-            next_token.leading_trivia.spaces > 0 || next_token.leading_trivia.newlines > 0;
-        let token_width = token.lexeme.chars().count().max(1);
-        let token_end_column = token.column + token_width;
-        let has_inline_gap = next_token.line == token.line && next_token.column > token_end_column;
+        let next_kind = TokenKind::from_token(next_token);
+        let token_end_column = token.column + token.lexeme.len();
+        let has_column_gap = next_token.column > token_end_column;
+        if matches!(next_kind, TokenKind::Whitespace | TokenKind::Newline) || has_column_gap {
+            return true;
+        }
 
-        has_explicit_whitespace || has_trivia_gap || has_inline_gap
+        let trivia = &next_token.leading_trivia;
+        let result = trivia.spaces > 0 || trivia.newlines > 0;
+        result
     }
 
     /// 現在のカーソル位置が `@` であり直後にホワイトスペースが存在するかを判定する。
     #[allow(dead_code)]
     pub(crate) fn cursor_has_whitespace_after_at(&self) -> bool {
         self.has_whitespace_after_at(self.cursor)
-    }
-
-    fn token_supports_unit_symbol(token: &Token) -> bool {
-        TokenKind::from_token(token) == TokenKind::Identifier
-            || matches!(token.token_type, TokenType::Invalid(_))
     }
 
     fn preview_unit_type_annotation_suffix(
@@ -1383,29 +1251,22 @@ impl<'tokens> ParserContext<'tokens> {
                 && saw_significant
             {
                 if kind == TokenKind::At {
-                    if let Some((next_index, next_kind)) =
-                        self.peek_significant_kind_from(index + 1)
-                    {
-                        if next_kind == TokenKind::LeftBracket {
-                            return Some(UnitSuffixDescriptor::BracketWithAt);
+                    let lookahead = self.peek_significant_kind_from(index + 1);
+                    match lookahead.map(|(_, next_kind)| next_kind) {
+                        Some(TokenKind::Identifier) => {
+                            return Some(UnitSuffixDescriptor::SimpleWithAt)
                         }
-                        if let Some(token_after) = self.tokens.get(next_index) {
-                            if Self::token_supports_unit_symbol(token_after) {
-                                return Some(UnitSuffixDescriptor::SimpleWithAt);
-                            }
+                        Some(TokenKind::LeftBracket) => {
+                            return Some(UnitSuffixDescriptor::BracketWithAt)
                         }
-                        return None;
-                    } else {
-                        return None;
+                        _ => return None,
                     }
                 } else if pending_whitespace {
-                    if kind == TokenKind::LeftBracket {
-                        return Some(UnitSuffixDescriptor::BracketWithoutAt);
-                    }
-                    if Self::token_supports_unit_symbol(token) {
-                        return Some(UnitSuffixDescriptor::SimpleWithoutAt);
-                    }
-                    return None;
+                    return match kind {
+                        TokenKind::Identifier => Some(UnitSuffixDescriptor::SimpleWithoutAt),
+                        TokenKind::LeftBracket => Some(UnitSuffixDescriptor::BracketWithoutAt),
+                        _ => None,
+                    };
                 }
             }
 
@@ -1458,15 +1319,19 @@ impl<'tokens> ParserContext<'tokens> {
                     return false;
                 }
                 let _ = self.consume_inline_whitespace();
-                if !self.bump_unit_identifier_or_invalid("単位名として識別子を指定してください")
-                {
+                if !self.bump_expected(
+                    TokenKind::Identifier,
+                    "単位名として識別子を指定してください",
+                ) {
                     return false;
                 }
                 true
             }
             UnitSuffixDescriptor::SimpleWithoutAt => {
-                if !self.bump_unit_identifier_or_invalid("単位名として識別子を指定してください")
-                {
+                if !self.bump_expected(
+                    TokenKind::Identifier,
+                    "単位名として識別子を指定してください",
+                ) {
                     return false;
                 }
                 true
@@ -1606,23 +1471,6 @@ impl<'tokens> ParserContext<'tokens> {
         }
     }
 
-    fn bump_unit_identifier_or_invalid(&mut self, message: &str) -> bool {
-        self.consume_trivia();
-        if let Some(token) = self.current_token() {
-            if Self::token_supports_unit_symbol(token) {
-                self.bump_raw();
-                return true;
-            }
-        }
-        let span = self.make_span(self.cursor, self.cursor);
-        self.push_diagnostic(ParserDiagnostic::new(
-            message,
-            DiagnosticSeverity::Error,
-            span,
-        ));
-        false
-    }
-
     /// エラーノードを伴う回復を実行する。
     pub(crate) fn recover_statement(&mut self, message: impl Into<String>, start: usize) {
         let message = message.into();
@@ -1641,8 +1489,7 @@ impl<'tokens> ParserContext<'tokens> {
             let kind = TokenKind::from_token(token);
             if SYNC_TOKENS.contains(&kind) {
                 match kind {
-                    TokenKind::Newline | TokenKind::Semicolon | TokenKind::Arrow => {
-                        // Arrow may have triggered error recovery, so always advance to avoid infinite loops.
+                    TokenKind::Newline | TokenKind::Semicolon => {
                         self.bump_raw();
                     }
                     _ => {}
@@ -1729,191 +1576,19 @@ impl<'tokens> ParserContext<'tokens> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ParserContext, UnitSuffixDescriptor};
-    use crate::frontend::DIAGNOSTIC_JV_UNIT_005_DEFAULT_MARKER_FORBIDDEN;
-    use crate::syntax::TokenKind;
-    use jv_lexer::{Lexer, Token, TokenTrivia, TokenType};
+    use super::*;
+    use jv_lexer::{Token, TokenTrivia, TokenType};
 
     fn make_token(token_type: TokenType, lexeme: &str) -> Token {
         Token {
             token_type,
             lexeme: lexeme.to_string(),
-            line: 1,
+            line: 0,
             column: 0,
             leading_trivia: TokenTrivia::default(),
             diagnostic: None,
             metadata: Vec::new(),
         }
-    }
-
-    fn assert_token_kind(token_type: TokenType, lexeme: &str, expected: TokenKind) {
-        let token = make_token(token_type, lexeme);
-        let actual = TokenKind::from_token(&token);
-        assert_eq!(
-            actual, expected,
-            "token {:?} should map to {:?}, got {:?}",
-            token.token_type, expected, actual
-        );
-    }
-
-    #[test]
-    fn rowan_symbols_match_token_kind() {
-        use TokenKind::*;
-
-        let keyword_cases = vec![
-            (TokenType::Package, "package", PackageKw),
-            (TokenType::Import, "import", ImportKw),
-            (TokenType::Val, "val", ValKw),
-            (TokenType::Var, "var", VarKw),
-            (TokenType::Fun, "fun", FunKw),
-            (TokenType::Class, "class", ClassKw),
-            (TokenType::Data, "data", DataKw),
-            (TokenType::When, "when", WhenKw),
-            (TokenType::Where, "where", WhereKw),
-            (TokenType::If, "if", IfKw),
-            (TokenType::Else, "else", ElseKw),
-            (TokenType::For, "for", ForKw),
-            (TokenType::In, "in", InKw),
-            (TokenType::While, "while", WhileKw),
-            (TokenType::Do, "do", DoKw),
-            (TokenType::Return, "return", ReturnKw),
-            (TokenType::Throw, "throw", ThrowKw),
-            (TokenType::Break, "break", BreakKw),
-            (TokenType::Continue, "continue", ContinueKw),
-            (TokenType::True, "true", TrueKw),
-            (TokenType::False, "false", FalseKw),
-            (TokenType::Null, "null", NullKw),
-            (TokenType::Log, "LOG", LogKw),
-            (TokenType::Trace, "TRACE", TraceKw),
-            (TokenType::Debug, "DEBUG", DebugKw),
-            (TokenType::Info, "INFO", InfoKw),
-            (TokenType::Warn, "WARN", WarnKw),
-            (TokenType::Error, "ERROR", ErrorKw),
-        ];
-
-        let operator_cases = vec![
-            (TokenType::Assign, "=", Assign),
-            (TokenType::Plus, "+", Plus),
-            (TokenType::Minus, "-", Minus),
-            (TokenType::Multiply, "*", Star),
-            (TokenType::Divide, "/", Slash),
-            (TokenType::Modulo, "%", Percent),
-            (TokenType::Equal, "==", EqualEqual),
-            (TokenType::NotEqual, "!=", NotEqual),
-            (TokenType::Less, "<", Less),
-            (TokenType::LessEqual, "<=", LessEqual),
-            (TokenType::Greater, ">", Greater),
-            (TokenType::GreaterEqual, ">=", GreaterEqual),
-            (TokenType::And, "&&", AndAnd),
-            (TokenType::Or, "||", OrOr),
-            (TokenType::Not, "!", Bang),
-            (TokenType::RangeExclusive, "..", RangeExclusive),
-            (TokenType::RangeInclusive, "..=", RangeInclusive),
-            (TokenType::Question, "?", Question),
-            (TokenType::NullSafe, "?.", NullSafe),
-            (TokenType::Elvis, "?:", Elvis),
-            (TokenType::Arrow, "->", Arrow),
-            (TokenType::FatArrow, "=>", FatArrow),
-            (TokenType::DoubleColon, "::", DoubleColon),
-        ];
-
-        let punctuation_cases = vec![
-            (TokenType::LeftParen, "(", LeftParen),
-            (TokenType::RightParen, ")", RightParen),
-            (TokenType::LeftBrace, "{", LeftBrace),
-            (TokenType::RightBrace, "}", RightBrace),
-            (TokenType::LeftBracket, "[", LeftBracket),
-            (TokenType::RightBracket, "]", RightBracket),
-            (TokenType::Comma, ",", Comma),
-            (TokenType::LayoutComma, ",", LayoutComma),
-            (TokenType::Dot, ".", Dot),
-            (TokenType::Semicolon, ";", Semicolon),
-            (TokenType::Colon, ":", Colon),
-            (TokenType::At, "@", At),
-        ];
-
-        let literal_cases = vec![
-            (
-                TokenType::String("\"text\"".into()),
-                "\"text\"",
-                StringLiteral,
-            ),
-            (
-                TokenType::StringInterpolation("${value}".into()),
-                "${value}",
-                StringLiteral,
-            ),
-            (TokenType::Number("42".into()), "42", NumberLiteral),
-            (TokenType::Character('a'), "'a'", CharacterLiteral),
-            (TokenType::Identifier("name".into()), "name", Identifier),
-            (TokenType::Boolean(true), "true", BooleanLiteral),
-            (TokenType::RegexLiteral(".*".into()), "/.*/", RegexLiteral),
-        ];
-
-        let trivia_cases = vec![
-            (TokenType::Whitespace(" ".into()), " ", Whitespace),
-            (TokenType::Newline, "\n", Newline),
-            (TokenType::LineComment("// a".into()), "// a", LineComment),
-            (
-                TokenType::BlockComment("/* a */".into()),
-                "/* a */",
-                BlockComment,
-            ),
-            (
-                TokenType::JavaDocComment("/** a */".into()),
-                "/** a */",
-                DocComment,
-            ),
-        ];
-
-        let misc_cases = vec![
-            (TokenType::StringStart, "\"$", StringStart),
-            (TokenType::StringMid, "}", StringMid),
-            (TokenType::StringEnd, "\"", StringEnd),
-            (TokenType::Eof, "", Eof),
-            (TokenType::Invalid("???".into()), "???", Unknown),
-        ];
-
-        for (token_type, lexeme, expected) in keyword_cases
-            .into_iter()
-            .chain(operator_cases)
-            .chain(punctuation_cases)
-            .chain(literal_cases)
-            .chain(trivia_cases)
-            .chain(misc_cases)
-        {
-            assert_token_kind(token_type, lexeme, expected);
-        }
-
-        assert_token_kind(TokenType::Identifier("use".into()), "use", UseKw);
-        assert_token_kind(TokenType::Identifier("defer".into()), "defer", DeferKw);
-        assert_token_kind(TokenType::Identifier("spawn".into()), "spawn", SpawnKw);
-    }
-
-    #[test]
-    fn detects_unit_definition_block() {
-        let tokens = vec![
-            make_token(TokenType::At, "@"),
-            make_token(TokenType::Identifier("Length".into()), "Length"),
-            make_token(TokenType::LeftParen, "("),
-            make_token(TokenType::Identifier("Double".into()), "Double"),
-            make_token(TokenType::RightParen, ")"),
-            make_token(TokenType::Identifier("m".into()), "m"),
-            make_token(TokenType::LeftBrace, "{"),
-            make_token(TokenType::Identifier("基準".into()), "基準"),
-            make_token(TokenType::Colon, ":"),
-            make_token(TokenType::Assign, "="),
-            make_token(TokenType::Identifier("1".into()), "1"),
-            make_token(TokenType::RightBrace, "}"),
-        ];
-
-        let mut ctx = ParserContext::new(tokens.as_slice());
-        ctx.parse_statement_list(None);
-
-        assert!(ctx
-            .diagnostics
-            .iter()
-            .all(|diag| diag.message != DIAGNOSTIC_JV_UNIT_005_DEFAULT_MARKER_FORBIDDEN));
     }
 
     #[test]
@@ -1939,33 +1614,6 @@ mod tests {
         assert!(!ctx.cursor_has_whitespace_after_at());
     }
 
-    fn lex_tokens(source: &str) -> Vec<Token> {
-        let mut lexer = Lexer::new(source.to_owned());
-        lexer.tokenize().expect("字句解析に成功すること")
-    }
-
-    #[test]
-    fn detects_real_world_whitespace_after_at() {
-        let tokens = lex_tokens("@ 単位(Double) m {");
-        let ctx = ParserContext::new(tokens.as_slice());
-        assert!(
-            ctx.has_whitespace_after_at(0),
-            "実際のトークン列で空白ありケースを検出できること"
-        );
-        assert!(ctx.cursor_has_whitespace_after_at());
-    }
-
-    #[test]
-    fn detects_missing_whitespace_with_lexer_tokens() {
-        let tokens = lex_tokens("@単位(Double) m {");
-        let ctx = ParserContext::new(tokens.as_slice());
-        assert!(
-            !ctx.has_whitespace_after_at(0),
-            "実際のトークン列で空白なしケースを検出できること"
-        );
-        assert!(!ctx.cursor_has_whitespace_after_at());
-    }
-
     #[test]
     fn ignores_non_at_tokens() {
         let tokens = vec![
@@ -1978,10 +1626,10 @@ mod tests {
         let mut ctx = ParserContext::new(tokens.as_slice());
         assert!(!ctx.cursor_has_whitespace_after_at());
 
-        ctx.bump_raw();
+        ctx.bump_raw(); // identifier
         assert!(!ctx.cursor_has_whitespace_after_at());
 
-        ctx.bump_raw();
+        ctx.bump_raw(); // whitespace
         assert!(ctx.cursor_has_whitespace_after_at());
         assert!(ctx.has_whitespace_after_at(ctx.position()));
     }
@@ -2071,45 +1719,5 @@ mod tests {
             TokenKind::WhereKw,
         ]);
         assert!(descriptor.is_none());
-    }
-
-    #[test]
-    fn parse_expression_until_keeps_parsing_when_arrow_within_return() {
-        let source = r#"
-            return when (value) {
-                is Int -> "int"
-                else -> "other"
-            }
-        "#;
-
-        let mut lexer = Lexer::new(source.to_string());
-        let tokens = lexer
-            .tokenize()
-            .expect("lexing should succeed for parser tests");
-        let arrow_index = tokens
-            .iter()
-            .position(|token| TokenKind::from_token(token) == TokenKind::Arrow)
-            .expect("fixture should contain an arrow token");
-
-        let mut context = ParserContext::new(&tokens);
-        assert!(
-            context.bump_expected(TokenKind::ReturnKw, "test should consume return keyword"),
-            "return keyword should be present"
-        );
-
-        let terminators = [
-            TokenKind::Semicolon,
-            TokenKind::Newline,
-            TokenKind::RightBrace,
-        ];
-        let consumed = context.parse_expression_until(&terminators, true);
-        assert!(
-            consumed,
-            "when expression body should be parsed as return payload"
-        );
-        assert!(
-            context.position() > arrow_index,
-            "cursor must advance past the when arrow to avoid syncing on it"
-        );
     }
 }

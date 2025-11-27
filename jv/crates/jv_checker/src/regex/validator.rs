@@ -1,9 +1,8 @@
 use crate::CheckError;
 use crate::diagnostics::{self, DiagnosticSeverity, EnhancedDiagnostic};
 use jv_ast::{
-    Argument, ConcurrencyConstruct, Expression, ForInStatement, LogBlock, LogItem, LoopStrategy,
-    NumericRangeLoop, Program, RegexLiteral, ResourceManagement, Span, Statement, StringPart,
-    TestDataset, TryCatchClause,
+    Argument, ConcurrencyConstruct, Expression, ForInStatement, LoopStrategy, NumericRangeLoop,
+    Program, RegexLiteral, ResourceManagement, Span, Statement, StringPart, TryCatchClause,
     statement::{UnitTypeDefinition, UnitTypeMember},
 };
 use std::time::Instant;
@@ -174,12 +173,6 @@ impl<'a> RegexValidationVisitor<'a> {
                 self.visit_expression(target);
                 self.visit_expression(value);
             }
-            Statement::TestDeclaration(declaration) => {
-                if let Some(dataset) = &declaration.dataset {
-                    self.visit_test_dataset(dataset);
-                }
-                self.visit_expression(&declaration.body);
-            }
             Statement::UnitTypeDefinition(definition) => {
                 self.visit_unit_definition(definition);
             }
@@ -225,16 +218,6 @@ impl<'a> RegexValidationVisitor<'a> {
         }
     }
 
-    fn visit_test_dataset(&mut self, dataset: &TestDataset) {
-        if let TestDataset::InlineArray { rows, .. } = dataset {
-            for row in rows {
-                for value in &row.values {
-                    self.visit_expression(value);
-                }
-            }
-        }
-    }
-
     fn visit_unit_definition(&mut self, definition: &UnitTypeDefinition) {
         for member in &definition.members {
             match member {
@@ -270,7 +253,6 @@ impl<'a> RegexValidationVisitor<'a> {
             Expression::RegexLiteral(literal) => {
                 self.validator.analyze_literal(literal, self.errors);
             }
-            Expression::RegexCommand(_) => {}
             Expression::Identifier(..)
             | Expression::This(..)
             | Expression::Super(..)
@@ -307,11 +289,6 @@ impl<'a> RegexValidationVisitor<'a> {
                 }
             }
             Expression::Array { elements, .. } => {
-                for element in elements {
-                    self.visit_expression(element);
-                }
-            }
-            Expression::Tuple { elements, .. } => {
                 for element in elements {
                     self.visit_expression(element);
                 }
@@ -362,7 +339,6 @@ impl<'a> RegexValidationVisitor<'a> {
                     self.visit_statement(statement);
                 }
             }
-            Expression::LogBlock(block) => self.visit_log_block(block),
             Expression::Try {
                 body,
                 catch_clauses,
@@ -376,16 +352,6 @@ impl<'a> RegexValidationVisitor<'a> {
                 if let Some(finally) = finally_block {
                     self.visit_expression(finally);
                 }
-            }
-        }
-    }
-
-    fn visit_log_block(&mut self, block: &LogBlock) {
-        for item in &block.items {
-            match item {
-                LogItem::Statement(statement) => self.visit_statement(statement),
-                LogItem::Expression(expr) => self.visit_expression(expr),
-                LogItem::Nested(nested) => self.visit_log_block(nested),
             }
         }
     }

@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use crate::types::{
     DataFormat, IrExpression, IrImport, IrImportDetail, IrResolvedMethodTarget, IrStatement,
-    JavaType, LogLevel, LoggerFieldId, LoggerFieldSpec, LoggingFrameworkKind, LoggingMetadata,
-    MethodOverload, PrimitiveReturnMetadata, SampleMode, UtilityClass,
+    JavaType, MethodOverload, PrimitiveReturnMetadata, SampleMode, UtilityClass,
 };
+use crate::unit::UnitRegistrySummary;
 use jv_ast::{CallArgumentStyle, Span};
 use jv_support::arena::{
     PoolMetrics as TransformPoolMetrics, PoolSessionMetrics as TransformPoolSessionMetrics,
@@ -44,8 +44,6 @@ pub struct TransformContext {
     pub sample_options: SampleOptions,
     /// Cache tracking whitespace-delimited sequence element types to avoid recomputation
     pub sequence_style_cache: SequenceStyleCache,
-    /// Tuple record plan metadata keyed by tuple literal span
-    tuple_plan_usages: HashMap<SpanKey, TuplePlanRegistration>,
     /// Counter for synthesised local identifiers
     temp_counter: usize,
     /// Optional arena pools shared across lowering sessions
@@ -56,8 +54,8 @@ pub struct TransformContext {
     planned_imports: Vec<IrImport>,
     /// Alias lookup for resolved import entries
     import_aliases: HashMap<String, JavaType>,
-    /// Logging transformation state and configuration
-    logging_state: LoggingState,
+    /// Optional unit registry snapshot shared with transformations
+    unit_registry_summary: Option<UnitRegistrySummary>,
 }
 
 /// Hint describing a function signature sourced from TypeFacts prior to lowering.
@@ -101,13 +99,12 @@ impl TransformContext {
             record_components: HashMap::new(),
             sample_options: SampleOptions::default(),
             sequence_style_cache: SequenceStyleCache::with_capacity(),
-            tuple_plan_usages: HashMap::new(),
             temp_counter: 0,
             pool_state: None,
             when_strategies: Vec::new(),
             planned_imports: Vec::new(),
             import_aliases: HashMap::new(),
-            logging_state: LoggingState::default(),
+            unit_registry_summary: None,
         }
     }
 
@@ -139,6 +136,14 @@ impl TransformContext {
 
     pub fn register_function_signature(&mut self, name: String, params: Vec<JavaType>) {
         self.function_signatures.insert(name, params);
+    }
+
+    pub fn set_unit_registry_summary(&mut self, summary: Option<UnitRegistrySummary>) {
+        self.unit_registry_summary = summary;
+    }
+
+    pub fn unit_registry_summary(&self) -> Option<&UnitRegistrySummary> {
+        self.unit_registry_summary.as_ref()
     }
 
     /// Registers a preloaded function signature hint sourced from upstream analysis.
@@ -260,72 +265,6 @@ impl TransformContext {
             }
         }
         keys
-    }
-
-    pub fn register_tuple_plan_usage(
-        &mut self,
-        span: Span,
-        record_name: Option<String>,
-        component_names: Vec<String>,
-        component_spans: Vec<Option<Span>>,
-        type_hints: Vec<Option<JavaType>>,
-    ) {
-        let key = SpanKey::from(&span);
-        self.tuple_plan_usages.insert(
-            key,
-            TuplePlanRegistration {
-                record_name,
-                component_names,
-                component_spans,
-                type_hints,
-            },
-        );
-    }
-
-    pub fn tuple_component_metadata(
-        &self,
-        span: &Span,
-        index: usize,
-    ) -> Option<TupleComponentMetadata> {
-        let key = SpanKey::from(span);
-        let registration = self.tuple_plan_usages.get(&key)?;
-        let field_name = registration
-            .component_names
-            .get(index)
-            .cloned()
-            .unwrap_or_else(|| format!("_{}", index + 1));
-        let java_type = registration
-            .type_hints
-            .get(index)
-            .and_then(|hint| hint.clone())
-            .or_else(|| {
-                registration
-                    .record_name
-                    .as_ref()
-                    .and_then(|name| self.record_component_type(name, &field_name))
-            })
-            .unwrap_or_else(JavaType::object);
-        let source_span = registration
-            .component_spans
-            .get(index)
-            .and_then(|entry| entry.clone());
-        Some(TupleComponentMetadata {
-            field_name,
-            java_type,
-            source_span,
-        })
-    }
-
-    pub fn tuple_record_java_type(&self, span: &Span) -> Option<JavaType> {
-        let key = SpanKey::from(span);
-        let registration = self.tuple_plan_usages.get(&key)?;
-        registration
-            .record_name
-            .as_ref()
-            .map(|name| JavaType::Reference {
-                name: name.clone(),
-                generic_args: vec![],
-            })
     }
 
     /// Registers a lowered method declaration so that later passes can resolve Java naming.
@@ -578,42 +517,6 @@ impl TransformContext {
 
     pub fn sample_options_mut(&mut self) -> &mut SampleOptions {
         &mut self.sample_options
-    }
-
-    pub fn logging_options(&self) -> &LoggingOptions {
-        self.logging_state.options()
-    }
-
-    pub fn logging_options_mut(&mut self) -> &mut LoggingOptions {
-        self.logging_state.options_mut()
-    }
-
-    pub fn allocate_logger_field(&mut self, owner_hint: Option<String>) -> LoggerFieldId {
-        self.logging_state.allocate_field(owner_hint)
-    }
-
-    pub fn logger_field_spec(&self, id: LoggerFieldId) -> Option<&LoggerFieldSpec> {
-        self.logging_state.field(id)
-    }
-
-    pub fn take_logging_metadata(&mut self) -> LoggingMetadata {
-        self.logging_state.take_metadata()
-    }
-
-    pub fn set_logging_framework(&mut self, framework: LoggingFrameworkKind) {
-        self.logging_state.framework = framework;
-    }
-
-    pub fn logging_framework(&self) -> &LoggingFrameworkKind {
-        &self.logging_state.framework
-    }
-
-    pub fn set_trace_context_enabled(&mut self, enabled: bool) {
-        self.logging_state.trace_context = enabled;
-    }
-
-    pub fn trace_context_enabled(&self) -> bool {
-        self.logging_state.trace_context
     }
 
     pub fn sequence_style_cache(&self) -> &SequenceStyleCache {
@@ -1093,15 +996,12 @@ fn set_expression_type(expr: &mut IrExpression, java_type: JavaType) {
         | IrExpression::Conditional { java_type: ty, .. }
         | IrExpression::Block { java_type: ty, .. }
         | IrExpression::ObjectCreation { java_type: ty, .. }
-        | IrExpression::TupleLiteral { java_type: ty, .. }
         | IrExpression::SequencePipeline { java_type: ty, .. }
         | IrExpression::Switch { java_type: ty, .. }
         | IrExpression::NullSafeOperation { java_type: ty, .. }
         | IrExpression::CompletableFuture { java_type: ty, .. }
         | IrExpression::VirtualThread { java_type: ty, .. }
         | IrExpression::TryWithResources { java_type: ty, .. }
-        | IrExpression::LogInvocation { java_type: ty, .. }
-        | IrExpression::RegexCommand { java_type: ty, .. }
         | IrExpression::This { java_type: ty, .. }
         | IrExpression::Super { java_type: ty, .. } => {
             *ty = java_type;
@@ -1111,7 +1011,6 @@ fn set_expression_type(expr: &mut IrExpression, java_type: JavaType) {
         }
         IrExpression::Lambda { .. }
         | IrExpression::Literal(_, _)
-        | IrExpression::TextBlock { .. }
         | IrExpression::RegexPattern { .. }
         | IrExpression::ArrayCreation { .. }
         | IrExpression::StringFormat { .. }
@@ -1143,7 +1042,6 @@ impl Clone for TransformContext {
             record_components: self.record_components.clone(),
             sample_options: self.sample_options.clone(),
             sequence_style_cache: self.sequence_style_cache.clone(),
-            tuple_plan_usages: self.tuple_plan_usages.clone(),
             temp_counter: self.temp_counter,
             pool_state: self
                 .pool_state
@@ -1152,7 +1050,7 @@ impl Clone for TransformContext {
             when_strategies: self.when_strategies.clone(),
             planned_imports: self.planned_imports.clone(),
             import_aliases: self.import_aliases.clone(),
-            logging_state: self.logging_state.clone(),
+            unit_registry_summary: self.unit_registry_summary.clone(),
         }
     }
 }
@@ -1201,65 +1099,6 @@ pub struct RegisteredMethodCall {
     pub return_type: JavaType,
     pub argument_style: CallArgumentStyle,
     pub span: Span,
-}
-
-#[derive(Debug, Clone)]
-pub struct LoggingOptions {
-    pub active_level: LogLevel,
-    pub default_level: LogLevel,
-}
-
-impl Default for LoggingOptions {
-    fn default() -> Self {
-        Self {
-            active_level: LogLevel::Info,
-            default_level: LogLevel::Info,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-struct LoggingState {
-    options: LoggingOptions,
-    next_field_id: u32,
-    fields: Vec<LoggerFieldSpec>,
-    framework: LoggingFrameworkKind,
-    trace_context: bool,
-}
-
-impl LoggingState {
-    fn options(&self) -> &LoggingOptions {
-        &self.options
-    }
-
-    fn options_mut(&mut self) -> &mut LoggingOptions {
-        &mut self.options
-    }
-
-    fn allocate_field(&mut self, owner_hint: Option<String>) -> LoggerFieldId {
-        let id = LoggerFieldId(self.next_field_id);
-        self.next_field_id = self.next_field_id.wrapping_add(1);
-        let spec = LoggerFieldSpec {
-            id,
-            owner_hint,
-            field_name: "LOGGER".to_string(),
-            class_id: None,
-        };
-        self.fields.push(spec);
-        id
-    }
-
-    fn field(&self, id: LoggerFieldId) -> Option<&LoggerFieldSpec> {
-        self.fields.iter().find(|spec| spec.id == id)
-    }
-
-    fn take_metadata(&mut self) -> LoggingMetadata {
-        LoggingMetadata {
-            logger_fields: std::mem::take(&mut self.fields),
-            framework: self.framework.clone(),
-            trace_context: self.trace_context,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -1339,21 +1178,6 @@ impl SequenceStyleCache {
         self.array_elements.clear();
         self.call_arguments.clear();
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct TupleComponentMetadata {
-    pub field_name: String,
-    pub java_type: JavaType,
-    pub source_span: Option<Span>,
-}
-
-#[derive(Debug, Clone)]
-struct TuplePlanRegistration {
-    record_name: Option<String>,
-    component_names: Vec<String>,
-    component_spans: Vec<Option<Span>>,
-    type_hints: Vec<Option<JavaType>>,
 }
 
 #[derive(Debug)]

@@ -274,23 +274,16 @@ fn java_executable() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
-    use std::ffi::OsString;
-    use std::path::Path;
-    use std::sync::Mutex;
-
-    #[cfg(unix)]
     use crate::{BuildConfig, BuildSystem};
-    #[cfg(unix)]
-    use std::fs;
+    use std::ffi::OsString;
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{env, fs};
+
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
-    #[cfg(unix)]
-    use std::path::PathBuf;
-    #[cfg(unix)]
-    use std::time::{SystemTime, UNIX_EPOCH};
 
-    #[cfg(unix)]
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
@@ -374,10 +367,7 @@ Java(TM) SE Runtime Environment"#;
 
         fn set_os(key: &'static str, value: &std::ffi::OsStr) -> Self {
             let original = env::var_os(key);
-            // SAFETY: テスト環境内でプロセス環境変数を一時的に上書きする用途のため、
-            // 同期ミューテックスで保護した上で安全に呼び出す。
             unsafe {
-                // SAFETY: `set_var` simply sets process env; inputs are well-formed `OsStr`.
                 env::set_var(key, value);
             }
             Self { key, original }
@@ -388,12 +378,10 @@ Java(TM) SE Runtime Environment"#;
         fn drop(&mut self) {
             if let Some(value) = self.original.take() {
                 unsafe {
-                    // SAFETY: restoring previously captured value.
                     env::set_var(self.key, value);
                 }
             } else {
                 unsafe {
-                    // SAFETY: removing variable for current process; no aliases retained.
                     env::remove_var(self.key);
                 }
             }

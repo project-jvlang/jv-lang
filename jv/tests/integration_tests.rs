@@ -17,7 +17,6 @@ use jv_cli::pipeline::project::{
 };
 use jv_cli::pipeline::{compile, BuildOptionsFactory, CliOverrides};
 use jv_ir::types::IrImportDetail;
-use jv_pm::{LogLevel, LoggingConfigLayer, LoggingFramework};
 
 struct TempDirGuard {
     path: PathBuf,
@@ -128,26 +127,6 @@ fn workspace_file(relative: &str) -> PathBuf {
     workspace_root().join(relative)
 }
 
-fn collect_java_files(root: &Path) -> Vec<PathBuf> {
-    let mut stack = vec![root.to_path_buf()];
-    let mut files = Vec::new();
-
-    while let Some(current) = stack.pop() {
-        let entries = fs::read_dir(&current)
-            .unwrap_or_else(|err| panic!("Failed to read {}: {}", current.display(), err));
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.extension().and_then(|ext| ext.to_str()) == Some("java") {
-                files.push(path);
-            }
-        }
-    }
-
-    files
-}
-
 fn ensure_toolchain_envs() {
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
@@ -157,7 +136,6 @@ fn ensure_toolchain_envs() {
         ] {
             if env::var_os(var).is_none() {
                 if let Some(path) = dir {
-                    // プロセス開始時に一度だけ実行されるため、安全に環境変数を設定できる。
                     unsafe {
                         env::set_var(var, path);
                     }
@@ -438,12 +416,10 @@ fn java_command_for_target(target: JavaTarget) -> Option<Command> {
     })
 }
 
-#[allow(dead_code)]
 fn javac_command() -> Option<Command> {
     javac_command_for_target(default_java_target())
 }
 
-#[allow(dead_code)]
 fn java_command() -> Option<Command> {
     java_command_for_target(default_java_target())
 }
@@ -568,8 +544,12 @@ include = ["src/**/*.jv"]
 
     assert!(status.success(), "CLI build failed with status: {}", status);
 
-    let java_dir = project_dir.join("target/java25");
-    let java_files = collect_java_files(&java_dir);
+    let java_files: Vec<_> = fs::read_dir(project_dir.join("target/java25"))
+        .expect("Failed to read output directory")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("java"))
+        .collect();
 
     assert!(
         !java_files.is_empty(),
@@ -577,20 +557,8 @@ include = ["src/**/*.jv"]
     );
 
     let java_source = fs::read_to_string(&java_files[0]).expect("Failed to read Java output");
-    let class_name = java_files[0]
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .expect("generated Java should have a valid class name");
-    assert!(
-        java_source.contains(&format!("class {}", class_name)),
-        "generated Java should declare {}: {}",
-        class_name,
-        java_source
-    );
-    assert!(
-        java_source.contains("Sequence output"),
-        "generated Java should include the formatted message string: {java_source}"
-    );
+    assert!(java_source.contains("Generated"));
+    assert!(java_source.contains("message"));
 }
 
 #[test]
@@ -651,15 +619,13 @@ fn cli_build_quick_tour_script_compiles() {
     };
 
     let temp_dir = TempDirGuard::new("cli-quick-tour").expect("create temp dir");
-    let quick_tour = workspace_file("examples/quick-tour.jv");
-    let quick_tour_copy = temp_dir.path().join("quick-tour.jv");
-    fs::copy(&quick_tour, &quick_tour_copy).expect("copy quick-tour script");
     let output_dir = temp_dir.path().join("out");
+    let quick_tour = workspace_file("examples/quick-tour.jv");
 
     let status = Command::new(&cli_path)
         .current_dir(temp_dir.path())
         .arg("build")
-        .arg(&quick_tour_copy)
+        .arg(&quick_tour)
         .arg("--java-only")
         .arg("-o")
         .arg(&output_dir)
@@ -986,34 +952,26 @@ fun sample(input: String): Boolean {
 
     assert!(status.success(), "regex CLI build failed: {status:?}");
 
-    let java_dir = project_dir.join("target/java25");
-    let java_files = collect_java_files(&java_dir);
+    let java_files: Vec<_> = fs::read_dir(project_dir.join("target/java25"))
+        .expect("read regex java output")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("java"))
+        .collect();
 
     assert!(
         !java_files.is_empty(),
         "regex build should emit at least one Java file"
     );
 
-    let java_sources: Vec<String> = java_files
-        .iter()
-        .map(|path| fs::read_to_string(path).expect("read regex java source"))
-        .collect();
-    let combined_java = java_sources.join("\n");
+    let java_source = fs::read_to_string(&java_files[0]).expect("read regex java source");
     assert!(
-        combined_java.contains("import java.util.regex.Pattern;"),
-        "generated Java should import Pattern: {combined_java}"
+        java_source.contains("import java.util.regex.Pattern;"),
+        "generated Java should import Pattern: {java_source}"
     );
     assert!(
-        combined_java.contains("Pattern.compile("),
-        "generated Java should invoke Pattern.compile: {combined_java}"
-    );
-    assert!(
-        combined_java.contains("\\d+"),
-        "generated Java should compile the regex literal: {combined_java}"
-    );
-    assert!(
-        combined_java.contains(&format!("Pattern.compile(\"\\d+\")")),
-        "generated Java should compile the regex literal with literal pattern: {combined_java}"
+        java_source.contains("Pattern.compile(\"\\d+\")"),
+        "generated Java should compile the regex literal: {java_source}"
     );
 }
 
@@ -1047,50 +1005,9 @@ fn cli_check_reports_regex_diagnostics() {
         stderr.contains("JV5102"),
         "regex diagnostic output should contain JV5102, got: {stderr}"
     );
-    let stderr_lower = stderr.to_ascii_lowercase();
     assert!(
-        stderr.contains("Unsupported regex escape sequence"),
-        "regex diagnostic text should describe the escape error, got: {stderr}"
-    );
-    assert!(
-        stderr_lower.contains("regex literal"),
+        stderr.contains("Regex literal"),
         "regex diagnostic text should mention regex literal, got: {stderr}"
-    );
-}
-
-#[test]
-fn pipeline_compiles_regex_command_sample() {
-    let temp_dir = TempDirGuard::new("regex-command-sample").expect("create temp dir");
-    let sample = workspace_file("samples/regex/concise_command.jv");
-
-    let plan = compose_plan_from_fixture(
-        temp_dir.path(),
-        &sample,
-        CliOverrides {
-            java_only: true,
-            ..CliOverrides::default()
-        },
-    );
-
-    let artifacts = compile(&plan).expect("regex command sample should compile");
-    assert!(
-        !artifacts.java_files.is_empty(),
-        "regex sample should produce Java output"
-    );
-
-    let java_sources: Vec<String> = artifacts
-        .java_files
-        .iter()
-        .map(|path| fs::read_to_string(path).expect("read regex sample java"))
-        .collect();
-    let combined = java_sources.join("\n");
-    assert!(
-        combined.contains("replaceAll"),
-        "regex sample should emit replaceAll pipeline: {combined}"
-    );
-    assert!(
-        combined.contains(".split("),
-        "regex sample should emit split calls: {combined}"
     );
 }
 
@@ -1121,8 +1038,6 @@ fn pipeline_compile_produces_artifacts() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
-            logging_cli: LoggingConfigLayer::default(),
-            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1166,8 +1081,6 @@ fn pipeline_preserves_annotations_in_java_output() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
-            logging_cli: LoggingConfigLayer::default(),
-            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1190,67 +1103,6 @@ fn pipeline_preserves_annotations_in_java_output() {
     assert!(java_source
         .contains("@RequestMapping(path = {\"/ping\"}, produces = {\"application/json\"})"));
     assert!(java_source.contains("@Nullable"));
-}
-
-#[test]
-fn logging_integration_emits_logger_calls_and_trace_context() {
-    let temp_dir =
-        TempDirGuard::new("logging-integration").expect("一時ディレクトリの作成に失敗しました");
-    let input = workspace_file("tests/fixtures/logging/basic.jv");
-
-    let mut plan = compose_plan_from_fixture(
-        temp_dir.path(),
-        &input,
-        CliOverrides {
-            java_only: true,
-            ..CliOverrides::default()
-        },
-    );
-
-    plan.logging_config.framework = LoggingFramework::Slf4j;
-    plan.logging_config.log_level = LogLevel::Trace;
-    plan.logging_config.default_level = LogLevel::Info;
-    plan.logging_config.opentelemetry.enabled = true;
-    plan.logging_config.opentelemetry.trace_context = true;
-
-    let artifacts = compile(&plan).expect("ロギング統合ビルドが成功するべきです");
-
-    assert!(
-        !artifacts.java_files.is_empty(),
-        "少なくとも1つの Java ファイルが生成される必要があります"
-    );
-
-    let mut aggregated = String::new();
-    for java_path in &artifacts.java_files {
-        let source = fs::read_to_string(java_path).unwrap_or_else(|error| {
-            panic!(
-                "生成された Java ファイル ({}) の読み込みに失敗しました: {error}",
-                java_path.display()
-            )
-        });
-        aggregated.push_str(&source);
-    }
-
-    assert!(
-        aggregated.contains("private static final org.slf4j.Logger LOGGER"),
-        "Slf4j 用のロガーフィールドが生成されるべきです: {aggregated}"
-    );
-    assert!(
-        aggregated.contains("LOGGER.info(\"開始\");"),
-        "LOG ブロックが INFO レベルの呼び出しへ展開されるべきです: {aggregated}"
-    );
-    assert!(
-        aggregated.contains("MDC.put(\"traceId\""),
-        "TraceId を MDC へ投入するコードが必要です: {aggregated}"
-    );
-    assert!(
-        aggregated.contains("MDC.remove(\"traceId\")"),
-        "traceId を MDC から除去するコードが必要です: {aggregated}"
-    );
-    assert!(
-        aggregated.contains("MDC.remove(\"spanId\")"),
-        "spanId を MDC から除去するコードが必要です: {aggregated}"
-    );
 }
 
 #[test]
@@ -1321,8 +1173,6 @@ fn pipeline_emit_types_produces_type_facts_json() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
-            logging_cli: LoggingConfigLayer::default(),
-            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1370,8 +1220,6 @@ fn type_inference_snapshot_emitted_with_emit_types() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
-            logging_cli: LoggingConfigLayer::default(),
-            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1417,8 +1265,6 @@ fn type_inference_snapshot_tracks_program_changes() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
-            logging_cli: LoggingConfigLayer::default(),
-            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1481,8 +1327,6 @@ fn null_safety_warnings_survive_pipeline() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
-            logging_cli: LoggingConfigLayer::default(),
-            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1521,8 +1365,6 @@ fn ambiguous_function_causes_type_error() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
-            logging_cli: LoggingConfigLayer::default(),
-            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1569,8 +1411,6 @@ fn pipeline_reports_missing_else_in_value_when() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
-            logging_cli: LoggingConfigLayer::default(),
-            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1614,8 +1454,6 @@ fn pipeline_runs_javac_when_available() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
-            logging_cli: LoggingConfigLayer::default(),
-            logging_env: LoggingConfigLayer::default(),
         },
     );
 
@@ -1781,7 +1619,12 @@ fn cli_all_subcommands_smoke_test() {
         .output()
         .expect("Failed to run jv build");
     assert!(build_output.status.success());
-    let generated_java = collect_java_files(&output_dir);
+    let generated_java: Vec<_> = fs::read_dir(&output_dir)
+        .expect("Failed to read build output")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("java"))
+        .collect();
     assert!(
         !generated_java.is_empty(),
         "Expected generated Java files, build stdout: {}",
@@ -1987,10 +1830,9 @@ fn sequence_stream_casts_compile_successfully() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let normalized = stdout.replace("\r\n", "\n");
     let expected = "[lexer-module, parser-module, ast-module, codegen-module]\n[lexer-module, parser-module, ast-module, codegen-module]";
     assert_eq!(
-        normalized.trim(),
+        stdout.trim(),
         expected,
         "unexpected output from sequence stream cast fixture"
     );
