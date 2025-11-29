@@ -2350,8 +2350,13 @@ fn tuple_specific_record_plan_generates_definition() {
 
     let source = generate_java_source(&program).expect("tuple record generation");
     assert!(
-        source.contains("public record Divmod_Result(int quotient, int remainder) {}"),
+        source.contains("public record Divmod_Result(int quotient, int remainder)"),
         "tuple record definition should include field labels: {source}"
+    );
+    assert!(
+        source.contains("public int _1() { return this.quotient(); }")
+            && source.contains("public int _2() { return this.remainder(); }"),
+        "tuple record definition should expose positional accessors: {source}"
     );
 }
 
@@ -2390,7 +2395,7 @@ fn tuple_generic_record_plan_uses_default_labels() {
     let source =
         generate_java_source_with_config(&program, &config).expect("tuple record generation");
     assert!(
-        source.contains("public record Tuple2_Int_String(int _1, String _2) {}"),
+        source.contains("public record Tuple2_Int_String(int _1, String _2)"),
         "generic tuple record should use fallback field names: {source}"
     );
 }

@@ -8,6 +8,7 @@ use std::collections::HashSet;
 pub struct TupleRecordComponent {
     pub name: String,
     pub ty: String,
+    pub aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,10 +75,17 @@ fn build_components(plan: &TupleRecordPlan) -> Vec<TupleRecordComponent> {
             .cloned()
             .unwrap_or_else(|| fallback_meta(index));
 
+        let fallback_name = format!("_{}", index + 1);
         let name = match plan.strategy {
-            TupleRecordStrategy::Generic => format!("_{}", index + 1),
+            TupleRecordStrategy::Generic => fallback_name.clone(),
             TupleRecordStrategy::Specific => field_name_from_meta(&meta, index),
         };
+
+        let mut aliases = aliases_from_meta(&meta, &name, &fallback_name);
+        if !aliases.contains(&fallback_name) {
+            aliases.push(fallback_name.clone());
+        }
+        aliases.retain(|alias| !alias.is_empty());
 
         let hint = plan
             .type_hints
@@ -86,7 +94,7 @@ fn build_components(plan: &TupleRecordPlan) -> Vec<TupleRecordComponent> {
             .unwrap_or("Unknown");
         let ty = java_type_from_hint(hint);
 
-        components.push(TupleRecordComponent { name, ty });
+        components.push(TupleRecordComponent { name, ty, aliases });
     }
     components
 }
@@ -132,6 +140,35 @@ fn primary_label(meta: &TupleFieldMeta) -> Option<String> {
     None
 }
 
+fn aliases_from_meta(meta: &TupleFieldMeta, chosen: &str, fallback: &str) -> Vec<String> {
+    let mut aliases = HashSet::new();
+
+    if let Some(label) = primary_label(meta) {
+        if label != chosen {
+            aliases.insert(label);
+        }
+    }
+
+    if let Some(hint) = meta.identifier_hint.as_ref() {
+        let trimmed = hint.trim();
+        if !trimmed.is_empty() && trimmed != chosen {
+            aliases.insert(trimmed.to_string());
+        }
+    }
+
+    for candidate in &meta.secondary_labels {
+        let trimmed = candidate.name.trim();
+        if !trimmed.is_empty()
+            && trimmed != chosen
+            && trimmed != fallback
+        {
+            aliases.insert(trimmed.to_string());
+        }
+    }
+
+    aliases.into_iter().collect()
+}
+
 fn java_type_from_hint(hint: &str) -> String {
     let normalized = hint.trim();
     if normalized.is_empty() || normalized.eq_ignore_ascii_case("Unknown") {
@@ -164,6 +201,8 @@ fn match_normalized_type(hint: &str) -> String {
         "Void".to_string()
     } else if hint.eq_ignore_ascii_case("Unit") {
         "Void".to_string()
+    } else if hint.eq_ignore_ascii_case("Bool") {
+        "boolean".to_string()
     } else {
         hint.to_string()
     }
@@ -177,9 +216,33 @@ pub fn render_tuple_record(record: &TupleRecord, indent: &str) -> String {
         .map(|component| format!("{} {}", component.ty, component.name))
         .collect::<Vec<_>>()
         .join(", ");
-    builder.push_line(&format!(
-        "public record {}({}) {{}}",
-        record.name, components
-    ));
+    let has_aliases = record
+        .components
+        .iter()
+        .any(|component| !component.aliases.is_empty());
+
+    if !has_aliases {
+        builder.push_line(&format!(
+            "public record {}({}) {{}}",
+            record.name, components
+        ));
+        return builder.build();
+    }
+
+    builder.push_line(&format!("public record {}({}) {{", record.name, components));
+    builder.indent();
+    for component in &record.components {
+        for alias in &component.aliases {
+            if alias == &component.name {
+                continue;
+            }
+            builder.push_line(&format!(
+                "public {} {}() {{ return this.{}(); }}",
+                component.ty, alias, component.name
+            ));
+        }
+    }
+    builder.dedent();
+    builder.push_line("}");
     builder.build()
 }

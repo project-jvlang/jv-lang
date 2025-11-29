@@ -31,9 +31,145 @@ impl JavaCodeGenerator {
                 modifiers,
                 ..
             } => {
+                let mut effective_type = java_type.clone();
+                if let Some(init_expr) = initializer.as_ref() {
+                    if let IrExpression::TupleLiteral { span, .. } = init_expr {
+                        if let Some(usage) = self.tuple_usages.get(&SpanKey::from(span)) {
+                            effective_type = JavaType::Reference {
+                                name: usage.record_name.clone(),
+                                generic_args: vec![],
+                            };
+                        }
+                    }
+                    if let IrExpression::ObjectCreation { class_name, .. } = init_expr {
+                        if self
+                            .tuple_record_component_types
+                            .contains_key(class_name.as_str())
+                        {
+                            effective_type = JavaType::Reference {
+                                name: class_name.clone(),
+                                generic_args: vec![],
+                            };
+                        }
+                    }
+                    if let IrExpression::FieldAccess {
+                        receiver,
+                        field_name,
+                        is_record_component,
+                        ..
+                    } = init_expr
+                    {
+                        if *is_record_component {
+                            let receiver_type = if let IrExpression::Identifier { name, .. } =
+                                receiver.as_ref()
+                            {
+                                self.local_tuple_types
+                                    .get(name)
+                                    .cloned()
+                                    .or_else(|| Self::expression_java_type(receiver).cloned())
+                            } else {
+                                Self::expression_java_type(receiver).cloned()
+                            };
+                            if let Some(JavaType::Reference { name, .. }) = receiver_type {
+                                if let Some(component_type) =
+                                    self.tuple_component_type(&name, field_name)
+                                {
+                                    effective_type = component_type;
+                                }
+                            }
+                        }
+                    }
+
+                    let mut tuple_type = if let IrExpression::MethodCall {
+                        method_name,
+                        java_name,
+                        resolved_target,
+                        ..
+                    } = init_expr
+                    {
+                        let mut candidates: Vec<String> = Vec::new();
+                        if let Some(name) = java_name.as_deref() {
+                            candidates.push(name.to_string());
+                        }
+                        if let Some(name) = resolved_target
+                            .as_ref()
+                            .and_then(|target| target.java_name.as_deref())
+                        {
+                            candidates.push(name.to_string());
+                        }
+                        if let Some(name) = resolved_target
+                            .as_ref()
+                            .and_then(|target| target.original_name.as_deref())
+                        {
+                            candidates.push(name.to_string());
+                        }
+                        candidates.push(method_name.to_string());
+
+                        let tuple_type = candidates.iter().find_map(|name| {
+                            self.tuple_return_records
+                                .get(name.as_str())
+                                .map(|record| JavaType::Reference {
+                                    name: record.clone(),
+                                    generic_args: vec![],
+                                })
+                        });
+
+                        let tuple_type = tuple_type.or_else(|| {
+                            candidates.iter().find_map(|name| {
+                                let fallback = format!("{}_Result", pascalize(name));
+                                let known_record = self
+                                    .tuple_return_records
+                                    .values()
+                                    .any(|record| record == &fallback);
+                                if known_record
+                                    || self.has_tuple_record_definition(&fallback)
+                                {
+                                    Some(JavaType::Reference {
+                                        name: fallback,
+                                        generic_args: vec![],
+                                    })
+                                } else {
+                                    None
+                                }
+                            })
+                        });
+
+                        tuple_type
+                    } else {
+                        None
+                    };
+
+                    if tuple_type.is_none() {
+                        if let IrExpression::Identifier { name: init_name, .. } = init_expr {
+                            if let Some(record_type) = self.local_tuple_types.get(init_name) {
+                                tuple_type = Some(record_type.clone());
+                            }
+                        }
+                    }
+
+                    if let Some(record_type) = tuple_type {
+                        effective_type = record_type;
+                    } else if effective_type == JavaType::object() {
+                        if let Some(JavaType::Reference { name, .. }) =
+                            Self::expression_java_type(init_expr)
+                        {
+                            if self.tuple_record_component_types.contains_key(name) {
+                                effective_type = JavaType::Reference {
+                                    name: name.clone(),
+                                    generic_args: vec![],
+                                };
+                            }
+                        }
+                    }
+                }
+                if effective_type != JavaType::object() {
+                    self.local_tuple_types
+                        .insert(name.clone(), effective_type.clone());
+                }
+
                 if self.mutable_captures.contains(name) {
                     self.add_import("java.util.concurrent.atomic.AtomicReference");
-                    let boxed_type = JavaCodeGenerator::boxed_type(java_type);
+                    let boxed_type = JavaCodeGenerator::boxed_type(&effective_type);
                     let mut parts = Vec::new();
                     let modifier = self.generate_local_modifiers(true, modifiers);
                     if !modifier.is_empty() {
@@ -63,7 +199,7 @@ impl JavaCodeGenerator {
                     if !modifier.is_empty() {
                         parts.push(modifier);
                     }
-                    parts.push(self.generate_type(java_type)?);
+                    parts.push(self.generate_type(&effective_type)?);
                     parts.push(name.clone());
                     let mut line = parts.join(" ");
                     if let Some(expr) = initializer {
@@ -777,5 +913,33 @@ impl JavaCodeGenerator {
     /// Check if switch case contains only a default label.
     pub(super) fn is_default_only_case(case: &IrSwitchCase) -> bool {
         case.labels.len() == 1 && matches!(case.labels[0], IrCaseLabel::Default)
+    }
+
+    fn tuple_component_type(&self, record_name: &str, field_name: &str) -> Option<JavaType> {
+        let components = self.tuple_record_component_types.get(record_name)?;
+        let index = if let Some(stripped) = field_name.strip_prefix('_') {
+            stripped
+                .parse::<usize>()
+                .ok()
+                .and_then(|pos| pos.checked_sub(1))
+        } else {
+            components
+                .iter()
+                .position(|(name, _)| name == field_name)
+        }?;
+        components.get(index).map(|(_, ty)| ty.clone())
+    }
+}
+
+fn pascalize(name: &str) -> String {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) => {
+            let mut result = String::new();
+            result.extend(first.to_uppercase());
+            result.push_str(chars.as_str());
+            result
+        }
+        None => String::new(),
     }
 }

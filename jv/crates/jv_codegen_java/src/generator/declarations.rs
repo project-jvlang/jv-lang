@@ -325,6 +325,7 @@ impl JavaCodeGenerator {
     }
 
     pub fn generate_method(&mut self, method: &IrStatement) -> Result<String, CodeGenError> {
+        self.local_tuple_types.clear();
         if let IrStatement::MethodDeclaration {
             name,
             java_name,
@@ -338,6 +339,13 @@ impl JavaCodeGenerator {
             ..
         } = JavaCodeGenerator::base_statement(method)
         {
+            let mut return_type = return_type.clone();
+            if let Some(record) = self.tuple_return_records.get(name) {
+                return_type = JavaType::Reference {
+                    name: record.clone(),
+                    generic_args: vec![],
+                };
+            }
             let emitted_name = if let Some(explicit) = java_name.clone() {
                 explicit
             } else if let Some(metadata) = primitive_return.as_ref() {
@@ -356,7 +364,7 @@ impl JavaCodeGenerator {
             self.push_variance_scope(&effective_type_parameters);
 
             let result = (|| -> Result<String, CodeGenError> {
-                let normalized_return_type = Self::normalize_void_like(return_type);
+            let normalized_return_type = Self::normalize_void_like(&return_type);
                 let mut builder = self.builder();
                 self.render_annotations(&mut builder, modifiers);
 

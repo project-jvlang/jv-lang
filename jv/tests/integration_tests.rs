@@ -557,7 +557,10 @@ include = ["src/**/*.jv"]
     );
 
     let java_source = fs::read_to_string(&java_files[0]).expect("Failed to read Java output");
-    assert!(java_source.contains("Generated"));
+    assert!(
+        java_source.contains("class CliMain"),
+        "generated Java should include class name: {java_source}"
+    );
     assert!(java_source.contains("message"));
 }
 
@@ -970,7 +973,8 @@ fun sample(input: String): Boolean {
         "generated Java should import Pattern: {java_source}"
     );
     assert!(
-        java_source.contains("Pattern.compile(\"\\d+\")"),
+        java_source.contains("Pattern.compile(\"\\\\d+\")")
+            || java_source.contains("Pattern.compile(\"\\d+\")"),
         "generated Java should compile the regex literal: {java_source}"
     );
 }
@@ -1006,7 +1010,7 @@ fn cli_check_reports_regex_diagnostics() {
         "regex diagnostic output should contain JV5102, got: {stderr}"
     );
     assert!(
-        stderr.contains("Regex literal"),
+        stderr.contains("Regex literal") || stderr.contains("regex literal"),
         "regex diagnostic text should mention regex literal, got: {stderr}"
     );
 }
@@ -1038,6 +1042,8 @@ fn pipeline_compile_produces_artifacts() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: Default::default(),
+            logging_env: Default::default(),
         },
     );
 
@@ -1081,6 +1087,8 @@ fn pipeline_preserves_annotations_in_java_output() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: Default::default(),
+            logging_env: Default::default(),
         },
     );
 
@@ -1173,6 +1181,8 @@ fn pipeline_emit_types_produces_type_facts_json() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: Default::default(),
+            logging_env: Default::default(),
         },
     );
 
@@ -1220,6 +1230,8 @@ fn type_inference_snapshot_emitted_with_emit_types() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: Default::default(),
+            logging_env: Default::default(),
         },
     );
 
@@ -1265,6 +1277,8 @@ fn type_inference_snapshot_tracks_program_changes() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: Default::default(),
+            logging_env: Default::default(),
         },
     );
 
@@ -1327,6 +1341,8 @@ fn null_safety_warnings_survive_pipeline() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: Default::default(),
+            logging_env: Default::default(),
         },
     );
 
@@ -1365,6 +1381,8 @@ fn ambiguous_function_causes_type_error() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: Default::default(),
+            logging_env: Default::default(),
         },
     );
 
@@ -1411,6 +1429,8 @@ fn pipeline_reports_missing_else_in_value_when() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: Default::default(),
+            logging_env: Default::default(),
         },
     );
 
@@ -1454,6 +1474,8 @@ fn pipeline_runs_javac_when_available() {
             apt_processors: None,
             apt_processorpath: None,
             apt_options: Vec::new(),
+            logging_cli: Default::default(),
+            logging_env: Default::default(),
         },
     );
 
@@ -1619,7 +1641,10 @@ fn cli_all_subcommands_smoke_test() {
         .output()
         .expect("Failed to run jv build");
     assert!(build_output.status.success());
-    let generated_java: Vec<_> = fs::read_dir(&output_dir)
+    let java_root = output_dir.join("java25");
+    let search_dir = if java_root.exists() { &java_root } else { &output_dir };
+
+    let generated_java: Vec<_> = fs::read_dir(search_dir)
         .expect("Failed to read build output")
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())

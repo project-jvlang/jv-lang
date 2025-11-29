@@ -71,6 +71,20 @@ impl JavaCodeGenerator {
                             .and_then(|target| target.java_name.as_deref())
                     })
                     .unwrap_or(method_name);
+
+                // Top-level (script) functions should be invoked directly rather than
+                // treating them as functional values with `.apply(...)`.
+                if effective_name == "apply" {
+                    if let Some(IrExpression::Identifier { name, .. }) = receiver.as_deref() {
+                        if self.script_method_names.contains(name) {
+                            let rendered_args = self.render_arguments_with_style(args, *argument_style)?;
+                            if let Some(owner) = self.owner_for_unqualified_call(name) {
+                                return Ok(format!("{owner}.{name}({rendered_args})"));
+                            }
+                            return Ok(format!("{name}({rendered_args})"));
+                        }
+                    }
+                }
                 if let Some(shortcut) = self.try_render_collectors_to_list(
                     receiver.as_deref(),
                     effective_name,

@@ -3,9 +3,9 @@ use super::{
 };
 use crate::CheckError;
 use jv_ast::{
-    Argument, ConcurrencyConstruct, Expression, ForInStatement, Literal, LoopStrategy,
-    NumericRangeLoop, Pattern, Program, Property, ResourceManagement, Span, Statement, StringPart,
-    TypeAnnotation, WhenArm,
+    Argument, ConcurrencyConstruct, Expression, ForInStatement, Literal, LogBlock, LogItem,
+    LoopStrategy, NumericRangeLoop, Pattern, Program, Property, ResourceManagement, Span,
+    Statement, StringPart, TypeAnnotation, WhenArm,
     statement::{UnitTypeDefinition, UnitTypeMember},
 };
 
@@ -112,6 +112,7 @@ impl<'a> WhenUsageValidator<'a> {
             Statement::UnitTypeDefinition(definition) => {
                 self.visit_unit_definition(definition);
             }
+            Statement::TestDeclaration(_) => {}
             Statement::Import { .. }
             | Statement::Package { .. }
             | Statement::Break(_)
@@ -143,6 +144,7 @@ impl<'a> WhenUsageValidator<'a> {
     fn visit_expression(&mut self, expression: &Expression, expects_value: bool) {
         match expression {
             Expression::RegexLiteral(..)
+            | Expression::RegexCommand(_)
             | Expression::Literal(..)
             | Expression::Identifier(..)
             | Expression::This(..)
@@ -173,9 +175,6 @@ impl<'a> WhenUsageValidator<'a> {
                 self.visit_expression(index, true);
             }
             Expression::TypeCast { expr, .. } => self.visit_expression(expr, true),
-            Expression::UnitLiteral { value, .. } => {
-                self.visit_expression(value, expects_value);
-            }
             Expression::StringInterpolation { parts, .. } => {
                 for part in parts {
                     if let StringPart::Expression(expr) = part {
@@ -183,8 +182,16 @@ impl<'a> WhenUsageValidator<'a> {
                     }
                 }
             }
+            Expression::UnitLiteral { value, .. } => {
+                self.visit_expression(value, expects_value);
+            }
             Expression::MultilineString { .. } | Expression::JsonLiteral { .. } => {}
             Expression::Array { elements, .. } => {
+                for element in elements {
+                    self.visit_expression(element, true);
+                }
+            }
+            Expression::Tuple { elements, .. } => {
                 for element in elements {
                     self.visit_expression(element, true);
                 }
@@ -220,6 +227,7 @@ impl<'a> WhenUsageValidator<'a> {
                     self.visit_statement(statement, stmt_expects_value);
                 }
             }
+            Expression::LogBlock(block) => self.visit_log_block(block),
             Expression::If {
                 condition,
                 then_branch,
@@ -257,6 +265,16 @@ impl<'a> WhenUsageValidator<'a> {
                     self.record_missing_else(span);
                 }
                 self.analyze_when_expression(expression, span, expects_value, has_subject);
+            }
+        }
+    }
+
+    fn visit_log_block(&mut self, block: &LogBlock) {
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => self.visit_statement(statement, false),
+                LogItem::Expression(expr) => self.visit_expression(expr, false),
+                LogItem::Nested(nested) => self.visit_log_block(nested),
             }
         }
     }

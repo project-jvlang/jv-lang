@@ -3,7 +3,7 @@ use jv_ast::Span;
 use jv_inference::service::TypeFactsSnapshot;
 use jv_inference::types::{TypeId, TypeKind, TypeVariant};
 use jv_inference::TypeFacts;
-use jv_ir::types::{JavaType, TupleRecordPlan, TupleRecordStrategy};
+use jv_ir::types::{IrProgram, IrStatement, JavaType, TupleRecordPlan, TupleRecordStrategy, TupleUsageKind};
 use jv_ir::TransformContext;
 use std::collections::HashMap;
 use tracing::debug;
@@ -135,7 +135,7 @@ fn java_type_from_name(name: &str) -> JavaType {
         "byte" | "Byte" => JavaType::Primitive("byte".to_string()),
         "float" | "Float" => JavaType::Primitive("float".to_string()),
         "double" | "Double" => JavaType::Primitive("double".to_string()),
-        "boolean" | "Boolean" => JavaType::Primitive("boolean".to_string()),
+        "boolean" | "Boolean" | "Bool" => JavaType::Primitive("boolean".to_string()),
         "char" | "Char" => JavaType::Primitive("char".to_string()),
         "String" => JavaType::Reference {
             name: "java.lang.String".to_string(),
@@ -234,6 +234,12 @@ pub fn preload_tuple_plans_into_context(
                 component_spans.clone(),
                 type_hints.clone(),
             );
+
+            if usage.kind == TupleUsageKind::FunctionReturn {
+                if let Some(owner) = &usage.owner {
+                    context.register_tuple_return(owner, &record_name, component_names.clone());
+                }
+            }
         }
     }
 }
@@ -305,4 +311,119 @@ fn java_type_from_tuple_hint(hint: &str) -> Option<JavaType> {
         return None;
     }
     Some(java_type_from_name(normalized))
+}
+
+/// Map tuple-returning関数の戻り型を、計画済みのタプルレコード名に置き換える。
+pub fn apply_tuple_return_types(program: &mut IrProgram) {
+    let mut mapping: HashMap<String, String> = HashMap::new();
+    for plan in &program.tuple_record_plans {
+        let record_name = plan
+            .specific_name
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| plan.generic_name.clone());
+        for usage in &plan.usage_sites {
+            if usage.kind == TupleUsageKind::FunctionReturn {
+                if let Some(owner) = &usage.owner {
+                    mapping.insert(owner.clone(), record_name.clone());
+                }
+            }
+        }
+    }
+
+    if mapping.is_empty() {
+        return;
+    }
+
+    fn rewrite(statement: &mut IrStatement, mapping: &HashMap<String, String>) {
+        match statement {
+            IrStatement::MethodDeclaration { name, return_type, .. } => {
+                if let Some(record) = mapping.get(name) {
+                    *return_type = JavaType::Reference {
+                        name: record.clone(),
+                        generic_args: vec![],
+                    };
+                }
+            }
+            IrStatement::ClassDeclaration {
+                fields,
+                methods,
+                nested_classes,
+                ..
+            } => {
+                for field in fields.iter_mut() {
+                    rewrite(field, mapping);
+                }
+                for method in methods.iter_mut() {
+                    rewrite(method, mapping);
+                }
+                for class in nested_classes.iter_mut() {
+                    rewrite(class, mapping);
+                }
+            }
+            IrStatement::InterfaceDeclaration {
+                methods,
+                default_methods,
+                fields,
+                nested_types,
+                ..
+            } => {
+                for method in methods.iter_mut() {
+                    rewrite(method, mapping);
+                }
+                for method in default_methods.iter_mut() {
+                    rewrite(method, mapping);
+                }
+                for field in fields.iter_mut() {
+                    rewrite(field, mapping);
+                }
+                for nested in nested_types.iter_mut() {
+                    rewrite(nested, mapping);
+                }
+            }
+            IrStatement::RecordDeclaration { methods, .. } => {
+                for method in methods.iter_mut() {
+                    rewrite(method, mapping);
+                }
+            }
+            IrStatement::Block { statements, .. } => {
+                for stmt in statements.iter_mut() {
+                    rewrite(stmt, mapping);
+                }
+            }
+            IrStatement::If { then_stmt, else_stmt, .. } => {
+                rewrite(then_stmt, mapping);
+                if let Some(else_stmt) = else_stmt.as_mut() {
+                    rewrite(else_stmt, mapping);
+                }
+            }
+            IrStatement::While { body, .. } => rewrite(body, mapping),
+            IrStatement::ForEach { body, .. } => rewrite(body, mapping),
+            IrStatement::For { body, .. } => rewrite(body, mapping),
+            IrStatement::Try { body, catch_clauses, finally_block, .. } => {
+                rewrite(body, mapping);
+                for clause in catch_clauses.iter_mut() {
+                    rewrite(&mut clause.body, mapping);
+                }
+                if let Some(finally_stmt) = finally_block.as_mut() {
+                    rewrite(finally_stmt, mapping);
+                }
+            }
+            IrStatement::TryWithResources { body, catch_clauses, finally_block, .. } => {
+                rewrite(body, mapping);
+                for clause in catch_clauses.iter_mut() {
+                    rewrite(&mut clause.body, mapping);
+                }
+                if let Some(finally_stmt) = finally_block.as_mut() {
+                    rewrite(finally_stmt, mapping);
+                }
+            }
+            IrStatement::Switch { .. } => {}
+            _ => {}
+        }
+    }
+
+    for decl in program.type_declarations.iter_mut() {
+        rewrite(decl, &mapping);
+    }
 }

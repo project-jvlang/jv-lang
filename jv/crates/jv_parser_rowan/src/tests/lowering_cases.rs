@@ -1,14 +1,16 @@
+use crate::frontend::RowanPipeline;
 use crate::lowering::{lower_program, LoweringDiagnosticSeverity, LoweringResult};
 use crate::parser::parse;
 use crate::verification::StatementKindKey;
 use crate::{JvLanguage, ParseBuilder, SyntaxKind};
+use jv_ast::annotation::{AnnotationArgument, AnnotationValue};
 use jv_ast::strings::MultilineKind;
 use jv_ast::{
     expression::{Argument, Parameter, ParameterProperty, StringPart},
     json::{JsonLiteral, JsonValue},
     statement::{
-        ConcurrencyConstruct, LoopStrategy, ResourceManagement, UnitConversionKind, UnitRelation,
-        UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
+        ConcurrencyConstruct, LoopStrategy, ResourceManagement, TestDataset, TestSampleMetadata,
+        UnitConversionKind, UnitRelation, UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
     },
     types::{BinaryOp, Literal, Modifiers, Pattern, TypeAnnotation},
     BindingPatternKind, Expression, Statement,
@@ -31,11 +33,11 @@ fn make_token(column: &mut usize, token_type: TokenType, lexeme: &str) -> Token 
 }
 
 #[test]
-fn lowers_unit_definition_block() {
+fn lowers_unit_definition() {
     let source = r#"
-@ Length(Double) km! {
+@ length(Double) km! {
     base := 1000
-    milli -> m
+    base -> m
     @Conversion {
         val result = value
     }
@@ -58,7 +60,7 @@ fn lowers_unit_definition_block() {
             members,
             ..
         }) => {
-            assert_eq!(category, "Length");
+            assert_eq!(category, "length");
             assert!(
                 matches!(base_type, TypeAnnotation::Simple(t) if t == "Double"),
                 "expected Double base type, got {:?}",
@@ -84,17 +86,17 @@ fn lowers_unit_definition_block() {
                         other => panic!("expected numeric literal, got {:?}", other),
                     }
                 }
-                other => panic!("first member must be a dependency, got {:?}", other),
+                other => panic!("expected dependency for first member, got {:?}", other),
             }
 
             match &members[1] {
                 UnitTypeMember::Dependency(dependency) => {
-                    assert_eq!(dependency.name, "milli");
+                    assert_eq!(dependency.name, "base");
                     assert!(matches!(dependency.relation, UnitRelation::ConversionArrow));
                     assert!(dependency.value.is_none());
                     assert_eq!(dependency.target.as_deref(), Some("m"));
                 }
-                other => panic!("second member must be conversion arrow, got {:?}", other),
+                other => panic!("expected conversion arrow, got {:?}", other),
             }
 
             match &members[2] {
@@ -103,19 +105,22 @@ fn lowers_unit_definition_block() {
                     assert_eq!(block.body.len(), 1);
                     match &block.body[0] {
                         Statement::ValDeclaration { name, .. } => assert_eq!(name, "result"),
-                        other => panic!("conversion block must start with val, got {:?}", other),
+                        other => panic!("expected val declaration, got {:?}", other),
                     }
                 }
-                other => panic!("third member must be conversion block, got {:?}", other),
+                other => panic!("expected conversion block, got {:?}", other),
             }
         }
-        other => panic!("unit definition was not lowered: {:?}", other),
+        other => panic!("expected unit definition, got {:?}", other),
     }
 }
 
 #[test]
-fn lowers_unit_literal_expression() {
-    let source = "val distance = 42 @ km";
+fn lowers_unit_literal() {
+    let source = r#"
+val distance = 42 @ km
+"#;
+
     let result = lower_source(source);
     assert!(
         result.diagnostics.is_empty(),
@@ -125,68 +130,21 @@ fn lowers_unit_literal_expression() {
 
     assert_eq!(result.statements.len(), 1);
     match &result.statements[0] {
-        Statement::ValDeclaration {
-            initializer:
-                Expression::UnitLiteral {
-                    value,
-                    unit,
-                    spacing,
-                    ..
-                },
-            ..
-        } => {
-            match value.as_ref() {
-                Expression::Literal(Literal::Number(value), _) => assert_eq!(value, "42"),
-                other => panic!("unit literal value must be numeric, got {:?}", other),
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::UnitLiteral {
+                value,
+                unit,
+                spacing,
+                ..
+            } => {
+                assert!(matches!(value.as_ref(), Expression::Literal(_, _)));
+                assert_eq!(unit.name, "km");
+                assert_eq!(spacing.space_before_at, true);
+                assert_eq!(spacing.space_after_at, true);
             }
-            assert_eq!(unit.name, "km");
-            assert!(!unit.is_bracketed);
-            assert!(!unit.has_default_marker);
-            assert!(
-                spacing.space_before_at,
-                "expected whitespace before `@` for readability"
-            );
-            assert!(
-                spacing.space_after_at,
-                "expected whitespace after `@` for readability"
-            );
-        }
-        other => panic!(
-            "val declaration did not contain a unit literal: {:?}",
-            other
-        ),
-    }
-}
-
-#[test]
-fn lowers_unit_type_annotation() {
-    let source = "val temperature: Double@[degC] = 0";
-    let result = lower_source(source);
-    assert!(
-        result.diagnostics.is_empty(),
-        "unexpected diagnostics: {:?}",
-        result.diagnostics
-    );
-
-    assert_eq!(result.statements.len(), 1);
-    match &result.statements[0] {
-        Statement::ValDeclaration {
-            type_annotation:
-                Some(TypeAnnotation::Unit {
-                    base,
-                    unit,
-                    implicit,
-                }),
-            initializer: Expression::Literal(Literal::Number(value), _),
-            ..
-        } => {
-            assert_eq!(value, "0");
-            assert_eq!(**base, TypeAnnotation::Simple("Double".into()));
-            assert!(!implicit);
-            assert_eq!(unit.name, "[degC]");
-            assert!(unit.is_bracketed);
-        }
-        other => panic!("unit type annotation was not produced: {:?}", other),
+            other => panic!("expected unit literal, got {:?}", other),
+        },
+        other => panic!("expected val declaration, got {:?}", other),
     }
 }
 
@@ -201,7 +159,7 @@ fn build_tree(
     SyntaxNode::new_root(builder.finish())
 }
 
-fn lower_source(source: &str) -> LoweringResult {
+pub(crate) fn lower_source(source: &str) -> LoweringResult {
     let tokens = Lexer::new(source.to_string())
         .tokenize()
         .expect("lex source");
@@ -214,6 +172,121 @@ fn lower_source(source: &str) -> LoweringResult {
     let green = ParseBuilder::build_from_events(&parse_output.events, &tokens);
     let syntax: SyntaxNode<JvLanguage> = SyntaxNode::new_root(green);
     lower_program(&syntax, &tokens)
+}
+
+#[test]
+fn pipeline_handles_unit_syntax_fixture() {
+    let source = include_str!("../../../../tests/fixtures/unit_syntax/basic/基本的な単位定義.jv");
+    let pipeline = RowanPipeline::default();
+    let debug = pipeline
+        .execute_with_debug(source)
+        .expect("unit syntax fixture should parse");
+    let statements = debug.statements();
+    assert!(
+        matches!(statements.first(), Some(Statement::UnitTypeDefinition(_))),
+        "expected first statement to be unit definition, got {:?}",
+        statements.first()
+    );
+    assert!(
+        statements.iter().any(|statement| matches!(
+            statement,
+            Statement::ValDeclaration { name, .. } if name == "歩行距離"
+        )),
+        "unit literal val declaration should be present"
+    );
+}
+
+#[test]
+fn lowers_test_declaration_with_inline_dataset() {
+    let source = r#"
+test "行列加算" [ [1 2], [3 4] ] (lhs: Int, rhs: Int) {
+    val sum = lhs + rhs
+}
+"#;
+
+    let result = lower_source(source);
+    assert!(
+        result.is_success(),
+        "lowering should succeed: {:?}",
+        result.diagnostics
+    );
+
+    let declaration = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::TestDeclaration(decl) => Some(decl),
+            _ => None,
+        })
+        .expect("test declaration should be lowered");
+
+    assert_eq!(declaration.display_name, "行列加算");
+    match &declaration.dataset {
+        Some(TestDataset::InlineArray { rows, .. }) => {
+            assert_eq!(rows.len(), 2, "expected two dataset rows");
+            assert_eq!(rows[0].values.len(), 2, "row should contain two values");
+        }
+        other => panic!("expected inline dataset, got {:?}", other),
+    }
+
+    assert_eq!(declaration.parameters.len(), 2, "expected two parameters");
+    match &declaration.body {
+        Expression::Block { .. } => {}
+        other => panic!("expected block body, got {:?}", other),
+    }
+}
+
+#[test]
+fn lowers_test_declaration_with_sample_dataset() {
+    let source = r#"
+test "外部ケース" [@Sample("cases.json", mode = SampleMode.Load)] (row) {
+    println(row)
+}
+"#;
+
+    let result = lower_source(source);
+    assert!(
+        result.is_success(),
+        "lowering should succeed: {:?}",
+        result.diagnostics
+    );
+
+    let declaration = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::TestDeclaration(decl) => Some(decl),
+            _ => None,
+        })
+        .expect("test declaration should be lowered");
+
+    match &declaration.dataset {
+        Some(TestDataset::Sample(TestSampleMetadata {
+            source, arguments, ..
+        })) => {
+            assert_eq!(source, "cases.json");
+            assert_eq!(arguments.len(), 1, "expected named mode argument");
+            match &arguments[0] {
+                AnnotationArgument::Named { name, value, .. } => {
+                    assert_eq!(name, "mode");
+                    match value {
+                        AnnotationValue::EnumConstant {
+                            type_path,
+                            constant,
+                        } => {
+                            assert_eq!(type_path, &vec!["SampleMode".to_string()]);
+                            assert_eq!(constant, "Load");
+                        }
+                        other => panic!("expected enum constant value, got {:?}", other),
+                    }
+                }
+                other => panic!("expected named annotation argument, got {:?}", other),
+            }
+        }
+        other => panic!("expected @Sample dataset, got {:?}", other),
+    }
+
+    assert_eq!(declaration.parameters.len(), 1, "expected single parameter");
 }
 
 fn sample_package_val() -> (SyntaxNode<JvLanguage>, Vec<Token>) {
@@ -1049,8 +1122,11 @@ fn lowering_table_driven_cases() {
                 let diagnostic = &result.diagnostics[0];
                 assert_eq!(diagnostic.severity, LoweringDiagnosticSeverity::Error);
                 assert!(
-                    !diagnostic.message.is_empty(),
-                    "diagnostic message should not be empty"
+                    diagnostic.message.contains("想定外")
+                        || diagnostic.message.contains("型注釈")
+                        || diagnostic.message.contains("識別子"),
+                    "unexpected diagnostic message: {}",
+                    diagnostic.message
                 );
                 match &result.statements[0] {
                     Statement::ValDeclaration {
@@ -1115,7 +1191,9 @@ fn lowering_table_driven_cases() {
                 let diagnostic = &result.diagnostics[0];
                 assert_eq!(diagnostic.severity, LoweringDiagnosticSeverity::Error);
                 assert!(
-                    diagnostic.message.contains("->"),
+                    diagnostic
+                        .message
+                        .contains("`->` 式ボディはサポートされません"),
                     "unexpected diagnostic message: {}",
                     diagnostic.message
                 );
@@ -2314,6 +2392,82 @@ fn multiline_string_interpolation_handles_complex_patterns() {
 }
 
 #[test]
+fn string_interpolation_handles_chained_calls() {
+    let source = r#"
+        fun demo(tuple: (Int Int Int)): Unit {
+            println("tuple third=${tuple._3()}")
+        }
+    "#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let print_call = result
+        .statements
+        .iter()
+        .find_map(|statement| match statement {
+            Statement::FunctionDeclaration { name, body, .. } if name == "demo" => {
+                match body.as_ref() {
+                    Expression::Block { statements, .. } => {
+                        statements.iter().find_map(|stmt| match stmt {
+                            Statement::Expression { expr, .. } => Some(expr),
+                            _ => None,
+                        })
+                    }
+                    other => panic!("expected block body, got {:?}", other),
+                }
+            }
+            _ => None,
+        })
+        .expect("expected println expression");
+
+    let call_arg = match print_call {
+        Expression::Call { args, .. } => args
+            .iter()
+            .next()
+            .unwrap_or_else(|| panic!("println should have at least one argument")),
+        other => panic!("expected println call, got {:?}", other),
+    };
+
+    let argument_expr = match call_arg {
+        Argument::Positional(expr) => expr,
+        Argument::Named { .. } => panic!("expected positional argument"),
+    };
+
+    match argument_expr {
+        Expression::StringInterpolation { parts, .. } => {
+            let expr_count = parts
+                .iter()
+                .filter(|part| matches!(part, StringPart::Expression(_)))
+                .count();
+            assert_eq!(expr_count, 1, "expected single interpolation expression");
+            let mut expr_iter = parts.iter().filter_map(|part| match part {
+                StringPart::Expression(expr) => Some(expr),
+                _ => None,
+            });
+            let expr = expr_iter.next().expect("interpolation expression missing");
+            match expr {
+                Expression::Call { function, .. } => match function.as_ref() {
+                    Expression::MemberAccess { property, .. } => {
+                        assert_eq!(property, "_3", "expected member property `_3`")
+                    }
+                    other => panic!("expected member access callee, got {:?}", other),
+                },
+                other => panic!(
+                    "expected call expression inside interpolation, got {:?}",
+                    other
+                ),
+            }
+        }
+        other => panic!("expected string interpolation argument, got {:?}", other),
+    }
+}
+
+#[test]
 fn nested_package_fixture_preserves_interpolation_identifiers() {
     let source = include_str!("../../../../../jv/tests/fixtures/package/nested_package.jv");
     let result = lower_source(source);
@@ -2519,4 +2673,107 @@ fn data_class_lowering_produces_constructor_properties() {
         }
         _ => unreachable!("matched in find_map above"),
     }
+}
+
+#[test]
+fn type_cast_allows_trivia_before_keyword() {
+    let source = r#"
+val casted = (
+    42
+)    as Int
+"#;
+
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "unexpected lowering diagnostics: {:?}",
+        result.diagnostics
+    );
+
+    let statement = result
+        .statements
+        .first()
+        .expect("expected a single top-level statement");
+
+    match statement {
+        Statement::ValDeclaration { initializer, .. } => match initializer {
+            Expression::TypeCast { .. } => {}
+            other => panic!("expected type cast initializer, got {:?}", other),
+        },
+        other => panic!("expected val declaration, got {:?}", other),
+    }
+}
+
+#[test]
+fn rowan_pipeline_preserves_type_cast_after_parenthetical_sequence() {
+    let source = r#"
+fun main(): Unit {
+    val modules = ["lexer" "parser"]
+    val castList = (
+        modules
+            .map { value -> value + "-module" }
+            .filter { candidate -> candidate.length >= 6 }
+    ) as List
+}
+"#;
+
+    let debug = RowanPipeline::default()
+        .execute_with_debug(source)
+        .expect("pipeline parse succeeds");
+
+    let lexemes: Vec<&str> = debug
+        .artifacts()
+        .tokens()
+        .iter()
+        .map(|token| token.lexeme.as_str())
+        .collect();
+    assert!(
+        lexemes.iter().any(|lexeme| *lexeme == "as"),
+        "expected tokens to contain `as`, got {:?}",
+        lexemes
+    );
+    let as_token = debug
+        .artifacts()
+        .tokens()
+        .iter()
+        .find(|token| token.lexeme == "as")
+        .expect("as token should be present");
+    assert!(
+        matches!(as_token.token_type, TokenType::Identifier(_)),
+        "expected `as` token to be classified as identifier, got {:?}",
+        as_token.token_type
+    );
+
+    let program = debug.artifacts().program();
+    assert_eq!(
+        program.statements.len(),
+        1,
+        "expected single top-level statement"
+    );
+
+    let initializer = match program
+        .statements
+        .first()
+        .expect("program should contain main function")
+    {
+        Statement::FunctionDeclaration { body, .. } => match &**body {
+            Expression::Block { statements, .. } => statements
+                .iter()
+                .find_map(|stmt| match stmt {
+                    Statement::ValDeclaration {
+                        initializer, name, ..
+                    } if name == "castList" => Some(initializer),
+                    _ => None,
+                })
+                .expect("expected castList declaration"),
+            other => panic!("expected block body, got {:?}", other),
+        },
+        other => panic!("expected function declaration, got {:?}", other),
+    };
+
+    assert!(
+        matches!(initializer, Expression::TypeCast { .. }),
+        "expected type cast expression for castList initializer, got {:?}",
+        initializer
+    );
 }

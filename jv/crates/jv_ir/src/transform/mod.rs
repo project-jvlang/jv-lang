@@ -393,6 +393,10 @@ fn desugar_pattern_val_declaration(
     if tuple_java_type == JavaType::object() {
         if let Some(record_type) = context.tuple_record_java_type(&tuple_span) {
             tuple_java_type = record_type;
+        } else if let IrExpression::MethodCall { method_name, .. } = &ir_initializer {
+            if let Some(record_type) = context.tuple_return_type(method_name) {
+                tuple_java_type = record_type;
+            }
         }
     }
 
@@ -484,7 +488,21 @@ fn make_tuple_component_access(
     let metadata = context.tuple_component_metadata(&receiver_span, index);
     let (field_name, field_type, source_span) = match metadata {
         Some(meta) => (meta.field_name, meta.java_type, meta.source_span),
-        None => (format!("_{}", index + 1), JavaType::object(), None),
+        None => {
+            if let Some(JavaType::Reference { name, .. }) = extract_java_type(&receiver) {
+                if let Some(components) = context.tuple_record_components(&name) {
+                    let fallback_name = components
+                        .get(index)
+                        .cloned()
+                        .unwrap_or_else(|| format!("_{}", index + 1));
+                    (fallback_name, JavaType::object(), None)
+                } else {
+                    (format!("_{}", index + 1), JavaType::object(), None)
+                }
+            } else {
+                (format!("_{}", index + 1), JavaType::object(), None)
+            }
+        }
     };
     let effective_span = source_span.unwrap_or(span);
 
@@ -1269,6 +1287,7 @@ fn lower_call_expression(
 
     match function {
         Expression::Identifier(name, fn_span) => {
+            let has_signature = context.function_signature(&name).is_some();
             if let Some(receiver_kind) = resolve_implicit_system_method(&name) {
                 let receiver_expr = create_system_field_access(receiver_kind, fn_span);
                 let return_type = system_method_return_type(receiver_kind, &name);
@@ -1322,26 +1341,32 @@ fn lower_call_expression(
                 });
             }
 
-            let java_type = resolved_type.unwrap_or_else(JavaType::object);
+            let tuple_return = context.tuple_return_type(&name);
+            let java_type = tuple_return
+                .clone()
+                .or(resolved_type.clone())
+                .unwrap_or_else(JavaType::object);
 
-            if let Some((method_name, return_type)) = functional_interface_method(&java_type) {
-                let receiver = IrExpression::Identifier {
-                    name: name.clone(),
-                    java_type: java_type.clone(),
-                    span: span.clone(),
-                };
-                let mut call = IrExpression::MethodCall {
-                    receiver: Some(Box::new(receiver)),
-                    method_name,
-                    java_name: None,
-                    resolved_target: None,
-                    args: ir_args,
-                    argument_style,
-                    java_type: return_type,
-                    span,
-                };
-                register_call_metadata(context, &mut call, None);
-                return Ok(call);
+            if !has_signature && tuple_return.is_none() {
+                if let Some((method_name, return_type)) = functional_interface_method(&java_type) {
+                    let receiver = IrExpression::Identifier {
+                        name: name.clone(),
+                        java_type: java_type.clone(),
+                        span: span.clone(),
+                    };
+                    let mut call = IrExpression::MethodCall {
+                        receiver: Some(Box::new(receiver)),
+                        method_name,
+                        java_name: None,
+                        resolved_target: None,
+                        args: ir_args,
+                        argument_style,
+                        java_type: return_type,
+                        span,
+                    };
+                    register_call_metadata(context, &mut call, None);
+                    return Ok(call);
+                }
             }
 
             let mut call = IrExpression::MethodCall {

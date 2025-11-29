@@ -33,11 +33,12 @@ impl TypeFactory {
             return Ok(TypeKind::reference("java.math.BigDecimal"));
         }
 
-        if let Some(primitive) = JavaPrimitive::from_identifier(normalized) {
-            return Ok(TypeKind::primitive(primitive));
-        }
         if let Some(primitive) = Self::boxed_primitive(normalized) {
             return Ok(TypeKind::boxed(primitive));
+        }
+
+        if let Some(primitive) = JavaPrimitive::from_identifier(normalized) {
+            return Ok(TypeKind::primitive(primitive));
         }
 
         match normalized {

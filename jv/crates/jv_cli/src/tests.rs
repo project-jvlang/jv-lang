@@ -399,6 +399,8 @@ counter = counter + explicit
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
+        logging_cli: Default::default(),
+        logging_env: Default::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -467,6 +469,8 @@ include = ["src/**/*.jv"]
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
+        logging_cli: Default::default(),
+        logging_env: Default::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -561,6 +565,8 @@ include = ["src/**/*.jv"]
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
+        logging_cli: Default::default(),
+        logging_env: Default::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -677,12 +683,14 @@ include = ["src/**/*.jv"]
             emit_telemetry: false,
             parallel_inference: false,
             inference_workers: None,
-            constraint_batch: None,
-            apt_enabled: false,
-            apt_processors: None,
-            apt_processorpath: None,
-            apt_options: Vec::new(),
-        };
+        constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: Default::default(),
+        logging_env: Default::default(),
+    };
 
         let plan =
             pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -774,12 +782,14 @@ include = ["src/**/*.jv"]
             emit_telemetry: false,
             parallel_inference: false,
             inference_workers: None,
-            constraint_batch: None,
-            apt_enabled: false,
-            apt_processors: None,
-            apt_processorpath: None,
-            apt_options: Vec::new(),
-        };
+        constraint_batch: None,
+        apt_enabled: false,
+        apt_processors: None,
+        apt_processorpath: None,
+        apt_options: Vec::new(),
+        logging_cli: Default::default(),
+        logging_env: Default::default(),
+    };
 
         let plan =
             pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -891,6 +901,8 @@ clean = false
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
+        logging_cli: Default::default(),
+        logging_env: Default::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -1000,6 +1012,8 @@ clean = false
         apt_processors: None,
         apt_processorpath: None,
         apt_options: Vec::new(),
+        logging_cli: Default::default(),
+        logging_env: Default::default(),
     };
 
     let plan = pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -1179,6 +1193,8 @@ fn apply_type_facts_enriches_class_metadata() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         span,
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
     };
 
     let type_id = TypeId::new(7);
@@ -1294,6 +1310,8 @@ fn apply_type_facts_records_nested_metadata() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         span,
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
     };
 
     let inner_id = TypeId::new(99);
@@ -1357,6 +1375,8 @@ fn apply_type_facts_records_metadata_without_generics() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         span,
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
     };
 
     let mut builder = TypeFactsBuilder::new();
@@ -1449,6 +1469,7 @@ fn apply_type_facts_sets_sequence_specialization_hint() {
         body: Some(method_body),
         modifiers: IrModifiers::default(),
         throws: Vec::new(),
+        assertion_patterns: Vec::new(),
         span: method_span,
     };
 
@@ -1471,6 +1492,8 @@ fn apply_type_facts_sets_sequence_specialization_hint() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         span,
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
     };
 
     let type_id = TypeId::new(11);
@@ -1594,6 +1617,8 @@ fn where_constraints_flow_into_ir_bounds() {
         generic_metadata: Default::default(),
         conversion_metadata: Vec::new(),
         span: span.clone(),
+        logging: Default::default(),
+        tuple_record_plans: Vec::new(),
     };
 
     let mut params = HashMap::new();

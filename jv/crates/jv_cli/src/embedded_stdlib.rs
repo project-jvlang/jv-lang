@@ -6,8 +6,8 @@ use std::sync::{Arc, OnceLock};
 
 use anyhow::{Result, anyhow};
 use jv_ast::{
-    Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, Program, Statement,
-    StringPart, Visibility,
+    Argument, CallArgumentMetadata, Expression, JsonLiteral, JsonValue, LogBlock, LogItem, Program,
+    Statement, StringPart, TestDataset, Visibility,
     statement::{UnitTypeDefinition, UnitTypeMember},
     types::{Kind, Pattern},
 };
@@ -123,6 +123,7 @@ fn promote_visibility(statement: &mut Statement) {
         Statement::ExtensionFunction(extension) => {
             promote_visibility(extension.function.as_mut());
         }
+        Statement::UnitTypeDefinition(definition) => promote_unit_definition(definition),
         Statement::Expression { .. }
         | Statement::Return { .. }
         | Statement::Throw { .. }
@@ -136,8 +137,8 @@ fn promote_visibility(statement: &mut Statement) {
         | Statement::Import { .. }
         | Statement::Package { .. }
         | Statement::Break(_)
-        | Statement::Continue(_) => {}
-        Statement::UnitTypeDefinition(definition) => promote_unit_definition(definition),
+        | Statement::Continue(_)
+        | Statement::TestDeclaration(_) => {}
     }
 }
 
@@ -157,24 +158,6 @@ fn promote_unit_definition(definition: &mut UnitTypeDefinition) {
             }
             UnitTypeMember::NestedStatement(statement) => promote_visibility(statement),
             UnitTypeMember::Dependency(_) => {}
-        }
-    }
-}
-
-fn rewrite_unit_definition(definition: &mut UnitTypeDefinition) {
-    for member in &mut definition.members {
-        match member {
-            UnitTypeMember::Dependency(dependency) => {
-                if let Some(expr) = &mut dependency.value {
-                    rewrite_expression(expr);
-                }
-            }
-            UnitTypeMember::Conversion(block) => {
-                for statement in &mut block.body {
-                    rewrite_statement(statement);
-                }
-            }
-            UnitTypeMember::NestedStatement(statement) => rewrite_statement(statement),
         }
     }
 }
@@ -247,6 +230,12 @@ fn rewrite_statement(statement: &mut Statement) {
         Statement::ExtensionFunction(extension) => {
             rewrite_statement(extension.function.as_mut());
         }
+        Statement::TestDeclaration(declaration) => {
+            if let Some(dataset) = &mut declaration.dataset {
+                rewrite_test_dataset(dataset);
+            }
+            rewrite_expression(&mut declaration.body);
+        }
         Statement::Expression { expr, .. } => rewrite_expression(expr),
         Statement::Return { value, .. } => {
             if let Some(expr) = value {
@@ -275,6 +264,24 @@ fn rewrite_statement(statement: &mut Statement) {
     }
 }
 
+fn rewrite_unit_definition(definition: &mut UnitTypeDefinition) {
+    for member in &mut definition.members {
+        match member {
+            UnitTypeMember::Dependency(dependency) => {
+                if let Some(expr) = &mut dependency.value {
+                    rewrite_expression(expr);
+                }
+            }
+            UnitTypeMember::Conversion(block) => {
+                for statement in &mut block.body {
+                    rewrite_statement(statement);
+                }
+            }
+            UnitTypeMember::NestedStatement(statement) => rewrite_statement(statement),
+        }
+    }
+}
+
 fn rewrite_concurrency(construct: &mut jv_ast::ConcurrencyConstruct) {
     match construct {
         jv_ast::ConcurrencyConstruct::Spawn { body, .. }
@@ -293,10 +300,21 @@ fn rewrite_resource_management(resource: &mut jv_ast::ResourceManagement) {
     }
 }
 
+fn rewrite_test_dataset(dataset: &mut TestDataset) {
+    if let TestDataset::InlineArray { rows, .. } = dataset {
+        for row in rows {
+            for value in &mut row.values {
+                rewrite_expression(value);
+            }
+        }
+    }
+}
+
 fn rewrite_expression(expression: &mut Expression) {
     match expression {
         Expression::Literal(_, _)
         | Expression::RegexLiteral(_)
+        | Expression::RegexCommand(_)
         | Expression::Identifier(_, _)
         | Expression::This(_)
         | Expression::Super(_) => {}
@@ -393,6 +411,11 @@ fn rewrite_expression(expression: &mut Expression) {
                 rewrite_expression(element);
             }
         }
+        Expression::Tuple { elements, .. } => {
+            for element in elements {
+                rewrite_expression(element);
+            }
+        }
         Expression::Lambda {
             parameters, body, ..
         } => {
@@ -421,6 +444,17 @@ fn rewrite_expression(expression: &mut Expression) {
             if let Some(finally_block) = finally_block {
                 rewrite_expression(finally_block.as_mut());
             }
+        }
+        Expression::LogBlock(block) => rewrite_log_block(block),
+    }
+}
+
+fn rewrite_log_block(block: &mut LogBlock) {
+    for item in &mut block.items {
+        match item {
+            LogItem::Statement(statement) => rewrite_statement(statement),
+            LogItem::Expression(expr) => rewrite_expression(expr),
+            LogItem::Nested(nested) => rewrite_log_block(nested),
         }
     }
 }
@@ -515,15 +549,14 @@ impl StdlibUsage {
             if token.is_empty() {
                 continue;
             }
+
+            // Consider the full token as well as each suffix separated by '.' so that both
+            // fully-qualified references and simple type names are recognised.
             let mut current = token;
             loop {
-                for package in catalog.packages_for_reference(current) {
-                    self.packages.insert(package);
-                }
+                self.record_reference(catalog, current);
                 if let Some((prefix, suffix)) = current.rsplit_once('.') {
-                    for package in catalog.packages_for_reference(suffix) {
-                        self.packages.insert(package);
-                    }
+                    self.record_reference(catalog, suffix);
                     current = prefix;
                 } else {
                     break;
@@ -614,6 +647,12 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             Statement::ExtensionFunction(extension) => {
                 self.visit_statement(extension.function.as_ref());
             }
+            Statement::TestDeclaration(declaration) => {
+                if let Some(dataset) = &declaration.dataset {
+                    self.visit_test_dataset(dataset);
+                }
+                self.visit_expression(&declaration.body);
+            }
             Statement::Expression { expr, .. } => self.visit_expression(expr),
             Statement::Return { value, .. } => {
                 if let Some(expr) = value {
@@ -637,11 +676,11 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                 self.visit_expression(&statement.iterable);
                 self.visit_expression(&statement.body);
             }
-            Statement::Concurrency(construct) => self.visit_concurrency(construct),
-            Statement::ResourceManagement(resource) => self.visit_resource_management(resource),
             Statement::UnitTypeDefinition(definition) => {
                 self.visit_unit_definition(definition);
             }
+            Statement::Concurrency(construct) => self.visit_concurrency(construct),
+            Statement::ResourceManagement(resource) => self.visit_resource_management(resource),
             Statement::DataClassDeclaration { .. }
             | Statement::Import { .. }
             | Statement::Package { .. }
@@ -673,7 +712,7 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
         for member in &definition.members {
             match member {
                 UnitTypeMember::Dependency(dependency) => {
-                    if let Some(expr) = dependency.value.as_ref() {
+                    if let Some(expr) = &dependency.value {
                         self.visit_expression(expr);
                     }
                 }
@@ -685,6 +724,16 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                 UnitTypeMember::NestedStatement(statement) => {
                     self.visit_statement(statement);
                 }
+            }
+        }
+    }
+
+    fn visit_log_block(&mut self, block: &LogBlock) {
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => self.visit_statement(statement),
+                LogItem::Expression(expr) => self.visit_expression(expr),
+                LogItem::Nested(nested) => self.visit_log_block(nested),
             }
         }
     }
@@ -790,6 +839,11 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
                     self.visit_expression(element);
                 }
             }
+            Expression::Tuple { elements, .. } => {
+                for element in elements {
+                    self.visit_expression(element);
+                }
+            }
             Expression::Lambda {
                 parameters, body, ..
             } => {
@@ -823,8 +877,20 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             | Expression::MultilineString(_)
             | Expression::Literal(_, _)
             | Expression::RegexLiteral(_)
+            | Expression::RegexCommand(_)
             | Expression::This(_)
             | Expression::Super(_) => {}
+            Expression::LogBlock(block) => self.visit_log_block(block),
+        }
+    }
+
+    fn visit_test_dataset(&mut self, dataset: &TestDataset) {
+        if let TestDataset::InlineArray { rows, .. } = dataset {
+            for row in rows {
+                for value in &row.values {
+                    self.visit_expression(value);
+                }
+            }
         }
     }
 }
@@ -876,25 +942,7 @@ impl<'a> MetadataCollector<'a> {
             Statement::DataClassDeclaration { name, .. } => {
                 self.metadata.type_names.insert(name.clone());
             }
-            Statement::UnitTypeDefinition(definition) => {
-                self.metadata
-                    .type_names
-                    .insert(definition.name.name.clone());
-                self.visit_unit_definition(definition);
-            }
             _ => {}
-        }
-    }
-
-    fn visit_unit_definition(&mut self, definition: &UnitTypeDefinition) {
-        for member in &definition.members {
-            if let UnitTypeMember::NestedStatement(statement) = member {
-                self.visit_statement(statement);
-            } else if let UnitTypeMember::Conversion(block) = member {
-                for statement in &block.body {
-                    self.visit_statement(statement);
-                }
-            }
         }
     }
 }
@@ -1658,13 +1706,21 @@ mod tests {
     use super::*;
     use jv_ast::Span;
     use jv_checker::imports::resolution::{ResolvedImport, ResolvedImportKind};
-    use jv_ir::{IrModifiers, IrStatement};
+    use jv_ir::{IrModifiers, IrStatement, LoggingMetadata};
+    use jv_parser_rowan::frontend::RowanPipeline;
 
     use std::{
         fs,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    fn parse_program(source: &str) -> Program {
+        RowanPipeline::default()
+            .parse(source)
+            .expect("source should parse for embedded stdlib tests")
+            .into_program()
+    }
 
     fn test_catalog() -> StdlibCatalog {
         let mut catalog = StdlibCatalog::default();
@@ -1758,6 +1814,41 @@ mod tests {
     }
 
     #[test]
+    fn unit_syntax_is_handled_during_stdlib_rewrites() {
+        let mut program = parse_program(
+            r#"
+@ 温度(Double) ℃ {
+    基準 := 273.15
+}
+
+val reading = 42 @ ℃
+"#,
+        );
+
+        rewrite_collection_property_access(&mut program);
+        promote_stdlib_visibility(&mut program);
+
+        let catalog = StdlibCatalog::default();
+        let mut usage = StdlibUsage::default();
+        usage.record_program_usage(&program, &catalog);
+
+        assert!(
+            matches!(
+                program.statements.first(),
+                Some(Statement::UnitTypeDefinition(_))
+            ),
+            "unit type definition should survive stdlib rewrites"
+        );
+        assert!(
+            matches!(
+                program.statements.get(1),
+                Some(Statement::ValDeclaration { .. })
+            ),
+            "value declaration should remain after rewrites"
+        );
+    }
+
+    #[test]
     fn compile_module_returns_error_on_parse_failure() {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1820,6 +1911,8 @@ mod tests {
             type_declarations: vec![class_decl],
             generic_metadata: BTreeMap::new(),
             conversion_metadata: Vec::new(),
+            logging: LoggingMetadata::default(),
+            tuple_record_plans: Vec::new(),
             span,
         };
 

@@ -212,6 +212,7 @@ fn multiline_string_literal_roundtrips_through_serde() {
         ],
         indent: Some(IndentMetadata::new(4, true)),
         span: span.clone(),
+        raw_flavor: None,
     };
 
     let serialized = serde_json::to_string(&literal).expect("serialize multiline literal");
@@ -228,6 +229,9 @@ fn regex_literal_roundtrips_through_serde() {
         pattern: "a/b".to_string(),
         raw: "/a\\/b/".to_string(),
         span: span.clone(),
+        origin: None,
+        const_key: None,
+        template_segments: Vec::new(),
     };
 
     let variant = Literal::Regex(literal.clone());

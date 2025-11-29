@@ -8,8 +8,8 @@ pub mod java;
 pub mod null_safety;
 pub mod pattern;
 pub mod regex;
-pub mod semantics;
 pub mod telemetry;
+pub mod tuple_planner;
 
 pub use inference::{
     InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, PrimitiveType,
@@ -20,11 +20,9 @@ pub use jv_inference::ParallelInferenceConfig;
 pub use regex::RegexAnalysis;
 
 use crate::imports::ResolvedImport;
-use crate::semantics::SemanticContext;
-use crate::semantics::units::UnitRegistry;
+use crate::tuple_planner::TuplePlanner;
 use binding::{BindingResolution, BindingUsageSummary, LateInitManifest, resolve_bindings};
 use inference::conversions::{AppliedConversion, ConversionKind, HelperSpec, NullableGuard};
-use inference::unit_integration;
 use jv_ast::{Program, Span};
 use jv_build::metadata::SymbolIndex;
 use null_safety::{JavaLoweringHint, NullSafetyCoordinator};
@@ -43,7 +41,7 @@ use jv_inference::types::{
     NullabilityFlag, TypeId as FactsTypeId, TypeKind as FactsTypeKind,
     TypeVariant as FactsTypeVariant,
 };
-use jv_ir::unit::UnitRegistrySummary;
+use jv_ir::TupleRecordPlan;
 use jv_pm::JavaTarget;
 
 #[derive(Error, Debug)]
@@ -71,6 +69,7 @@ pub struct InferenceSnapshot {
     pattern_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
     regex_analyses: Vec<RegexAnalysis>,
     late_init_manifest: LateInitManifest,
+    tuple_plans: Vec<TupleRecordPlan>,
 }
 
 impl InferenceSnapshot {
@@ -79,6 +78,7 @@ impl InferenceSnapshot {
         pattern_facts: HashMap<(u64, PatternTarget), PatternMatchFacts>,
         regex_analyses: Vec<RegexAnalysis>,
         late_init_manifest: LateInitManifest,
+        tuple_plans: Vec<TupleRecordPlan>,
     ) -> Self {
         let environment = engine.environment().clone();
         let bindings = engine.bindings().to_vec();
@@ -101,6 +101,7 @@ impl InferenceSnapshot {
             pattern_facts,
             regex_analyses,
             late_init_manifest,
+            tuple_plans,
         }
     }
 
@@ -126,6 +127,10 @@ impl InferenceSnapshot {
 
     pub fn late_init_manifest(&self) -> &LateInitManifest {
         &self.late_init_manifest
+    }
+
+    pub fn tuple_record_plans(&self) -> &[TupleRecordPlan] {
+        &self.tuple_plans
     }
 }
 
@@ -219,6 +224,9 @@ pub trait TypeInferenceService {
     /// Late-init 用メタデータを返す。
     fn late_init_manifest(&self) -> &LateInitManifest;
 
+    /// Planned tuple record definitions inferred for the current program.
+    fn tuple_record_plans(&self) -> &[TupleRecordPlan];
+
     /// Retrieves branch-level nullability flags for a `when` expression.
     ///
     /// The caller must provide the node identifier used by the pattern service,
@@ -257,6 +265,10 @@ impl TypeInferenceService for InferenceSnapshot {
 
     fn late_init_manifest(&self) -> &LateInitManifest {
         &self.late_init_manifest
+    }
+
+    fn tuple_record_plans(&self) -> &[TupleRecordPlan] {
+        &self.tuple_plans
     }
 
     fn when_branch_nullability(
@@ -392,7 +404,7 @@ pub struct TypeChecker {
     normalized_program: Option<Program>,
     binding_usage: BindingUsageSummary,
     late_init_manifest: LateInitManifest,
-    semantic_context: SemanticContext,
+    tuple_plans: Vec<TupleRecordPlan>,
 }
 
 impl TypeChecker {
@@ -416,7 +428,7 @@ impl TypeChecker {
             normalized_program: None,
             binding_usage: BindingUsageSummary::default(),
             late_init_manifest: LateInitManifest::default(),
-            semantic_context: SemanticContext::new(),
+            tuple_plans: Vec::new(),
         }
     }
 
@@ -459,14 +471,8 @@ impl TypeChecker {
         &self.late_init_manifest
     }
 
-    pub fn unit_registry_summary(&self) -> Option<UnitRegistrySummary> {
-        self.semantic_context
-            .unit_registry()
-            .map(|registry| registry.to_summary())
-    }
-
-    pub fn release_unit_registry(&mut self) -> Option<Arc<UnitRegistry>> {
-        self.semantic_context.release_unit_registry()
+    pub fn tuple_record_plans(&self) -> &[TupleRecordPlan] {
+        &self.tuple_plans
     }
 
     pub fn set_imports(&mut self, symbol_index: Arc<SymbolIndex>, imports: Vec<ResolvedImport>) {
@@ -480,7 +486,7 @@ impl TypeChecker {
     pub fn check_program(&mut self, program: &Program) -> Result<(), Vec<CheckError>> {
         self.engine.set_parallel_config(self.parallel_config);
         self.null_safety_hints.clear();
-        self.semantic_context.release_unit_registry();
+        self.tuple_plans.clear();
 
         let binding_resolution = resolve_bindings(program);
         let BindingResolution {
@@ -494,27 +500,10 @@ impl TypeChecker {
         self.normalized_program = Some(normalized);
         self.late_init_manifest = late_init_manifest;
 
-        let mut diagnostics = diagnostics;
         if !diagnostics.is_empty() {
             self.snapshot = None;
             self.merged_facts = None;
             return Err(diagnostics);
-        }
-
-        let normalized_program = self
-            .normalized_program
-            .as_ref()
-            .expect("normalized program should be available");
-        let unit_result = unit_integration::build_registry(normalized_program);
-        diagnostics.extend(unit_result.diagnostics);
-        if unit_result.had_error {
-            self.snapshot = None;
-            self.merged_facts = None;
-            return Err(diagnostics);
-        }
-
-        if let Some(registry) = unit_result.registry {
-            self.semantic_context.attach_unit_registry(registry);
         }
 
         let inference_result = {
@@ -558,11 +547,20 @@ impl TypeChecker {
                     self.update_type_facts_telemetry();
                     return Err(validation_errors);
                 }
+                let tuple_plans = {
+                    let normalized_program = self
+                        .normalized_program
+                        .as_ref()
+                        .expect("normalized program should be available");
+                    TuplePlanner::plan_program(normalized_program)
+                };
+                self.tuple_plans = tuple_plans.clone();
                 self.snapshot = Some(InferenceSnapshot::from_engine(
                     &self.engine,
                     pattern_facts,
                     regex_analyses,
                     self.late_init_manifest.clone(),
+                    tuple_plans,
                 ));
                 self.merged_facts = self
                     .snapshot
@@ -581,6 +579,7 @@ impl TypeChecker {
                     self.snapshot = None;
                     self.merged_facts = None;
                     self.update_type_facts_telemetry();
+                    self.tuple_plans.clear();
                     return Err(placement_errors);
                 }
                 Ok(())
@@ -777,6 +776,7 @@ fn convert_type_kind(ty: &TypeKind) -> FactsTypeKind {
             FactsTypeKind::function(converted_params, converted_ret)
                 .with_nullability(NullabilityFlag::NonNull)
         }
+        TypeKind::Tuple(_) => FactsTypeKind::default(),
         TypeKind::Unknown => FactsTypeKind::default(),
     }
 }

@@ -1,6 +1,6 @@
 use jv_ast::{
-    Argument, Expression, JsonLiteral, JsonValue, Parameter, Pattern, Program, SequenceDelimiter,
-    Span, Statement,
+    Argument, Expression, JsonLiteral, JsonValue, LogBlock, LogItem, Parameter, Pattern, Program,
+    SequenceDelimiter, Span, Statement, TestDataset,
     statement::{UnitTypeDefinition, UnitTypeMember},
 };
 
@@ -92,6 +92,12 @@ impl SequenceWarningCollector {
                     self.visit_statement(method);
                 }
             }
+            Statement::TestDeclaration(declaration) => {
+                if let Some(dataset) = &declaration.dataset {
+                    self.visit_test_dataset(dataset);
+                }
+                self.visit_expression(&declaration.body);
+            }
             Statement::ExtensionFunction(extension) => {
                 self.visit_statement(&extension.function);
             }
@@ -113,15 +119,25 @@ impl SequenceWarningCollector {
                 self.visit_loop_strategy(&statement.strategy);
                 self.visit_expression(&statement.body);
             }
-            Statement::Concurrency(construct) => self.visit_concurrency(construct),
-            Statement::ResourceManagement(resource) => self.visit_resource_management(resource),
             Statement::UnitTypeDefinition(definition) => {
                 self.visit_unit_definition(definition);
             }
+            Statement::Concurrency(construct) => self.visit_concurrency(construct),
+            Statement::ResourceManagement(resource) => self.visit_resource_management(resource),
             Statement::Import { .. }
             | Statement::Package { .. }
             | Statement::Break(_)
             | Statement::Continue(_) => {}
+        }
+    }
+
+    fn visit_test_dataset(&mut self, dataset: &TestDataset) {
+        if let TestDataset::InlineArray { rows, .. } = dataset {
+            for row in rows {
+                for value in &row.values {
+                    self.visit_expression(value);
+                }
+            }
         }
     }
 
@@ -147,7 +163,7 @@ impl SequenceWarningCollector {
         for member in &definition.members {
             match member {
                 UnitTypeMember::Dependency(dependency) => {
-                    if let Some(expr) = dependency.value.as_ref() {
+                    if let Some(expr) = &dependency.value {
                         self.visit_expression(expr);
                     }
                 }
@@ -159,6 +175,16 @@ impl SequenceWarningCollector {
                 UnitTypeMember::NestedStatement(statement) => {
                     self.visit_statement(statement);
                 }
+            }
+        }
+    }
+
+    fn visit_log_block(&mut self, block: &LogBlock) {
+        for item in &block.items {
+            match item {
+                LogItem::Statement(statement) => self.visit_statement(statement),
+                LogItem::Expression(expr) => self.visit_expression(expr),
+                LogItem::Nested(nested) => self.visit_log_block(nested),
             }
         }
     }
@@ -180,6 +206,7 @@ impl SequenceWarningCollector {
         match expression {
             Expression::Literal(_, _)
             | Expression::RegexLiteral(_)
+            | Expression::RegexCommand(_)
             | Expression::Identifier(_, _)
             | Expression::This(_)
             | Expression::Super(_) => {}
@@ -283,6 +310,11 @@ impl SequenceWarningCollector {
                     self.visit_expression(element);
                 }
             }
+            Expression::Tuple { elements, .. } => {
+                for element in elements {
+                    self.visit_expression(element);
+                }
+            }
             Expression::Lambda {
                 parameters, body, ..
             } => {
@@ -308,6 +340,7 @@ impl SequenceWarningCollector {
                     self.visit_expression(finally);
                 }
             }
+            Expression::LogBlock(block) => self.visit_log_block(block),
         }
     }
 
@@ -465,5 +498,23 @@ numbers.map { value -> value * 2 }.toList()
         );
         let warnings = collect_sequence_warnings(&program);
         assert!(warnings.iter().any(|warning| warning.contains("SEQ1002")));
+    }
+
+    #[test]
+    fn unit_syntax_is_ignored_for_sequence_warnings() {
+        let program = parse(
+            r#"
+@ 温度(Double) ℃ {
+    基準 := 273.15
+}
+
+val reading = 42 @ ℃
+"#,
+        );
+        let warnings = collect_sequence_warnings(&program);
+        assert!(
+            warnings.is_empty(),
+            "unit syntax should not trigger sequence warnings, got {warnings:?}"
+        );
     }
 }
