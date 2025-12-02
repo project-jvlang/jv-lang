@@ -7,6 +7,10 @@ members = [
     "crates/jv_parser_semantics",
     "crates/jv_parser_frontend",
     "crates/jv_parser_rowan",
+    "crates/jv_parser2",
+    "crates/jv_dsl_features",
+    "crates/jv_dsl_api",
+    "crates/jv_dsl_builtin",
     "crates/jv_ast",
     "crates/jv_ir",
     "crates/jv_inference",
@@ -66,6 +70,9 @@ jv_parser_preprocess = { path = "crates/jv_parser_preprocess" }
 jv_parser_semantics = { path = "crates/jv_parser_semantics" }
 jv_parser_frontend = { path = "crates/jv_parser_frontend" }
 jv_parser_rowan = { path = "crates/jv_parser_rowan" }
+jv_parser2 = { path = "crates/jv_parser2" }
+jv_dsl_api = { path = "crates/jv_dsl_api" }
+jv_dsl_builtin = { path = "crates/jv_dsl_builtin" }
 jv_ast = { path = "crates/jv_ast" }
 jv_ir = { path = "crates/jv_ir" }
 jv_inference = { path = "crates/jv_inference" }

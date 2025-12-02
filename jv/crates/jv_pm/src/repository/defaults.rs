@@ -288,12 +288,16 @@ fn fallback_distributions() -> Vec<MavenDistribution> {
 /// Only plugins that are actually executed need their transitive deps resolved.
 /// For dependency:resolve, only maven-dependency-plugin is executed.
 fn fallback_lifecycle_bound_plugins() -> Vec<MavenPluginDefinition> {
-    vec![("org.apache.maven.plugins", "maven-dependency-plugin", "3.7.0")]
-        .into_iter()
-        .map(|(group_id, artifact_id, version)| MavenPluginDefinition {
-            group_id: group_id.to_string(),
-            artifact_id: artifact_id.to_string(),
-            version: version.to_string(),
-        })
-        .collect()
+    vec![(
+        "org.apache.maven.plugins",
+        "maven-dependency-plugin",
+        "3.7.0",
+    )]
+    .into_iter()
+    .map(|(group_id, artifact_id, version)| MavenPluginDefinition {
+        group_id: group_id.to_string(),
+        artifact_id: artifact_id.to_string(),
+        version: version.to_string(),
+    })
+    .collect()
 }

@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  feature-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: default
+            feature_flags: ""
+          - name: dsl-all
+            feature_flags: "--all-features"
+          - name: dsl-log
+            feature_flags: "--features dsl-log"
+          - name: dsl-io
+            feature_flags: "--features dsl-io"
+          - name: dsl-lock
+            feature_flags: "--features dsl-lock"
+          - name: dsl-cron
+            feature_flags: "--features dsl-cron"
+          - name: dsl-assert
+            feature_flags: "--features dsl-assert"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: jv -> target
+
+      - name: Cargo check (jv_parser2 + DSL crates) [${{ matrix.name }}]
+        working-directory: jv
+        run: |
+          set -euo pipefail
+          cargo check -p jv_dsl_features -p jv_parser2 -p jv_dsl_api -p jv_dsl_builtin ${{ matrix.feature_flags }}

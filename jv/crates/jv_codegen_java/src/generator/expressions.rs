@@ -77,7 +77,8 @@ impl JavaCodeGenerator {
                 if effective_name == "apply" {
                     if let Some(IrExpression::Identifier { name, .. }) = receiver.as_deref() {
                         if self.script_method_names.contains(name) {
-                            let rendered_args = self.render_arguments_with_style(args, *argument_style)?;
+                            let rendered_args =
+                                self.render_arguments_with_style(args, *argument_style)?;
                             if let Some(owner) = self.owner_for_unqualified_call(name) {
                                 return Ok(format!("{owner}.{name}({rendered_args})"));
                             }

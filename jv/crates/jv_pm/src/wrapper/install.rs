@@ -36,14 +36,15 @@ mod tests {
         let config = InstallConfig::from_args(&args);
         assert_eq!(config.maven_args.len(), 2);
         assert_eq!(config.maven_args[0], OsString::from("-DskipTests"));
-        assert_eq!(config.maven_args[1], OsString::from("-Dmaven.javadoc.skip=true"));
+        assert_eq!(
+            config.maven_args[1],
+            OsString::from("-Dmaven.javadoc.skip=true")
+        );
     }
 
     #[test]
     fn test_install_config_empty_args() {
-        let args = InstallArgs {
-            maven_args: vec![],
-        };
+        let args = InstallArgs { maven_args: vec![] };
 
         let config = InstallConfig::from_args(&args);
         assert!(config.maven_args.is_empty());
@@ -54,9 +55,9 @@ mod tests {
         // Test common Maven options mentioned in R2-5
         let args = InstallArgs {
             maven_args: vec![
-                OsString::from("-DskipTests"),  // Skip tests
-                OsString::from("-o"),            // Offline mode
-                OsString::from("-U"),            // Force update snapshots
+                OsString::from("-DskipTests"), // Skip tests
+                OsString::from("-o"),          // Offline mode
+                OsString::from("-U"),          // Force update snapshots
             ],
         };
 
@@ -70,10 +71,7 @@ mod tests {
     #[test]
     fn test_install_config_with_profiles() {
         let args = InstallArgs {
-            maven_args: vec![
-                OsString::from("-Pproduction"),
-                OsString::from("-Prelease"),
-            ],
+            maven_args: vec![OsString::from("-Pproduction"), OsString::from("-Prelease")],
         };
 
         let config = InstallConfig::from_args(&args);

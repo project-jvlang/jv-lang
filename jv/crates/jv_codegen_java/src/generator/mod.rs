@@ -485,7 +485,8 @@ impl JavaCodeGenerator {
             if let Some(pkg) = &self.package {
                 if !pkg.is_empty() {
                     let fq = format!("{pkg}.{}", record_name);
-                    self.tuple_record_component_types.insert(fq, component_pairs.clone());
+                    self.tuple_record_component_types
+                        .insert(fq, component_pairs.clone());
                 }
             }
             let source_positions = Self::tuple_source_positions(plan);

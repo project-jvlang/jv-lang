@@ -517,8 +517,7 @@ pub mod pipeline {
     use std::time::Instant;
     use tracing::debug;
     use type_facts_bridge::{
-        apply_tuple_return_types, preload_tuple_plans_into_context,
-        preload_type_facts_into_context,
+        apply_tuple_return_types, preload_tuple_plans_into_context, preload_type_facts_into_context,
     };
 
     /// Resulting artifacts and diagnostics from the build pipeline.

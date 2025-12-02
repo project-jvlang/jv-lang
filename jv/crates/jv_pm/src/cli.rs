@@ -73,7 +73,6 @@ pub struct AddArgs {
     pub strategy: Option<ResolverAlgorithm>,
 }
 
-
 /// 新規プロジェクトを初期化する
 #[derive(Debug, Clone, Args)]
 pub struct InitArgs {

@@ -60,16 +60,15 @@ impl JavaCodeGenerator {
                     } = init_expr
                     {
                         if *is_record_component {
-                            let receiver_type = if let IrExpression::Identifier { name, .. } =
-                                receiver.as_ref()
-                            {
-                                self.local_tuple_types
-                                    .get(name)
-                                    .cloned()
-                                    .or_else(|| Self::expression_java_type(receiver).cloned())
-                            } else {
-                                Self::expression_java_type(receiver).cloned()
-                            };
+                            let receiver_type =
+                                if let IrExpression::Identifier { name, .. } = receiver.as_ref() {
+                                    self.local_tuple_types
+                                        .get(name)
+                                        .cloned()
+                                        .or_else(|| Self::expression_java_type(receiver).cloned())
+                                } else {
+                                    Self::expression_java_type(receiver).cloned()
+                                };
                             if let Some(JavaType::Reference { name, .. }) = receiver_type {
                                 if let Some(component_type) =
                                     self.tuple_component_type(&name, field_name)
@@ -106,12 +105,12 @@ impl JavaCodeGenerator {
                         candidates.push(method_name.to_string());
 
                         let tuple_type = candidates.iter().find_map(|name| {
-                            self.tuple_return_records
-                                .get(name.as_str())
-                                .map(|record| JavaType::Reference {
+                            self.tuple_return_records.get(name.as_str()).map(|record| {
+                                JavaType::Reference {
                                     name: record.clone(),
                                     generic_args: vec![],
-                                })
+                                }
+                            })
                         });
 
                         let tuple_type = tuple_type.or_else(|| {
@@ -121,9 +120,7 @@ impl JavaCodeGenerator {
                                     .tuple_return_records
                                     .values()
                                     .any(|record| record == &fallback);
-                                if known_record
-                                    || self.has_tuple_record_definition(&fallback)
-                                {
+                                if known_record || self.has_tuple_record_definition(&fallback) {
                                     Some(JavaType::Reference {
                                         name: fallback,
                                         generic_args: vec![],
@@ -140,7 +137,10 @@ impl JavaCodeGenerator {
                     };
 
                     if tuple_type.is_none() {
-                        if let IrExpression::Identifier { name: init_name, .. } = init_expr {
+                        if let IrExpression::Identifier {
+                            name: init_name, ..
+                        } = init_expr
+                        {
                             if let Some(record_type) = self.local_tuple_types.get(init_name) {
                                 tuple_type = Some(record_type.clone());
                             }
@@ -923,9 +923,7 @@ impl JavaCodeGenerator {
                 .ok()
                 .and_then(|pos| pos.checked_sub(1))
         } else {
-            components
-                .iter()
-                .position(|(name, _)| name == field_name)
+            components.iter().position(|(name, _)| name == field_name)
         }?;
         components.get(index).map(|(_, ty)| ty.clone())
     }

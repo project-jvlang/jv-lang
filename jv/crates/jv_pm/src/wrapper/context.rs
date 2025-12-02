@@ -108,10 +108,15 @@ impl WrapperContext {
         })
     }
 
-    fn ensure_settings(_project_root: &Path, settings_path: &Path) -> Result<PathBuf, WrapperError> {
+    fn ensure_settings(
+        _project_root: &Path,
+        settings_path: &Path,
+    ) -> Result<PathBuf, WrapperError> {
         // wrapper モードでは Maven 標準の ~/.m2/repository を使用
         let local_repository = dirs::home_dir()
-            .ok_or_else(|| WrapperError::OperationFailed("ホームディレクトリが見つかりません".to_string()))?
+            .ok_or_else(|| {
+                WrapperError::OperationFailed("ホームディレクトリが見つかりません".to_string())
+            })?
             .join(".m2")
             .join("repository");
         if settings_path.exists() {

@@ -334,7 +334,12 @@ impl TransformContext {
             })
     }
 
-    pub fn register_tuple_return(&mut self, function: &str, record_name: &str, components: Vec<String>) {
+    pub fn register_tuple_return(
+        &mut self,
+        function: &str,
+        record_name: &str,
+        components: Vec<String>,
+    ) {
         self.tuple_return_types.insert(
             function.to_string(),
             JavaType::Reference {

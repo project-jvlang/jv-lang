@@ -5,8 +5,8 @@ use std::path::PathBuf;
 
 use dialoguer::{Input, Select};
 
-use crate::cli::InitArgs;
 use super::error::WrapperError;
+use crate::cli::InitArgs;
 
 /// Packaging type for Maven projects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -80,7 +80,11 @@ impl JavaVersion {
 
     /// Returns all Java version options for display.
     pub fn all() -> &'static [JavaVersion] {
-        &[JavaVersion::Java17, JavaVersion::Java21, JavaVersion::Java25]
+        &[
+            JavaVersion::Java17,
+            JavaVersion::Java21,
+            JavaVersion::Java25,
+        ]
     }
 }
 

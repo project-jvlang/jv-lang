@@ -60,11 +60,17 @@ fun produce(): (Int String) {
     assert_eq!(プラン一覧.len(), 1, "タプル計画が1件生成されること");
     let プラン = &プラン一覧[0];
     assert!(
-        matches!(プラン.strategy, TupleRecordStrategy::Specific | TupleRecordStrategy::Generic),
+        matches!(
+            プラン.strategy,
+            TupleRecordStrategy::Specific | TupleRecordStrategy::Generic
+        ),
         "戻り値専用または汎用レコード戦略が選択されること"
     );
     assert!(
-        matches!(プラン.specific_name.as_deref(), Some("Produce_Result") | None),
+        matches!(
+            プラン.specific_name.as_deref(),
+            Some("Produce_Result") | None
+        ),
         "関数名からPascalCaseのレコード名が生成されること"
     );
     assert!(
@@ -220,7 +226,10 @@ fun labeled(first: Int, second: Int): (Int Int) {
 
     let 二番目 = &プラン.fields[1];
     assert!(
-        matches!(二番目.primary_label.as_deref(), Some("primarySecond") | None),
+        matches!(
+            二番目.primary_label.as_deref(),
+            Some("primarySecond") | None
+        ),
         "2番目の要素でもprimaryラベルが保存されること: {:?}",
         二番目.primary_label
     );

@@ -264,9 +264,9 @@ fn init_followed_by_wrapper_context_detect() {
 
 #[test]
 fn install_config_parses_maven_arguments_correctly() {
-    use std::ffi::OsString;
     use jv_pm::cli::InstallArgs;
     use jv_pm::wrapper::install::InstallConfig;
+    use std::ffi::OsString;
 
     let args = InstallArgs {
         maven_args: vec![
@@ -306,9 +306,9 @@ fn init_command_allowed_in_wrapper_mode() {
 
 #[test]
 fn install_command_allowed_in_wrapper_mode() {
-    use std::ffi::OsString;
     use jv_pm::cli::{Commands, InstallArgs};
     use jv_pm::wrapper::filter::{CliMode, WrapperCommandFilter};
+    use std::ffi::OsString;
 
     let command = Commands::Install(InstallArgs {
         maven_args: vec![OsString::from("-DskipTests")],

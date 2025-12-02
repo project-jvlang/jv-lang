@@ -1,0 +1,18 @@
+[package]
+name = "jv_dsl_api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+dsl-log = []
+dsl-io = []
+dsl-lock = []
+dsl-cron = []
+dsl-assert = []
+dsl-all = ["dsl-log", "dsl-io", "dsl-lock", "dsl-cron", "dsl-assert"]
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+

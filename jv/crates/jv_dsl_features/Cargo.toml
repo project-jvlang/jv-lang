@@ -1,0 +1,21 @@
+[package]
+name = "jv_dsl_features"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = []
+dsl-log = ["dep:jv_parser2", "dep:jv_dsl_api", "dep:jv_dsl_builtin", "jv_parser2/dsl-log", "jv_dsl_api/dsl-log", "jv_dsl_builtin/dsl-log"]
+dsl-io = ["dep:jv_parser2", "dep:jv_dsl_api", "dep:jv_dsl_builtin", "jv_parser2/dsl-io", "jv_dsl_api/dsl-io", "jv_dsl_builtin/dsl-io"]
+dsl-lock = ["dep:jv_parser2", "dep:jv_dsl_api", "dep:jv_dsl_builtin", "jv_parser2/dsl-lock", "jv_dsl_api/dsl-lock", "jv_dsl_builtin/dsl-lock"]
+dsl-cron = ["dep:jv_parser2", "dep:jv_dsl_api", "dep:jv_dsl_builtin", "jv_parser2/dsl-cron", "jv_dsl_api/dsl-cron", "jv_dsl_builtin/dsl-cron"]
+dsl-assert = ["dep:jv_parser2", "dep:jv_dsl_api", "dep:jv_dsl_builtin", "jv_parser2/dsl-assert", "jv_dsl_api/dsl-assert", "jv_dsl_builtin/dsl-assert"]
+dsl-all = ["dsl-log", "dsl-io", "dsl-lock", "dsl-cron", "dsl-assert"]
+
+[dependencies]
+jv_parser2 = { path = "../jv_parser2", optional = true }
+jv_dsl_api = { path = "../jv_dsl_api", optional = true }
+jv_dsl_builtin = { path = "../jv_dsl_builtin", optional = true }
+

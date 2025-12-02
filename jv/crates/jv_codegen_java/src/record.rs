@@ -158,10 +158,7 @@ fn aliases_from_meta(meta: &TupleFieldMeta, chosen: &str, fallback: &str) -> Vec
 
     for candidate in &meta.secondary_labels {
         let trimmed = candidate.name.trim();
-        if !trimmed.is_empty()
-            && trimmed != chosen
-            && trimmed != fallback
-        {
+        if !trimmed.is_empty() && trimmed != chosen && trimmed != fallback {
             aliases.insert(trimmed.to_string());
         }
     }
