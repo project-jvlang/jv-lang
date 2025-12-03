@@ -17,4 +17,4 @@ dsl-all = ["dsl-log", "dsl-io", "dsl-lock", "dsl-cron", "dsl-assert"]
 bumpalo = "3.14"
 jv_dsl_api = { path = "../jv_dsl_api", optional = true }
 jv_dsl_builtin = { path = "../jv_dsl_builtin", optional = true }
-
+unicode-ident = "1.0"
