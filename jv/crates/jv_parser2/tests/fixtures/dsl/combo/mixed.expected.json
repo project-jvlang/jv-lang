@@ -1,0 +1,40 @@
+[
+  {
+    "keyword": "LOG",
+    "payload": {
+      "statements": [
+        {
+          "level": "debug",
+          "message": "combo"
+        }
+      ]
+    },
+    "scope_transparent": true,
+    "max_nesting": 1
+  },
+  {
+    "keyword": "IO",
+    "payload": {
+      "operations": [
+        {
+          "op": "std",
+          "arg": "stderr"
+        }
+      ]
+    },
+    "scope_transparent": true,
+    "max_nesting": 1
+  },
+  {
+    "keyword": "ASSERT",
+    "payload": {
+      "checks": [
+        {
+          "expr": "ready()"
+        }
+      ]
+    },
+    "scope_transparent": true,
+    "max_nesting": 4
+  }
+]

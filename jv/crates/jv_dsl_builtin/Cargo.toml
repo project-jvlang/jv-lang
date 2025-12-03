@@ -15,4 +15,4 @@ dsl-all = ["dsl-log", "dsl-io", "dsl-lock", "dsl-cron", "dsl-assert"]
 
 [dependencies]
 jv_dsl_api = { path = "../jv_dsl_api" }
-
+serde_json = { workspace = true }

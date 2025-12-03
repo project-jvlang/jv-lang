@@ -1,0 +1,17 @@
+{
+  "keyword": "IO",
+  "payload": {
+    "operations": [
+      {
+        "op": "file",
+        "arg": "input.txt"
+      },
+      {
+        "op": "std",
+        "arg": "stdout"
+      }
+    ]
+  },
+  "scope_transparent": true,
+  "max_nesting": 1
+}

@@ -1,0 +1,15 @@
+{
+  "keyword": "LOCK",
+  "payload": {
+    "steps": [
+      {
+        "action": "enter(\"critical\")"
+      },
+      {
+        "action": "release()"
+      }
+    ]
+  },
+  "scope_transparent": false,
+  "max_nesting": 1
+}

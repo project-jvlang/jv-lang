@@ -1,0 +1,11 @@
+LOG |{
+  debug("combo")
+}|
+
+IO |{
+  STD("stderr")
+}|
+
+ASSERT |{
+  ready()
+}|

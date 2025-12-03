@@ -1,0 +1,17 @@
+{
+  "keyword": "LOG",
+  "payload": {
+    "statements": [
+      {
+        "level": "info",
+        "message": "started"
+      },
+      {
+        "level": "error",
+        "message": "failed"
+      }
+    ]
+  },
+  "scope_transparent": true,
+  "max_nesting": 1
+}

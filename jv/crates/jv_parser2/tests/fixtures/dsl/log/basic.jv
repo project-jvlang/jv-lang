@@ -1,0 +1,4 @@
+LOG |{
+  info("started"),
+  error("failed")
+}|

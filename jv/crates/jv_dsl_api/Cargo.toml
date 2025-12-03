@@ -15,4 +15,4 @@ dsl-all = ["dsl-log", "dsl-io", "dsl-lock", "dsl-cron", "dsl-assert"]
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
-
+serde_json = { workspace = true }

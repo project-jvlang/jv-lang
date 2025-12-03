@@ -1,0 +1,4 @@
+ASSERT |{
+  x > 0
+  y != null
+}|

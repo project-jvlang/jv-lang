@@ -1,0 +1,4 @@
+IO |{
+  FILE("input.txt")
+  STD("stdout")
+}|

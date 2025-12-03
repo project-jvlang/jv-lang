@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-default = []
+default = ["dsl-all"]
 dsl-log = ["dep:jv_dsl_api", "dep:jv_dsl_builtin", "jv_dsl_api/dsl-log", "jv_dsl_builtin/dsl-log"]
 dsl-io = ["dep:jv_dsl_api", "dep:jv_dsl_builtin", "jv_dsl_api/dsl-io", "jv_dsl_builtin/dsl-io"]
 dsl-lock = ["dep:jv_dsl_api", "dep:jv_dsl_builtin", "jv_dsl_api/dsl-lock", "jv_dsl_builtin/dsl-lock"]
@@ -18,3 +18,4 @@ bumpalo = "3.14"
 jv_dsl_api = { path = "../jv_dsl_api", optional = true }
 jv_dsl_builtin = { path = "../jv_dsl_builtin", optional = true }
 unicode-ident = "1.0"
+serde_json = { workspace = true }

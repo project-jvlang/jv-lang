@@ -1,0 +1,15 @@
+{
+  "keyword": "ASSERT",
+  "payload": {
+    "checks": [
+      {
+        "expr": "x > 0"
+      },
+      {
+        "expr": "y != null"
+      }
+    ]
+  },
+  "scope_transparent": true,
+  "max_nesting": 4
+}

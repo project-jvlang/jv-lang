@@ -6,12 +6,14 @@
 pub mod allocator;
 pub mod feature_flags;
 pub mod lexer;
+pub mod plugins;
 pub mod source;
 pub mod span;
 pub mod token;
 
 pub use allocator::{Arena, ArenaGuard};
 pub use lexer::Lexer;
+pub use plugins::PluginRegistry;
 pub use source::Source;
 pub use span::{SourceLocation, Span};
 pub use token::{Token, TokenKind};

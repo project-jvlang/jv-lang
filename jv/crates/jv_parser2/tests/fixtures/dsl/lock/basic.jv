@@ -1,0 +1,4 @@
+LOCK |{
+  enter("critical")
+  release()
+}|

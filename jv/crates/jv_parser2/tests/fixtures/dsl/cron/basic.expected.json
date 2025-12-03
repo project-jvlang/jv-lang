@@ -1,0 +1,13 @@
+{
+  "keyword": "CRON",
+  "payload": {
+    "schedule": "*/5 * * * *",
+    "tasks": [
+      {
+        "task": "run_cleanup()"
+      }
+    ]
+  },
+  "scope_transparent": true,
+  "max_nesting": 1
+}
