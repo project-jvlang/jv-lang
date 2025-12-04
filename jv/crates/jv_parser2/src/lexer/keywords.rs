@@ -60,6 +60,7 @@ pub(crate) fn keyword_from_bytes(text: &[u8]) -> Option<TokenKind> {
             _ => None,
         },
         b't' => match text {
+            b"test" => Some(TokenKind::Test),
             b"throw" => Some(TokenKind::Throw),
             b"trace" => Some(TokenKind::Trace),
             b"true" => Some(TokenKind::TrueKw),

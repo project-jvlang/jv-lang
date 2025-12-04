@@ -170,6 +170,9 @@ fn parse_program(source: &str) -> IrProgram {
         .parse(source)
         .expect("IR codegen fixture should parse")
         .into_program();
+    if std::env::var("JV_DEBUG_AST").is_ok() {
+        eprintln!("AST: {:#?}", program);
+    }
     let mut context = TransformContext::new();
     transform_program_with_context(program, &mut context).expect("program should lower to IR")
 }

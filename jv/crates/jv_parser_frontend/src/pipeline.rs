@@ -264,6 +264,7 @@ fn map_token_type(kind: TokenKind, lexeme: &str) -> TokenType {
         TokenKind::At => TokenType::At,
         TokenKind::Val => TokenType::Val,
         TokenKind::Var => TokenType::Var,
+        TokenKind::Test => TokenType::Identifier(lexeme.to_string()),
         TokenKind::When => TokenType::When,
         TokenKind::Data => TokenType::Data,
         TokenKind::Class => TokenType::Class,

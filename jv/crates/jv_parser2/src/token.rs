@@ -66,6 +66,7 @@ pub enum TokenKind {
     // キーワード（ここから連続で並べること）
     Val,
     Var,
+    Test,
     When,
     Data,
     Class,
