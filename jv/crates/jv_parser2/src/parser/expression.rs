@@ -19,6 +19,12 @@ fn parse_precedence<'src, 'alloc>(
     let mut left = parse_prefix(parser)?;
 
     loop {
+        // 後置演算子（呼び出し・メンバアクセス・インデックス）を処理。
+        if let Some(next) = parse_postfix(parser, &mut left) {
+            left = next;
+            continue;
+        }
+
         let token = parser.current();
         let Some((l_bp, r_bp, op)) = infix_binding_power(token.kind) else {
             break;
@@ -28,7 +34,9 @@ fn parse_precedence<'src, 'alloc>(
         }
         parser.advance();
         let right = parse_precedence(parser, r_bp).unwrap_or_else(|| dummy_expr(token.span));
-        let span = token.span.merge(span_of_expr(&left));
+        let span = span_of_expr(&left)
+            .merge(span_of_expr(&right))
+            .merge(token.span);
         left = Expression::Binary {
             left: Box::new(left),
             op,
@@ -100,7 +108,7 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
         }
         TokenKind::Minus => {
             parser.advance();
-            let rhs = parse_precedence(parser, 70).unwrap_or_else(|| dummy_expr(token.span));
+            let rhs = parse_precedence(parser, 90).unwrap_or_else(|| dummy_expr(token.span));
             Some(Expression::Unary {
                 op: UnaryOp::Minus,
                 operand: Box::new(rhs),
@@ -109,7 +117,7 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
         }
         TokenKind::Plus => {
             parser.advance();
-            let rhs = parse_precedence(parser, 70).unwrap_or_else(|| dummy_expr(token.span));
+            let rhs = parse_precedence(parser, 90).unwrap_or_else(|| dummy_expr(token.span));
             Some(Expression::Unary {
                 op: UnaryOp::Plus,
                 operand: Box::new(rhs),
@@ -118,7 +126,7 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
         }
         TokenKind::Not => {
             parser.advance();
-            let rhs = parse_precedence(parser, 70).unwrap_or_else(|| dummy_expr(token.span));
+            let rhs = parse_precedence(parser, 90).unwrap_or_else(|| dummy_expr(token.span));
             Some(Expression::Unary {
                 op: UnaryOp::Not,
                 operand: Box::new(rhs),
@@ -164,9 +172,12 @@ fn span_of_expr(expr: &Expression) -> crate::span::Span {
         Expression::Identifier(_, span)
         | Expression::Literal(_, span)
         | Expression::Unary { span, .. }
-        | Expression::Binary { span, .. } => {
-            crate::span::Span::new(span.start_column as u32, span.end_column as u32)
-        }
+        | Expression::Binary { span, .. } => ast_span_to_span(span),
+        Expression::MemberAccess { span, .. }
+        | Expression::NullSafeMemberAccess { span, .. }
+        | Expression::Call { span, .. }
+        | Expression::IndexAccess { span, .. }
+        | Expression::NullSafeIndexAccess { span, .. } => ast_span_to_span(span),
         _ => crate::span::Span::new(0, 0),
     }
 }
@@ -177,5 +188,81 @@ fn to_ast_span(span: crate::span::Span) -> AstSpan {
         start_column: span.start as usize,
         end_line: 0,
         end_column: span.end as usize,
+    }
+}
+
+fn ast_span_to_span(span: &AstSpan) -> crate::span::Span {
+    crate::span::Span::new(span.start_column as u32, span.end_column as u32)
+}
+
+fn parse_postfix<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+    left: &mut Expression,
+) -> Option<Expression> {
+    let token = parser.current();
+    match token.kind {
+        TokenKind::Dot | TokenKind::NullSafe => {
+            let null_safe = token.kind == TokenKind::NullSafe;
+            parser.advance(); // consume . or ?.
+            let ident_token = parser.current();
+            if ident_token.kind != TokenKind::Identifier {
+                return None;
+            }
+            let name = parser
+                .lexeme(ident_token.span)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("_id{}", ident_token.span.start));
+            parser.advance();
+            let combined = span_of_expr(left).merge(ident_token.span);
+            let span = to_ast_span(combined);
+            if null_safe {
+                Some(Expression::NullSafeMemberAccess {
+                    object: Box::new(left.clone()),
+                    property: name,
+                    span,
+                })
+            } else {
+                Some(Expression::MemberAccess {
+                    object: Box::new(left.clone()),
+                    property: name,
+                    span,
+                })
+            }
+        }
+        TokenKind::LeftParen => {
+            let open = parser.advance().span;
+            let mut args = Vec::new();
+            if !parser.consume_if(TokenKind::RightParen) {
+                loop {
+                    let arg = parse_expression(parser).unwrap_or_else(|| dummy_expr(open));
+                    args.push(jv_ast::expression::Argument::Positional(arg));
+                    if parser.consume_if(TokenKind::Comma) {
+                        continue;
+                    }
+                    let _ = parser.consume_if(TokenKind::RightParen);
+                    break;
+                }
+            }
+            let combined = span_of_expr(left).merge(open);
+            Some(Expression::Call {
+                function: Box::new(left.clone()),
+                args,
+                type_arguments: Vec::new(),
+                argument_metadata: Default::default(),
+                span: to_ast_span(combined),
+            })
+        }
+        TokenKind::LeftBracket => {
+            let open = parser.advance().span;
+            let index = parse_expression(parser).unwrap_or_else(|| dummy_expr(open));
+            let _ = parser.consume_if(TokenKind::RightBracket);
+            let combined = span_of_expr(left).merge(open);
+            Some(Expression::IndexAccess {
+                object: Box::new(left.clone()),
+                index: Box::new(index),
+                span: to_ast_span(combined),
+            })
+        }
+        _ => None,
     }
 }
