@@ -17,6 +17,7 @@ pub(crate) fn parse_program<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> 
             None => {
                 // 回復して次へ。
                 recovery::recover_to_sync_point(parser);
+                parser.recovery_metrics.recovered += 1;
                 if parser.current().kind == TokenKind::Semicolon {
                     parser.advance();
                 }
