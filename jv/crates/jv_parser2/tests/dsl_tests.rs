@@ -17,10 +17,12 @@ fn read_fixture(suite: &str, name: &str) -> (String, Value) {
 
 fn split_block(input: &str) -> (&str, &str) {
     let start = input.find("|{").expect("missing block start");
-    let end_rel = input[start + 2..]
-        .find("}|")
-        .expect("missing block end");
-    let keyword = input[..start].trim().split_whitespace().last().unwrap_or_default();
+    let end_rel = input[start + 2..].find("}|").expect("missing block end");
+    let keyword = input[..start]
+        .trim()
+        .split_whitespace()
+        .last()
+        .unwrap_or_default();
     let body_end = start + 2 + end_rel;
     (keyword, input[start + 2..body_end].trim())
 }

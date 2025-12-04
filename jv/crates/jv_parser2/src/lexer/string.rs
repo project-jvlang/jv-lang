@@ -1,4 +1,4 @@
-use crate::{token::TokenKind, Token};
+use crate::{Token, token::TokenKind};
 
 use super::{Lexer, Mode, StringContext};
 

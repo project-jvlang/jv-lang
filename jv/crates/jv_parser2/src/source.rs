@@ -65,6 +65,11 @@ impl<'src> Source<'src> {
         self.cursor
     }
 
+    /// オフセットを設定する（入力長にクランプ）。
+    pub fn set_offset(&mut self, offset: usize) {
+        self.cursor = offset.min(self.len);
+    }
+
     /// ファイル末尾に達したか。
     pub fn is_eof(&self) -> bool {
         self.cursor >= self.len

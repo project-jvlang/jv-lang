@@ -1,6 +1,6 @@
-use crate::{token::TokenKind, Token};
+use crate::{Token, token::TokenKind};
 
-use super::{is_ascii_ident_continue, keywords, Lexer};
+use super::{Lexer, is_ascii_ident_continue, keywords};
 
 pub(crate) fn handle_unknown(lexer: &mut Lexer<'_>) -> Token {
     let start = lexer.current_offset();

@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use jv_dsl_api::{BlockPlugin, DslBlock, DslError, DslTokenKind, GlobalOperatorPlugin, TokenPlugin};
+use jv_dsl_api::{
+    BlockPlugin, DslBlock, DslError, DslTokenKind, GlobalOperatorPlugin, TokenPlugin,
+};
 
 #[cfg(feature = "dsl-assert")]
 use jv_dsl_builtin::AssertPlugin;
@@ -170,7 +172,12 @@ impl PluginRegistry {
                     &mut used_tokens,
                     &mut next_token,
                 );
-                push_first_char(keyword, token_id, &mut keyword_to_token, &mut first_char_index);
+                push_first_char(
+                    keyword,
+                    token_id,
+                    &mut keyword_to_token,
+                    &mut first_char_index,
+                );
             }
         }
 
@@ -183,7 +190,12 @@ impl PluginRegistry {
                     &mut used_tokens,
                     &mut next_token,
                 );
-                push_first_char(keyword, token_id, &mut keyword_to_token, &mut first_char_index);
+                push_first_char(
+                    keyword,
+                    token_id,
+                    &mut keyword_to_token,
+                    &mut first_char_index,
+                );
             }
         }
 
@@ -286,7 +298,13 @@ fn assign_token(
     if let Some(existing) = keyword_to_token.get(keyword) {
         return *existing;
     }
-    allocate_token(keyword, requested, keyword_to_token, used_tokens, next_token)
+    allocate_token(
+        keyword,
+        requested,
+        keyword_to_token,
+        used_tokens,
+        next_token,
+    )
 }
 
 #[cfg(test)]

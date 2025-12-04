@@ -1,6 +1,6 @@
 //! レキサー本体とバイトハンドラディスパッチ。
 
-use crate::{source::Source, span::Span, token::TokenKind, Token};
+use crate::{Token, source::Source, span::Span, token::TokenKind};
 
 mod handlers;
 mod keywords;
@@ -189,6 +189,12 @@ impl<'src> Lexer<'src> {
     #[inline]
     pub(crate) fn current_offset(&self) -> usize {
         self.source.offset()
+    }
+
+    /// ソースカーソルを任意位置へ戻す（チェックポイント復元用）。
+    #[inline]
+    pub(crate) fn set_offset(&mut self, offset: usize) {
+        self.source.set_offset(offset);
     }
 
     #[inline]

@@ -14,8 +14,10 @@ dsl-assert = ["dep:jv_dsl_api", "dep:jv_dsl_builtin", "jv_dsl_api/dsl-assert", "
 dsl-all = ["dsl-log", "dsl-io", "dsl-lock", "dsl-cron", "dsl-assert"]
 
 [dependencies]
+bitflags = "2.4"
 bumpalo = "3.14"
 jv_dsl_api = { path = "../jv_dsl_api", optional = true }
 jv_dsl_builtin = { path = "../jv_dsl_builtin", optional = true }
+jv_ast = { path = "../jv_ast" }
 unicode-ident = "1.0"
 serde_json = { workspace = true }

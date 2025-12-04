@@ -1,4 +1,4 @@
-use crate::{token::TokenKind, Token};
+use crate::{Token, token::TokenKind};
 
 use super::Lexer;
 
@@ -39,9 +39,7 @@ pub(crate) fn lex_number(lexer: &mut Lexer<'_>) -> Token {
     let mut int_digits = consume_digits(lexer, |b| b.is_ascii_digit());
 
     // 小数部
-    if matches!(lexer.peek(), Some(b'.'))
-        && !matches!(lexer.peek2(), Some((b'.', b'.')))
-    {
+    if matches!(lexer.peek(), Some(b'.')) && !matches!(lexer.peek2(), Some((b'.', b'.'))) {
         lexer.advance(); // '.'
         let frac = consume_digits(lexer, |b| b.is_ascii_digit());
         if frac == 0 {
