@@ -9,5 +9,5 @@ pub use formatter::{
     Diagnostic, DiagnosticContext, DiagnosticFormatter, DiagnosticSeverity, DiagnosticSource,
     ParserDiagnosticView,
 };
-pub use pipeline::{ParseError, ParserPipeline, PipelineArtifacts};
+pub use pipeline::{ParseError, Parser2Pipeline, ParserPipeline, PipelineArtifacts};
 pub use views::{FrontendDiagnostics, FrontendOutput, ProgramView};

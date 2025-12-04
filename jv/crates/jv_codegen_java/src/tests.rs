@@ -17,8 +17,7 @@ use jv_ir::{
     SequenceTerminal, SequenceTerminalEvaluation, SequenceTerminalKind, TupleRecordPlan,
     TupleRecordStrategy, TupleUsageContext, TupleUsageKind,
 };
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 use serde_json::to_string_pretty;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -167,7 +166,7 @@ fn sample_declaration_tsv() -> IrSampleDeclaration {
 }
 
 fn parse_program(source: &str) -> IrProgram {
-    let program = RowanPipeline::default()
+    let program = Parser2Pipeline::default()
         .parse(source)
         .expect("IR codegen fixture should parse")
         .into_program();

@@ -1,6 +1,6 @@
 //! インクリメンタルパースのスタブ。
 
-use super::{ParseResult, Parser};
+use super::Parser;
 
 /// 差分情報（暫定）。
 #[derive(Debug, Clone)]
@@ -18,9 +18,9 @@ pub struct IncrementalCache {}
 
 /// 変更に基づき最小限の再パースを行う（現状はフルパースに委譲）。
 pub fn parse_incremental<'src, 'alloc>(
-    parser: &'alloc mut Parser<'src, 'alloc>,
+    mut parser: Parser<'src, 'alloc>,
     _change: &TextChange,
     _cache: &mut IncrementalCache,
-) -> ParseResult<'alloc> {
-    parser.parse()
+) {
+    let _ = parser.parse();
 }

@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 jv_lexer.workspace = true
 jv_ast.workspace = true
+jv_parser2 = { path = "../jv_parser2" }
 jv_parser_preprocess = { path = "../jv_parser_preprocess" }
 jv_parser_semantics = { path = "../jv_parser_semantics" }
 thiserror.workspace = true

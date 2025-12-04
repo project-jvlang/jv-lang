@@ -4,11 +4,10 @@ use jv_checker::{
     pattern::{NarrowedNullability, PatternMatchService, PatternTarget},
 };
 use jv_ir::{context::TransformContext, transform::desugar_when_expression, types::JavaType};
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser_frontend::Parser2Pipeline;
 
 fn parse_when_expression(source: &str) -> Expression {
-    let program = RowanPipeline::default()
+    let program = Parser2Pipeline::default()
         .parse(source)
         .expect("snippet should parse")
         .into_program();

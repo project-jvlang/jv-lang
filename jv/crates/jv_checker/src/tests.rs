@@ -15,8 +15,7 @@ use jv_ast::{
 use jv_inference::TypeFacts;
 use jv_inference::types::{NullabilityFlag, TypeVariant as FactsTypeVariant};
 use jv_ir::error::{TestLoweringDiagnostic, TransformError};
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 use std::collections::HashMap;
 
 fn dummy_span() -> Span {
@@ -97,7 +96,7 @@ fn assertion_rewrite_transform_error_includes_quick_fix() {
 }
 
 fn parse_program(source: &str) -> Program {
-    RowanPipeline::default()
+    Parser2Pipeline::default()
         .parse(source)
         .expect("source snippet should parse")
         .into_program()

@@ -1,6 +1,9 @@
 // jv_lsp - Language Server Protocol implementation
 mod handlers;
+mod parser_adapter;
 mod services;
+
+pub use parser_adapter::ParserAdapter;
 
 use handlers::imports::build_imports_response;
 pub use handlers::imports::{ImportItem, ImportsParams, ImportsResponse};
@@ -35,8 +38,7 @@ use jv_inference::{
 use jv_ir::types::{IrImport, IrImportDetail};
 use jv_ir::{TransformContext, transform_program_with_context};
 use jv_lexer::{Token, TokenMetadata, TokenType};
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 use serde::{Deserialize, Serialize};
 use services::completion::logging::{log_block_snippet_completions, manifest_logging_completions};
 use services::diagnostics::logging::collect_logging_diagnostics;
@@ -567,6 +569,8 @@ pub struct JvLanguageServer {
     programs: HashMap<String, Program>,
     generics: HashMap<String, GenericDocumentIndex>,
     parallel_config: ParallelInferenceConfig,
+    parser: ParserAdapter,
+    last_parsed: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
@@ -605,6 +609,8 @@ impl JvLanguageServer {
             programs: HashMap::new(),
             generics: HashMap::new(),
             parallel_config: config,
+            parser: ParserAdapter::new(),
+            last_parsed: HashMap::new(),
         }
     }
 
@@ -616,7 +622,7 @@ impl JvLanguageServer {
         &self,
         content: &str,
     ) -> Result<Vec<IrImport>, ImportPlanError> {
-        let pipeline = RowanPipeline::default();
+        let pipeline = Parser2Pipeline::default();
         let frontend_output = pipeline.parse(content).map_err(|error| {
             from_parse_error(&error)
                 .map(|diagnostic| ImportPlanError::new(diagnostic.message))
@@ -673,19 +679,23 @@ impl JvLanguageServer {
     }
 
     pub fn open_document(&mut self, uri: String, content: String) {
+        self.parser.drop_cache(&uri);
         self.documents.insert(uri.clone(), content);
         self.type_facts.remove(&uri);
         self.regex_metadata.remove(&uri);
         self.programs.remove(&uri);
         self.generics.remove(&uri);
+        self.last_parsed.remove(&uri);
     }
 
     pub fn close_document(&mut self, uri: &str) {
+        self.parser.drop_cache(uri);
         self.documents.remove(uri);
         self.type_facts.remove(uri);
         self.regex_metadata.remove(uri);
         self.programs.remove(uri);
         self.generics.remove(uri);
+        self.last_parsed.remove(uri);
     }
 
     pub fn get_diagnostics(&mut self, uri: &str) -> Vec<Diagnostic> {
@@ -693,10 +703,23 @@ impl JvLanguageServer {
             return Vec::new();
         };
 
-        let pipeline = RowanPipeline::default();
-        let frontend_output = match pipeline.parse(content) {
-            Ok(output) => output,
+        let previous = self.last_parsed.get(uri).cloned();
+        let frontend_output = match previous {
+            Some(prev) => self
+                .parser
+                .parse_incremental(uri, &prev, content)
+                .or_else(|_| self.parser.parse_full(uri, content)),
+            None => self.parser.parse_full(uri, content),
+        };
+        let frontend_output = match frontend_output {
+            Ok(output) => {
+                self.last_parsed
+                    .insert(uri.to_string(), content.to_string());
+                output
+            }
             Err(error) => {
+                self.parser.drop_cache(uri);
+                self.last_parsed.remove(uri);
                 self.type_facts.remove(uri);
                 self.regex_metadata.remove(uri);
                 self.programs.remove(uri);

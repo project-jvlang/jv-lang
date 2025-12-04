@@ -64,7 +64,7 @@ where
     }
 
     /// プログラム全体をパースする。
-    pub fn parse(&'alloc mut self) -> ParseResult<'alloc> {
+    pub fn parse(&mut self) -> ParseResult<'_> {
         let program = statement::parse_program(self);
         let ast = program.map(|prog| self.ast_builder.alloc_program(prog));
         ParseResult {

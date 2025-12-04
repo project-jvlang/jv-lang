@@ -1031,8 +1031,7 @@ fn ensure_optional_type(ty: TypeKind) -> TypeKind {
 mod tests {
     use super::*;
     use jv_ast::{BinaryMetadata, Modifiers, Pattern, Span, ValBindingOrigin, WhenArm};
-    use jv_parser_frontend::ParserPipeline;
-    use jv_parser_rowan::frontend::RowanPipeline;
+    use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 
     fn dummy_span() -> Span {
         Span::dummy()
@@ -1051,7 +1050,7 @@ mod tests {
     }
 
     fn parse_program(source: &str) -> Program {
-        RowanPipeline::default()
+        Parser2Pipeline::default()
             .parse(source)
             .expect("source should parse for constraint generator tests")
             .into_program()
