@@ -6,8 +6,11 @@ mod handlers;
 mod keywords;
 mod number;
 mod operators;
+mod regex;
 mod string;
 mod unicode;
+
+pub(crate) use regex::{can_start_regex, lex_regex};
 
 type ByteHandler = fn(&mut Lexer<'_>) -> Token;
 
@@ -51,7 +54,7 @@ const fn build_byte_handlers() -> [ByteHandler; 128] {
     table[b'+' as usize] = operators::lex_operator;
     table[b'-' as usize] = operators::lex_operator;
     table[b'*' as usize] = operators::lex_operator;
-    table[b'/' as usize] = operators::lex_operator;
+    table[b'/' as usize] = operators::lex_slash;
     table[b'%' as usize] = operators::lex_operator;
     table[b'=' as usize] = operators::lex_operator;
     table[b'!' as usize] = operators::lex_operator;
@@ -80,6 +83,8 @@ pub struct Lexer<'src> {
     source: Source<'src>,
     pub(crate) current: Token,
     pub(crate) mode: Mode,
+    /// 直前に生成したトークンの種別（正規表現判定用）。
+    pub(crate) last_token_kind: TokenKind,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -102,6 +107,7 @@ impl<'src> Lexer<'src> {
             source,
             current: Token::new(TokenKind::Invalid, Span::new(0, 0)),
             mode: Mode::Normal,
+            last_token_kind: TokenKind::Eof, // ファイル先頭では正規表現開始可能
         };
         lexer.current = lexer.read_next_token();
         lexer
@@ -110,6 +116,13 @@ impl<'src> Lexer<'src> {
     /// 現在のトークンを返し、次のトークンへ進める。
     pub fn next_token(&mut self) -> Token {
         let token = self.current;
+        // 空白やコメントはスキップして、意味のあるトークンのみ記録
+        if !matches!(
+            token.kind,
+            TokenKind::Whitespace | TokenKind::Newline | TokenKind::LineComment | TokenKind::BlockComment
+        ) {
+            self.last_token_kind = token.kind;
+        }
         self.current = self.read_next_token();
         token
     }
@@ -192,15 +205,16 @@ impl<'src> Lexer<'src> {
     }
 
     /// レキサー状態を取得する（チェックポイント用）。
-    pub(crate) fn state(&self) -> (usize, Token, Mode) {
-        (self.source.offset(), self.current, self.mode)
+    pub(crate) fn state(&self) -> (usize, Token, Mode, TokenKind) {
+        (self.source.offset(), self.current, self.mode, self.last_token_kind)
     }
 
     /// レキサー状態を復元する。
-    pub(crate) fn set_state(&mut self, offset: usize, current: Token, mode: Mode) {
+    pub(crate) fn set_state(&mut self, offset: usize, current: Token, mode: Mode, last_token_kind: TokenKind) {
         self.set_offset(offset);
         self.current = current;
         self.mode = mode;
+        self.last_token_kind = last_token_kind;
     }
 
     /// ソースカーソルを任意位置へ戻す（チェックポイント復元用）。

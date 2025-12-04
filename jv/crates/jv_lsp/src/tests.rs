@@ -475,9 +475,7 @@ fn surfaces_null_safety_warning() {
     ) && diag.message.contains("Null safety")));
 }
 
-// TODO: Re-enable once regex literal lexing is implemented in jv_parser2
 #[test]
-#[ignore = "regex literal lexing not yet implemented in jv_parser2"]
 fn surfaces_regex_diagnostics_from_validator() {
     let mut server = JvLanguageServer::new();
     let uri = "file:///regex-invalid.jv".to_string();
@@ -496,9 +494,7 @@ fn surfaces_regex_diagnostics_from_validator() {
     assert_eq!(metadata.len(), 1);
 }
 
-// TODO: Re-enable once regex literal lexing is implemented in jv_parser2
 #[test]
-#[ignore = "regex literal lexing not yet implemented in jv_parser2"]
 fn hover_exposes_regex_analysis_summary() {
     let mut server = JvLanguageServer::new();
     let uri = "file:///regex-hover.jv".to_string();
@@ -524,9 +520,7 @@ fn hover_exposes_regex_analysis_summary() {
     assert_eq!(hover.range.start.line, hover_position.line);
 }
 
-// TODO: Re-enable once regex literal lexing is implemented in jv_parser2
 #[test]
-#[ignore = "regex literal lexing not yet implemented in jv_parser2"]
 fn regex_completions_include_templates_and_metadata() {
     let mut server = JvLanguageServer::new();
     let uri = "file:///regex-completion.jv".to_string();

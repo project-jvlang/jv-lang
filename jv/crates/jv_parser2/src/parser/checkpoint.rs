@@ -1,6 +1,6 @@
 use super::Parser;
 use crate::lexer::Mode;
-use crate::token::Token;
+use crate::token::{Token, TokenKind};
 
 /// パース状態のスナップショット。
 #[derive(Debug, Clone, Copy)]
@@ -13,6 +13,7 @@ pub struct Checkpoint {
     pub(crate) recovered: bool,
     pub(crate) lexer_current: Token,
     pub(crate) lexer_mode: Mode,
+    pub(crate) lexer_last_token_kind: TokenKind,
 }
 
 impl Checkpoint {
@@ -25,6 +26,7 @@ impl Checkpoint {
         recovered: bool,
         lexer_current: Token,
         lexer_mode: Mode,
+        lexer_last_token_kind: TokenKind,
     ) -> Self {
         Self {
             cursor,
@@ -35,11 +37,12 @@ impl Checkpoint {
             recovered,
             lexer_current,
             lexer_mode,
+            lexer_last_token_kind,
         }
     }
 
     pub(crate) fn from_parser<'src, 'alloc>(parser: &Parser<'src, 'alloc>) -> Self {
-        let (cursor, current, mode) = parser.lexer.state();
+        let (cursor, current, mode, last_token_kind) = parser.lexer.state();
         Self::new(
             cursor,
             parser.position,
@@ -49,6 +52,7 @@ impl Checkpoint {
             parser.recovered,
             current,
             mode,
+            last_token_kind,
         )
     }
 }

@@ -85,6 +85,7 @@ where
             self.recovered,
             self.lexer.current,
             self.lexer.mode,
+            self.lexer.last_token_kind,
         )
     }
 
@@ -99,6 +100,7 @@ where
             checkpoint.cursor,
             checkpoint.lexer_current,
             checkpoint.lexer_mode,
+            checkpoint.lexer_last_token_kind,
         );
     }
 

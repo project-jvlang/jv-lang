@@ -1,6 +1,6 @@
 use crate::{Token, token::TokenKind};
 
-use super::Lexer;
+use super::{Lexer, can_start_regex, lex_regex};
 
 pub(crate) fn lex_operator(lexer: &mut Lexer<'_>) -> Token {
     let start = lexer.current_offset();
@@ -130,6 +130,29 @@ pub(crate) fn lex_operator(lexer: &mut Lexer<'_>) -> Token {
     };
 
     lexer.make_token(kind, start)
+}
+
+/// `/` を文脈依存で処理する。正規表現リテラルまたは除算演算子を返す。
+///
+/// この関数はバイトハンドラとして使用され、`/` の文脈判定を行う。
+pub(crate) fn lex_slash(lexer: &mut Lexer<'_>) -> Token {
+    // コメントかどうかを先読み
+    if let Some((b'/', next)) = lexer.peek2() {
+        if next == b'/' || next == b'*' {
+            // コメント: 通常の演算子処理へ
+            return lex_operator(lexer);
+        }
+    }
+
+    // 正規表現リテラルを開始できるか判定
+    if can_start_regex(lexer.last_token_kind) {
+        return lex_regex(lexer);
+    }
+
+    // 除算演算子
+    let start = lexer.current_offset();
+    lexer.advance();
+    lexer.make_token(TokenKind::Divide, start)
 }
 
 fn lex_line_comment(lexer: &mut Lexer<'_>) -> TokenKind {
