@@ -431,12 +431,19 @@ fn parse_postfix<'src, 'alloc>(
             let mut args = Vec::new();
             let mut last_span = open;
             let mut close_span = open;
+            let mut has_comma = false;
+            let mut first_comma_span: Option<crate::span::Span> = None;
             if !parser.consume_if(TokenKind::RightParen) {
                 loop {
                     let arg = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, open));
                     last_span = span_of_expr(parser, &arg);
                     args.push(jv_ast::expression::Argument::Positional(arg));
-                    if parser.consume_if(TokenKind::Comma) {
+                    if parser.current().kind == TokenKind::Comma {
+                        if !has_comma {
+                            first_comma_span = Some(parser.current().span);
+                        }
+                        has_comma = true;
+                        parser.advance();
                         continue;
                     }
                     if parser.current().kind == TokenKind::RightParen {
@@ -449,6 +456,16 @@ fn parse_postfix<'src, 'alloc>(
                 // consume_if で進んだので current は次トークン。閉じ括弧は open に隣接する位置。
                 close_span = open;
             }
+
+            // Emit JV2102 diagnostic if commas were used in function call arguments
+            if has_comma {
+                let diagnostic_span = first_comma_span.unwrap_or(open);
+                parser.push_diagnostic(crate::diagnostics::Diagnostic::new(
+                    "JV2102: 関数呼び出しでカンマ区切りはサポートされません。位置引数は空白または改行で区切ってください。\nJV2102: Function calls do not support comma separators. Separate positional arguments with whitespace or newlines.",
+                    diagnostic_span,
+                ));
+            }
+
             let combined = span_of_expr(parser, left)
                 .merge(open)
                 .merge(last_span)
@@ -680,6 +697,8 @@ fn parse_json_array<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<J
     let start = parser.advance().span;
     let mut elements = Vec::new();
     let mut end_span = start;
+    let mut has_comma = false;
+    let mut first_comma_span: Option<crate::span::Span> = None;
 
     while parser.current().kind != TokenKind::RightBracket && parser.current().kind != TokenKind::Eof
     {
@@ -697,7 +716,12 @@ fn parse_json_array<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<J
             parser.advance();
         }
 
-        if parser.consume_if(TokenKind::Comma) {
+        if parser.current().kind == TokenKind::Comma {
+            if !has_comma {
+                first_comma_span = Some(parser.current().span);
+            }
+            has_comma = true;
+            parser.advance();
             continue;
         }
     }
@@ -705,6 +729,15 @@ fn parse_json_array<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<J
     if parser.current().kind == TokenKind::RightBracket {
         end_span = parser.current().span;
         parser.advance();
+    }
+
+    // Emit JV2101 diagnostic if commas were used in array literal
+    if has_comma {
+        let diagnostic_span = first_comma_span.unwrap_or(start);
+        parser.push_diagnostic(crate::diagnostics::Diagnostic::new(
+            "JV2101: 配列リテラルでカンマ区切りはサポートされません。空白または改行のみで要素を分けてください。\nJV2101: Array literals do not support comma separators. Use whitespace or newlines between elements.",
+            diagnostic_span,
+        ));
     }
 
     Some(JsonValue::Array {

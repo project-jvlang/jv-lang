@@ -130,12 +130,14 @@ impl Parser2Pipeline {
                 .diagnostics
                 .iter()
                 .map(|diag| {
+                    // Extract diagnostic code from message if it starts with "JVxxxx:"
+                    let code = extract_diagnostic_code(&diag.message);
                     ParserDiagnosticView::with_code(
                         "parser2",
                         diag.message.clone(),
                         Some(to_ast_span(diag.span, line_starts)),
                         map_severity(diag.kind),
-                        None,
+                        code,
                     )
                 })
                 .collect::<Vec<_>>();
@@ -322,4 +324,19 @@ fn build_metadata(kind: TokenKind, lexeme: &str, line: usize, column: usize) -> 
         })],
         _ => Vec::new(),
     }
+}
+
+/// Extract diagnostic code from message if it starts with "JVxxxx:" pattern.
+fn extract_diagnostic_code(message: &str) -> Option<String> {
+    if message.starts_with("JV") {
+        // Find the colon that separates code from message
+        if let Some(colon_pos) = message.find(':') {
+            let code = &message[..colon_pos];
+            // Validate it looks like a diagnostic code (JV followed by digits)
+            if code.len() >= 3 && code[2..].chars().all(|c| c.is_ascii_digit()) {
+                return Some(code.to_string());
+            }
+        }
+    }
+    None
 }
