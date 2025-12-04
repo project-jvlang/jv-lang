@@ -30,6 +30,11 @@ pub enum BindingPatternKind {
         /// Source span covering the wildcard token.
         span: Span,
     },
+    /// Literal pattern (number/string/bool/null).
+    Literal {
+        literal: crate::types::Literal,
+        span: Span,
+    },
 }
 
 impl BindingPatternKind {
@@ -52,7 +57,8 @@ impl BindingPatternKind {
             BindingPatternKind::Identifier { span, .. }
             | BindingPatternKind::Tuple { span, .. }
             | BindingPatternKind::List { span, .. }
-            | BindingPatternKind::Wildcard { span } => span.clone(),
+            | BindingPatternKind::Wildcard { span }
+            | BindingPatternKind::Literal { span, .. } => span.clone(),
         }
     }
 
@@ -79,7 +85,7 @@ impl BindingPatternKind {
             | BindingPatternKind::List { elements, .. } => elements
                 .iter()
                 .find_map(BindingPatternKind::first_identifier),
-            BindingPatternKind::Wildcard { .. } => None,
+            BindingPatternKind::Wildcard { .. } | BindingPatternKind::Literal { .. } => None,
         }
     }
 }

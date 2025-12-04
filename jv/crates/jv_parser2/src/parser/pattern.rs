@@ -3,8 +3,9 @@
 use super::Parser;
 use crate::token::TokenKind;
 use jv_ast::binding_pattern::BindingPatternKind;
+use jv_ast::types::Literal;
 
-pub(crate) fn parse_pattern<'src, 'alloc>(
+pub fn parse_pattern<'src, 'alloc>(
     parser: &mut Parser<'src, 'alloc>,
 ) -> Option<BindingPatternKind> {
     match parser.current().kind {
@@ -16,6 +17,11 @@ pub(crate) fn parse_pattern<'src, 'alloc>(
                 span: to_ast_span(span),
             })
         }
+        TokenKind::Number
+        | TokenKind::String
+        | TokenKind::TrueKw
+        | TokenKind::FalseKw
+        | TokenKind::NullKw => parse_literal_pattern(parser),
         TokenKind::LeftParen => parse_tuple_pattern(parser),
         TokenKind::LeftBracket => parse_list_pattern(parser),
         _ => None,
@@ -62,16 +68,26 @@ fn parse_tuple_pattern<'src, 'alloc>(
         if parser.consume_if(TokenKind::Comma) {
             continue;
         }
-        let _ = parser.consume_if(TokenKind::RightParen);
-        break;
+        if parser.consume_if(TokenKind::RightParen) {
+            let end_span = parser.current().span;
+            let span = open.merge(end_span);
+            return Some(BindingPatternKind::Tuple {
+                elements,
+                span: to_ast_span(span),
+            });
+        } else {
+            // missing ')'
+            let err_span = parser.current().span;
+            parser.push_diagnostic(crate::diagnostics::Diagnostic::new(
+                "expected ')' to close tuple pattern",
+                err_span,
+            ));
+            break;
+        }
     }
 
-    let end_span = parser.current().span;
-    let span = open.merge(end_span);
-    Some(BindingPatternKind::Tuple {
-        elements,
-        span: to_ast_span(span),
-    })
+    let span = to_ast_span(open);
+    Some(BindingPatternKind::Tuple { elements, span })
 }
 
 fn parse_list_pattern<'src, 'alloc>(
@@ -96,15 +112,43 @@ fn parse_list_pattern<'src, 'alloc>(
         if parser.consume_if(TokenKind::Comma) {
             continue;
         }
-        let _ = parser.consume_if(TokenKind::RightBracket);
-        break;
+        if parser.consume_if(TokenKind::RightBracket) {
+            let end_span = parser.current().span;
+            let span = open.merge(end_span);
+            return Some(BindingPatternKind::List {
+                elements,
+                span: to_ast_span(span),
+            });
+        } else {
+            let err_span = parser.current().span;
+            parser.push_diagnostic(crate::diagnostics::Diagnostic::new(
+                "expected ']' to close list pattern",
+                err_span,
+            ));
+            break;
+        }
     }
 
-    let end_span = parser.current().span;
-    let span = open.merge(end_span);
-    Some(BindingPatternKind::List {
-        elements,
-        span: to_ast_span(span),
+    let span = to_ast_span(open);
+    Some(BindingPatternKind::List { elements, span })
+}
+
+fn parse_literal_pattern<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<BindingPatternKind> {
+    let tok = parser.current();
+    let lit = match tok.kind {
+        TokenKind::Number => Literal::Number(parser.lexeme(tok.span).unwrap_or("0").to_string()),
+        TokenKind::String => Literal::String(parser.lexeme(tok.span).unwrap_or("").to_string()),
+        TokenKind::TrueKw => Literal::Boolean(true),
+        TokenKind::FalseKw => Literal::Boolean(false),
+        TokenKind::NullKw => Literal::Null,
+        _ => return None,
+    };
+    parser.advance();
+    Some(BindingPatternKind::Literal {
+        literal: lit,
+        span: to_ast_span(tok.span),
     })
 }
 
