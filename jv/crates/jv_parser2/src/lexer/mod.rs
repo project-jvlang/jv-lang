@@ -245,6 +245,11 @@ impl<'src> Lexer<'src> {
     }
 
     #[inline]
+    pub(crate) fn source_text(&self) -> &'src str {
+        self.source.as_str()
+    }
+
+    #[inline]
     pub(crate) fn consume_while<F>(&mut self, mut predicate: F)
     where
         F: FnMut(u8) -> bool,

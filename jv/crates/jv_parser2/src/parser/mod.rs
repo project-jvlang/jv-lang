@@ -10,28 +10,32 @@ pub mod types;
 
 use crate::{
     allocator::Arena,
+    ast::builder::{AstBuilder, AstRoot},
     context::JvContext,
     diagnostics::Diagnostic,
     lexer::Lexer,
     span::Span,
     token::{Token, TokenKind},
 };
-use jv_ast::statement::Program;
 
 pub use checkpoint::Checkpoint;
 
 /// パース結果。
 #[derive(Default, Clone)]
-pub struct ParseResult {
-    pub ast: Option<Program>,
+pub struct ParseResult<'alloc> {
+    pub ast: Option<AstRoot<'alloc>>,
     pub diagnostics: Vec<Diagnostic>,
     pub recovered: bool,
 }
 
 /// レキサー上で構文解析を行う再帰下降パーサー。
-pub struct Parser<'src, 'alloc> {
+pub struct Parser<'src, 'alloc>
+where
+    'src: 'alloc,
+{
     pub(crate) lexer: Lexer<'src>,
     arena: &'alloc Arena,
+    ast_builder: AstBuilder<'src, 'alloc>,
     diagnostics: Vec<Diagnostic>,
     tokens: Vec<Token>,
     position: usize,
@@ -40,11 +44,16 @@ pub struct Parser<'src, 'alloc> {
     recovery_metrics: crate::parser::recovery::RecoveryMetrics,
 }
 
-impl<'src, 'alloc> Parser<'src, 'alloc> {
+impl<'src, 'alloc> Parser<'src, 'alloc>
+where
+    'src: 'alloc,
+{
     pub fn new(lexer: Lexer<'src>, arena: &'alloc Arena) -> Self {
+        let builder = AstBuilder::new(arena, lexer.source_text());
         Self {
             lexer,
             arena,
+            ast_builder: builder,
             diagnostics: Vec::new(),
             tokens: Vec::new(),
             position: 0,
@@ -55,10 +64,11 @@ impl<'src, 'alloc> Parser<'src, 'alloc> {
     }
 
     /// プログラム全体をパースする。
-    pub fn parse(&mut self) -> ParseResult {
+    pub fn parse(&'alloc mut self) -> ParseResult<'alloc> {
         let program = statement::parse_program(self);
+        let ast = program.map(|prog| self.ast_builder.alloc_program(prog));
         ParseResult {
-            ast: program,
+            ast,
             diagnostics: self.diagnostics.clone(),
             recovered: self.recovery_metrics.recovered > 0 || self.recovered,
         }
@@ -170,6 +180,21 @@ impl<'src, 'alloc> Parser<'src, 'alloc> {
     /// Arena参照を返す（AST構築用）。
     pub(crate) fn arena(&self) -> &'alloc Arena {
         self.arena
+    }
+
+    /// ASTビルダーへの参照を返す。
+    pub(crate) fn ast_builder(&self) -> &AstBuilder<'src, 'alloc> {
+        &self.ast_builder
+    }
+
+    /// バイトスパンをASTスパンへ変換する。
+    pub(crate) fn ast_span(&self, span: Span) -> jv_ast::Span {
+        self.ast_builder.span(span)
+    }
+
+    /// `jv_ast::Span` をバイトスパンへ逆変換する。
+    pub(crate) fn span_from_ast(&self, span: &jv_ast::Span) -> Span {
+        self.ast_builder.span_to_byte(span)
     }
 
     /// パーサーが回復を行ったかどうかをマーキングする。

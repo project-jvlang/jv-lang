@@ -93,6 +93,12 @@ impl<'src> Source<'src> {
         let end_u32 = end.min(self.len) as u32;
         Span::new(start_u32, end_u32)
     }
+
+    /// 入力全体をUTF-8文字列として参照する。
+    pub fn as_str(&self) -> &'src str {
+        // `new` でUTF-8検証済み。
+        unsafe { std::str::from_utf8_unchecked(self.bytes) }
+    }
 }
 
 #[cfg(test)]

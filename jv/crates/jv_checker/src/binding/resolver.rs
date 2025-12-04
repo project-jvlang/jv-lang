@@ -593,6 +593,7 @@ impl BindingResolver {
                     Self::collect_pattern_identifiers(element, acc);
                 }
             }
+            BindingPatternKind::Literal { .. } => {}
             BindingPatternKind::Wildcard { .. } => {}
         }
     }
@@ -990,6 +991,7 @@ impl BindingResolver {
                     self.declare_test_parameter_pattern(element);
                 }
             }
+            BindingPatternKind::Literal { .. } => {}
             BindingPatternKind::Wildcard { .. } => {}
         }
     }

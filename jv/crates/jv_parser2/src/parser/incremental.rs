@@ -18,9 +18,9 @@ pub struct IncrementalCache {}
 
 /// 変更に基づき最小限の再パースを行う（現状はフルパースに委譲）。
 pub fn parse_incremental<'src, 'alloc>(
-    parser: &mut Parser<'src, 'alloc>,
+    parser: &'alloc mut Parser<'src, 'alloc>,
     _change: &TextChange,
     _cache: &mut IncrementalCache,
-) -> ParseResult {
+) -> ParseResult<'alloc> {
     parser.parse()
 }

@@ -53,11 +53,17 @@ fn parse_statement<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<St
         TokenKind::Return => parse_return(parser),
         TokenKind::Throw => parse_throw(parser),
         TokenKind::Break => {
-            let span = to_ast_span(parser.advance().span);
+            let span = {
+                let tok = parser.advance();
+                parser.ast_span(tok.span)
+            };
             Some(Statement::Break(span))
         }
         TokenKind::Continue => {
-            let span = to_ast_span(parser.advance().span);
+            let span = {
+                let tok = parser.advance();
+                parser.ast_span(tok.span)
+            };
             Some(Statement::Continue(span))
         }
         _ => parse_expression_statement(parser),
@@ -75,9 +81,9 @@ fn parse_val<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>, is_val: bool) -> O
     };
 
     let initializer = if parser.consume_if(TokenKind::Assign) {
-        parse_expression(parser).unwrap_or_else(|| dummy_expr(name_span))
+        parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, name_span))
     } else {
-        dummy_expr(name_span)
+        dummy_expr(parser, name_span)
     };
 
     let span = kw_span.merge(name_span);
@@ -89,7 +95,7 @@ fn parse_val<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>, is_val: bool) -> O
             initializer,
             modifiers: Modifiers::default(),
             origin: ValBindingOrigin::ExplicitKeyword,
-            span: to_ast_span(span),
+            span: parser.ast_span(span),
         })
     } else {
         Some(Statement::VarDeclaration {
@@ -98,7 +104,7 @@ fn parse_val<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>, is_val: bool) -> O
             type_annotation,
             initializer: Some(initializer),
             modifiers: Modifiers::default(),
-            span: to_ast_span(span),
+            span: parser.ast_span(span),
         })
     }
 }
@@ -118,7 +124,7 @@ fn parse_fun<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statemen
         None
     };
 
-    let body = parse_expression(parser).unwrap_or_else(|| dummy_expr(fn_span));
+    let body = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, fn_span));
 
     let span = fn_span.merge(name_span);
     Some(Statement::FunctionDeclaration {
@@ -131,7 +137,7 @@ fn parse_fun<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statemen
         primitive_return: None,
         body: Box::new(body),
         modifiers: Modifiers::default(),
-        span: to_ast_span(span),
+        span: parser.ast_span(span),
     })
 }
 
@@ -150,7 +156,7 @@ fn parse_class<'src, 'alloc>(
             generic_signature: None,
             is_mutable: false,
             modifiers: Modifiers::default(),
-            span: to_ast_span(class_span),
+            span: parser.ast_span(class_span),
         })
     } else {
         Some(Statement::ClassDeclaration {
@@ -162,7 +168,7 @@ fn parse_class<'src, 'alloc>(
             properties: Vec::new(),
             methods: Vec::new(),
             modifiers: Modifiers::default(),
-            span: to_ast_span(class_span),
+            span: parser.ast_span(class_span),
         })
     }
 }
@@ -205,15 +211,15 @@ fn parse_for<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statemen
         name,
         pattern: None,
         type_annotation: None,
-        span: to_ast_span(name_span),
+        span: parser.ast_span(name_span),
     };
 
     if !parser.consume_if(TokenKind::In) {
         parser.push_diagnostic(Diagnostic::new("\"in\" expected in for-in loop", for_span));
     }
 
-    let iterable = parse_expression(parser).unwrap_or_else(|| dummy_expr(for_span));
-    let body = parse_expression(parser).unwrap_or_else(|| dummy_expr(for_span));
+    let iterable = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, for_span));
+    let body = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, for_span));
 
     let span = for_span.merge(name_span);
     Some(Statement::ForIn(ForInStatement {
@@ -221,7 +227,7 @@ fn parse_for<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statemen
         iterable,
         strategy: LoopStrategy::Unknown,
         body: Box::new(body),
-        span: to_ast_span(span),
+        span: parser.ast_span(span),
     }))
 }
 
@@ -234,23 +240,29 @@ fn parse_return<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<State
     };
     Some(Statement::Return {
         value,
-        span: to_ast_span(kw),
+        span: parser.ast_span(kw),
     })
 }
 
 fn parse_throw<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statement> {
     let kw = parser.advance().span;
-    let expr = parse_expression(parser).unwrap_or_else(|| dummy_expr(kw));
+    let expr = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, kw));
     Some(Statement::Throw {
         expr,
-        span: to_ast_span(kw),
+        span: parser.ast_span(kw),
     })
 }
 
 fn parse_expression_statement<'src, 'alloc>(
     parser: &mut Parser<'src, 'alloc>,
 ) -> Option<Statement> {
-    let expr = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser.current().span));
+    let expr = match parse_expression(parser) {
+        Some(expr) => expr,
+        None => {
+            let span = parser.current().span;
+            dummy_expr(parser, span)
+        }
+    };
     Some(Statement::Expression {
         expr,
         span: AstSpan::default(),
@@ -278,17 +290,8 @@ fn token_text_placeholder(token: &crate::token::Token) -> String {
     format!("_id{}", token.span.start)
 }
 
-fn dummy_expr(span: crate::span::Span) -> Expression {
-    Expression::Identifier("_".into(), to_ast_span(span))
-}
-
-fn to_ast_span(span: crate::span::Span) -> AstSpan {
-    AstSpan {
-        start_line: 0,
-        start_column: span.start as usize,
-        end_line: 0,
-        end_column: span.end as usize,
-    }
+fn dummy_expr<'src, 'alloc>(parser: &Parser<'src, 'alloc>, span: crate::span::Span) -> Expression {
+    Expression::Identifier("_".into(), parser.ast_span(span))
 }
 
 fn skip_group<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>, open: TokenKind, close: TokenKind) {

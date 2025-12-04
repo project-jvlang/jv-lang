@@ -32,21 +32,31 @@ fn parse_precedence<'src, 'alloc>(
                 break;
             }
             parser.advance(); // consume '?'
-            let then_expr = parse_precedence(parser, l_bp + 1)
-                .unwrap_or_else(|| dummy_expr(parser.current().span));
+            let then_expr = match parse_precedence(parser, l_bp + 1) {
+                Some(expr) => expr,
+                None => {
+                    let span = parser.current().span;
+                    dummy_expr(parser, span)
+                }
+            };
             if !parser.consume_if(TokenKind::Colon) {
                 // colon missing, continue with dummy else
             }
-            let else_expr = parse_precedence(parser, l_bp.saturating_sub(1))
-                .unwrap_or_else(|| dummy_expr(parser.current().span));
-            let span = span_of_expr(&left)
-                .merge(span_of_expr(&then_expr))
-                .merge(span_of_expr(&else_expr));
+            let else_expr = match parse_precedence(parser, l_bp.saturating_sub(1)) {
+                Some(expr) => expr,
+                None => {
+                    let span = parser.current().span;
+                    dummy_expr(parser, span)
+                }
+            };
+            let span = span_of_expr(parser, &left)
+                .merge(span_of_expr(parser, &then_expr))
+                .merge(span_of_expr(parser, &else_expr));
             left = Expression::If {
                 condition: Box::new(left),
                 then_branch: Box::new(then_expr),
                 else_branch: Some(Box::new(else_expr)),
-                span: to_ast_span(span),
+                span: parser.ast_span(span),
             };
             continue;
         }
@@ -59,15 +69,16 @@ fn parse_precedence<'src, 'alloc>(
             break;
         }
         parser.advance();
-        let right = parse_precedence(parser, r_bp).unwrap_or_else(|| dummy_expr(token.span));
-        let span = span_of_expr(&left)
-            .merge(span_of_expr(&right))
+        let right =
+            parse_precedence(parser, r_bp).unwrap_or_else(|| dummy_expr(parser, token.span));
+        let span = span_of_expr(parser, &left)
+            .merge(span_of_expr(parser, &right))
             .merge(token.span);
         left = Expression::Binary {
             left: Box::new(left),
             op,
             right: Box::new(right),
-            span: to_ast_span(span),
+            span: parser.ast_span(span),
             metadata: BinaryMetadata::default(),
         };
     }
@@ -84,7 +95,7 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
                 .lexeme(token.span)
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("_id{}", token.span.start));
-            Some(Expression::Identifier(name, to_ast_span(token.span)))
+            Some(Expression::Identifier(name, parser.ast_span(token.span)))
         }
         TokenKind::Number => {
             parser.advance();
@@ -94,7 +105,7 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
                 .unwrap_or_else(|| "0".to_string());
             Some(Expression::Literal(
                 Literal::Number(text),
-                to_ast_span(token.span),
+                parser.ast_span(token.span),
             ))
         }
         TokenKind::String => {
@@ -105,64 +116,70 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
                 .unwrap_or_default();
             Some(Expression::Literal(
                 Literal::String(text),
-                to_ast_span(token.span),
+                parser.ast_span(token.span),
             ))
         }
         TokenKind::TrueKw => {
             parser.advance();
             Some(Expression::Literal(
                 Literal::Boolean(true),
-                to_ast_span(token.span),
+                parser.ast_span(token.span),
             ))
         }
         TokenKind::FalseKw => {
             parser.advance();
             Some(Expression::Literal(
                 Literal::Boolean(false),
-                to_ast_span(token.span),
+                parser.ast_span(token.span),
             ))
         }
         TokenKind::NullKw => {
             parser.advance();
-            Some(Expression::Literal(Literal::Null, to_ast_span(token.span)))
+            Some(Expression::Literal(
+                Literal::Null,
+                parser.ast_span(token.span),
+            ))
         }
         TokenKind::LeftParen => {
             parser.advance();
-            let expr = parse_expression(parser).unwrap_or_else(|| dummy_expr(token.span));
+            let expr = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, token.span));
             let _ = parser.consume_if(TokenKind::RightParen);
             Some(expr)
         }
         TokenKind::Minus => {
             parser.advance();
-            let rhs = parse_precedence(parser, 90).unwrap_or_else(|| dummy_expr(token.span));
+            let rhs =
+                parse_precedence(parser, 90).unwrap_or_else(|| dummy_expr(parser, token.span));
             Some(Expression::Unary {
                 op: UnaryOp::Minus,
                 operand: Box::new(rhs),
-                span: to_ast_span(token.span),
+                span: parser.ast_span(token.span),
             })
         }
         TokenKind::Plus => {
             parser.advance();
-            let rhs = parse_precedence(parser, 90).unwrap_or_else(|| dummy_expr(token.span));
+            let rhs =
+                parse_precedence(parser, 90).unwrap_or_else(|| dummy_expr(parser, token.span));
             Some(Expression::Unary {
                 op: UnaryOp::Plus,
                 operand: Box::new(rhs),
-                span: to_ast_span(token.span),
+                span: parser.ast_span(token.span),
             })
         }
         TokenKind::Not => {
             parser.advance();
-            let rhs = parse_precedence(parser, 90).unwrap_or_else(|| dummy_expr(token.span));
+            let rhs =
+                parse_precedence(parser, 90).unwrap_or_else(|| dummy_expr(parser, token.span));
             Some(Expression::Unary {
                 op: UnaryOp::Not,
                 operand: Box::new(rhs),
-                span: to_ast_span(token.span),
+                span: parser.ast_span(token.span),
             })
         }
         _ => {
             // 不明なプレフィックスはダミー式で継続。
             parser.advance();
-            Some(dummy_expr(token.span))
+            Some(dummy_expr(parser, token.span))
         }
     }
 }
@@ -189,36 +206,23 @@ fn infix_binding_power(kind: TokenKind) -> Option<(u8, u8, BinaryOp)> {
     Some(res)
 }
 
-fn dummy_expr(span: crate::span::Span) -> Expression {
-    Expression::Identifier("_".into(), to_ast_span(span))
+fn dummy_expr<'src, 'alloc>(parser: &Parser<'src, 'alloc>, span: crate::span::Span) -> Expression {
+    Expression::Identifier("_".into(), parser.ast_span(span))
 }
 
-fn span_of_expr(expr: &Expression) -> crate::span::Span {
+fn span_of_expr(parser: &Parser<'_, '_>, expr: &Expression) -> crate::span::Span {
     match expr {
         Expression::Identifier(_, span)
         | Expression::Literal(_, span)
         | Expression::Unary { span, .. }
-        | Expression::Binary { span, .. } => ast_span_to_span(span),
+        | Expression::Binary { span, .. } => parser.span_from_ast(span),
         Expression::MemberAccess { span, .. }
         | Expression::NullSafeMemberAccess { span, .. }
         | Expression::Call { span, .. }
         | Expression::IndexAccess { span, .. }
-        | Expression::NullSafeIndexAccess { span, .. } => ast_span_to_span(span),
+        | Expression::NullSafeIndexAccess { span, .. } => parser.span_from_ast(span),
         _ => crate::span::Span::new(0, 0),
     }
-}
-
-fn to_ast_span(span: crate::span::Span) -> AstSpan {
-    AstSpan {
-        start_line: 0,
-        start_column: span.start as usize,
-        end_line: 0,
-        end_column: span.end as usize,
-    }
-}
-
-fn ast_span_to_span(span: &AstSpan) -> crate::span::Span {
-    crate::span::Span::new(span.start_column as u32, span.end_column as u32)
 }
 
 fn parse_postfix<'src, 'alloc>(
@@ -239,8 +243,10 @@ fn parse_postfix<'src, 'alloc>(
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("_id{}", ident_token.span.start));
             parser.advance();
-            let combined = span_of_expr(left).merge(token.span).merge(ident_token.span);
-            let span = to_ast_span(combined);
+            let combined = span_of_expr(parser, left)
+                .merge(token.span)
+                .merge(ident_token.span);
+            let span = parser.ast_span(combined);
             if null_safe {
                 Some(Expression::NullSafeMemberAccess {
                     object: Box::new(left.clone()),
@@ -262,8 +268,8 @@ fn parse_postfix<'src, 'alloc>(
             let mut close_span = open;
             if !parser.consume_if(TokenKind::RightParen) {
                 loop {
-                    let arg = parse_expression(parser).unwrap_or_else(|| dummy_expr(open));
-                    last_span = span_of_expr(&arg);
+                    let arg = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, open));
+                    last_span = span_of_expr(parser, &arg);
                     args.push(jv_ast::expression::Argument::Positional(arg));
                     if parser.consume_if(TokenKind::Comma) {
                         continue;
@@ -278,7 +284,7 @@ fn parse_postfix<'src, 'alloc>(
                 // consume_if で進んだので current は次トークン。閉じ括弧は open に隣接する位置。
                 close_span = open;
             }
-            let combined = span_of_expr(left)
+            let combined = span_of_expr(parser, left)
                 .merge(open)
                 .merge(last_span)
                 .merge(close_span);
@@ -287,25 +293,25 @@ fn parse_postfix<'src, 'alloc>(
                 args,
                 type_arguments: Vec::new(),
                 argument_metadata: Default::default(),
-                span: to_ast_span(combined),
+                span: parser.ast_span(combined),
             })
         }
         TokenKind::LeftBracket => {
             let open = parser.advance().span;
-            let index = parse_expression(parser).unwrap_or_else(|| dummy_expr(open));
+            let index = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, open));
             let mut close_span = open;
             if parser.current().kind == TokenKind::RightBracket {
                 close_span = parser.current().span;
                 parser.advance();
             }
-            let combined = span_of_expr(left)
+            let combined = span_of_expr(parser, left)
                 .merge(open)
-                .merge(span_of_expr(&index))
+                .merge(span_of_expr(parser, &index))
                 .merge(close_span);
             Some(Expression::IndexAccess {
                 object: Box::new(left.clone()),
                 index: Box::new(index),
-                span: to_ast_span(combined),
+                span: parser.ast_span(combined),
             })
         }
         _ => None,

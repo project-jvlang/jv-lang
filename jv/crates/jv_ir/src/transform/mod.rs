@@ -456,6 +456,10 @@ fn lower_binding_pattern_elements(
             span,
             expr: value_expr,
         }]),
+        BindingPatternKind::Literal { span, .. } => Ok(vec![IrStatement::Expression {
+            span,
+            expr: value_expr,
+        }]),
         BindingPatternKind::Tuple { elements, .. } | BindingPatternKind::List { elements, .. } => {
             let mut statements = Vec::new();
             let (receiver_expr, mut prefix) = ensure_identifier_expression(value_expr, context);

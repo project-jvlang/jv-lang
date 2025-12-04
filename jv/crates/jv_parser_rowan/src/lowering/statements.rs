@@ -8158,5 +8158,6 @@ fn pattern_binding_label(pattern: &BindingPatternKind) -> String {
             BindingPatternKind::Tuple { .. } => "(...)".to_string(),
             BindingPatternKind::List { .. } => "[...]".to_string(),
             BindingPatternKind::Identifier { name, .. } => name.clone(),
+            BindingPatternKind::Literal { .. } => "<literal>".to_string(),
         })
 }

@@ -218,6 +218,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     self.bind_test_parameter_pattern(element, ty.clone());
                 }
             }
+            BindingPatternKind::Literal { .. } => {}
             BindingPatternKind::Wildcard { .. } => {}
         }
     }

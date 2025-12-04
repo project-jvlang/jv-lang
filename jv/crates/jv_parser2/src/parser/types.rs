@@ -31,7 +31,7 @@ pub(crate) fn parse_type<'src, 'alloc>(
                     name: unit_name,
                     is_bracketed: false,
                     has_default_marker: false,
-                    span: to_ast_span(span),
+                    span: parser.ast_span(span),
                 };
                 ty = TypeAnnotation::Unit {
                     base: Box::new(ty),
@@ -107,15 +107,6 @@ fn parse_ident<'src, 'alloc>(
             token.span,
         ));
         None
-    }
-}
-
-fn to_ast_span(span: crate::span::Span) -> jv_ast::Span {
-    jv_ast::Span {
-        start_line: 0,
-        start_column: span.start as usize,
-        end_line: 0,
-        end_column: span.end as usize,
     }
 }
 
