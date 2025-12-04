@@ -37,6 +37,7 @@ pub struct Parser<'src, 'alloc> {
     position: usize,
     context: JvContext,
     recovered: bool,
+    recovery_metrics: crate::parser::recovery::RecoveryMetrics,
 }
 
 impl<'src, 'alloc> Parser<'src, 'alloc> {
@@ -49,6 +50,7 @@ impl<'src, 'alloc> Parser<'src, 'alloc> {
             position: 0,
             context: JvContext::empty(),
             recovered: false,
+            recovery_metrics: crate::parser::recovery::RecoveryMetrics::default(),
         }
     }
 
@@ -58,7 +60,7 @@ impl<'src, 'alloc> Parser<'src, 'alloc> {
         ParseResult {
             ast: program,
             diagnostics: self.diagnostics.clone(),
-            recovered: self.recovered,
+            recovered: self.recovery_metrics.recovered > 0 || self.recovered,
         }
     }
 
@@ -141,6 +143,11 @@ impl<'src, 'alloc> Parser<'src, 'alloc> {
     /// 診断を追加する。
     pub(crate) fn push_diagnostic(&mut self, diagnostic: Diagnostic) {
         self.diagnostics.push(diagnostic);
+    }
+
+    /// 診断の参照を取得する（テスト用）。
+    pub fn diagnostics(&self) -> &Vec<Diagnostic> {
+        &self.diagnostics
     }
 
     /// Span に対応するソース文字列を取得する（UTF-8）。

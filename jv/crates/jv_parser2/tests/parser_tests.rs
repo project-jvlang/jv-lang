@@ -1,4 +1,4 @@
-use jv_parser2::{lexer::Lexer, parser::incremental::IncrementalCache, Parser, Source, Arena};
+use jv_parser2::{Arena, Parser, Source, lexer::Lexer, parser::incremental::IncrementalCache};
 
 #[test]
 fn parse_smoke_empty_program() {
@@ -25,6 +25,7 @@ fn parse_incremental_delegates() {
         start_line: 0,
         end_line: 0,
     };
-    let result = jv_parser2::parser::incremental::parse_incremental(&mut parser, &change, &mut cache);
+    let result =
+        jv_parser2::parser::incremental::parse_incremental(&mut parser, &change, &mut cache);
     assert!(result.ast.is_some());
 }
