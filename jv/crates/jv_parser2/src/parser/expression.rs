@@ -37,8 +37,8 @@ fn parse_precedence<'src, 'alloc>(
             if !parser.consume_if(TokenKind::Colon) {
                 // colon missing, continue with dummy else
             }
-            let else_expr =
-                parse_precedence(parser, l_bp).unwrap_or_else(|| dummy_expr(parser.current().span));
+            let else_expr = parse_precedence(parser, l_bp.saturating_sub(1))
+                .unwrap_or_else(|| dummy_expr(parser.current().span));
             let span = span_of_expr(&left)
                 .merge(span_of_expr(&then_expr))
                 .merge(span_of_expr(&else_expr));
@@ -259,6 +259,7 @@ fn parse_postfix<'src, 'alloc>(
             let open = parser.advance().span;
             let mut args = Vec::new();
             let mut last_span = open;
+            let mut close_span = open;
             if !parser.consume_if(TokenKind::RightParen) {
                 loop {
                     let arg = parse_expression(parser).unwrap_or_else(|| dummy_expr(open));
@@ -267,11 +268,18 @@ fn parse_postfix<'src, 'alloc>(
                     if parser.consume_if(TokenKind::Comma) {
                         continue;
                     }
-                    let _ = parser.consume_if(TokenKind::RightParen);
+                    if parser.consume_if(TokenKind::RightParen) {
+                        close_span = parser.current().span;
+                    }
                     break;
                 }
+            } else {
+                close_span = open;
             }
-            let combined = span_of_expr(left).merge(open).merge(last_span);
+            let combined = span_of_expr(left)
+                .merge(open)
+                .merge(last_span)
+                .merge(close_span);
             Some(Expression::Call {
                 function: Box::new(left.clone()),
                 args,
@@ -283,8 +291,14 @@ fn parse_postfix<'src, 'alloc>(
         TokenKind::LeftBracket => {
             let open = parser.advance().span;
             let index = parse_expression(parser).unwrap_or_else(|| dummy_expr(open));
-            let _ = parser.consume_if(TokenKind::RightBracket);
-            let combined = span_of_expr(left).merge(open).merge(span_of_expr(&index));
+            let mut close_span = open;
+            if parser.consume_if(TokenKind::RightBracket) {
+                close_span = parser.current().span;
+            }
+            let combined = span_of_expr(left)
+                .merge(open)
+                .merge(span_of_expr(&index))
+                .merge(close_span);
             Some(Expression::IndexAccess {
                 object: Box::new(left.clone()),
                 index: Box::new(index),
