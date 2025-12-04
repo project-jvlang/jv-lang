@@ -36,7 +36,9 @@ pub(crate) fn lex_number(lexer: &mut Lexer<'_>) -> Token {
         }
     }
 
-    let mut int_digits = consume_digits(lexer, |b| b.is_ascii_digit());
+    // The first digit was already consumed by advance() above, so count it
+    let mut int_digits = if first.is_ascii_digit() { 1 } else { 0 };
+    int_digits += consume_digits(lexer, |b| b.is_ascii_digit());
 
     // 小数部
     if matches!(lexer.peek(), Some(b'.')) && !matches!(lexer.peek2(), Some((b'.', b'.'))) {

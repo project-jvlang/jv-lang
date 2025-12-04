@@ -1,7 +1,9 @@
 //! Pratt 構文解析による式パーサー（簡易版）。
 
-use super::Parser;
+use super::{Parser, statement::parse_statement};
 use crate::token::TokenKind;
+use crate::parser::statement::parse_identifier;
+use jv_ast::json::{JsonEntry, JsonLiteral, JsonValue};
 use jv_ast::expression::BinaryMetadata;
 use jv_ast::types::{BinaryOp, Literal, UnaryOp};
 use jv_ast::{Expression, Pattern, WhenArm};
@@ -177,7 +179,8 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
                 span: parser.ast_span(token.span),
             })
         }
-        TokenKind::LeftBrace => parse_block_expression(parser),
+        TokenKind::LeftBrace => parse_json_or_block(parser),
+        TokenKind::LeftBracket => parse_array_literal(parser),
         _ => {
             // 不明なプレフィックスはダミー式で継続。
             parser.advance();
@@ -484,23 +487,229 @@ fn parse_block_expression<'src, 'alloc>(
     parser: &mut Parser<'src, 'alloc>,
 ) -> Option<Expression> {
     let open_span = parser.advance().span;
-    let mut depth = 1usize;
-    let mut last_span = open_span;
+    let mut statements = Vec::new();
 
-    while depth > 0 {
-        let tok = parser.advance();
-        last_span = tok.span;
-        match tok.kind {
-            TokenKind::LeftBrace => depth += 1,
-            TokenKind::RightBrace => depth = depth.saturating_sub(1),
-            TokenKind::Eof => break,
-            _ => {}
+    while parser.current().kind != TokenKind::RightBrace && parser.current().kind != TokenKind::Eof {
+        match parse_statement(parser) {
+            Some(stmt) => statements.push(stmt),
+            None => {
+                parser.advance();
+            }
         }
     }
 
-    let span = parser.ast_span(open_span.merge(last_span));
-    Some(Expression::Block {
-        statements: Vec::new(),
-        span,
+    let end_span = if parser.current().kind == TokenKind::RightBrace {
+        parser.advance().span
+    } else {
+        open_span
+    };
+
+    let span = parser.ast_span(open_span.merge(end_span));
+    Some(Expression::Block { statements, span })
+}
+
+fn parse_json_or_block<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<Expression> {
+    // Peek ahead: if { is followed by a statement keyword, it's a block, not JSON.
+    // This prevents misinterpreting `{ val x = ... }` as a JSON object with key "val".
+    let next_token = parser.peek_next().map(|t| t.kind);
+    if matches!(
+        next_token,
+        Some(
+            TokenKind::Val
+                | TokenKind::Var
+                | TokenKind::Fun
+                | TokenKind::Class
+                | TokenKind::Data
+                | TokenKind::If
+                | TokenKind::For
+                | TokenKind::While
+                | TokenKind::Return
+                | TokenKind::Throw
+                | TokenKind::Break
+                | TokenKind::Continue
+                | TokenKind::When
+                | TokenKind::Test
+        )
+    ) {
+        return parse_block_expression(parser);
+    }
+
+    let checkpoint = parser.checkpoint();
+    if let Some(json) = parse_json_value(parser) {
+        let span = match &json {
+            JsonValue::Object { span, .. } | JsonValue::Array { span, .. } | JsonValue::String { span, .. } | JsonValue::Number { span, .. } | JsonValue::Boolean { span, .. } | JsonValue::Null { span, .. } => span.clone(),
+        };
+        return Some(Expression::JsonLiteral(JsonLiteral {
+            value: json,
+            leading_comments: Vec::new(),
+            trailing_comments: Vec::new(),
+            span,
+            inferred_schema: None,
+        }));
+    }
+    parser.rewind(checkpoint);
+    parse_block_expression(parser)
+}
+
+fn parse_array_literal<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<Expression> {
+    let checkpoint = parser.checkpoint();
+    if let Some(JsonValue::Array { elements, delimiter, span }) = parse_json_array(parser) {
+        return Some(Expression::JsonLiteral(JsonLiteral {
+            value: JsonValue::Array {
+                elements,
+                delimiter,
+                span: span.clone(),
+            },
+            leading_comments: Vec::new(),
+            trailing_comments: Vec::new(),
+            span,
+            inferred_schema: None,
+        }));
+    }
+    parser.rewind(checkpoint);
+    None
+}
+
+fn parse_json_value<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<JsonValue> {
+    let token = parser.current();
+    match token.kind {
+        TokenKind::LeftBrace => parse_json_object(parser),
+        TokenKind::LeftBracket => parse_json_array(parser),
+        TokenKind::String => {
+            let lexeme = parser.lexeme(token.span).unwrap_or("");
+            let value = lexeme.trim_matches('"').to_string();
+            parser.advance();
+            Some(JsonValue::String {
+                value,
+                span: parser.ast_span(token.span),
+            })
+        }
+        TokenKind::Number => {
+            let lexeme = parser.lexeme(token.span).unwrap_or("0").to_string();
+            parser.advance();
+            Some(JsonValue::Number {
+                literal: lexeme,
+                grouping: Default::default(),
+                span: parser.ast_span(token.span),
+            })
+        }
+        TokenKind::TrueKw | TokenKind::FalseKw => {
+            parser.advance();
+            Some(JsonValue::Boolean {
+                value: token.kind == TokenKind::TrueKw,
+                span: parser.ast_span(token.span),
+            })
+        }
+        TokenKind::NullKw => {
+            parser.advance();
+            Some(JsonValue::Null {
+                span: parser.ast_span(token.span),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn parse_json_object<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<JsonValue> {
+    let start = parser.advance().span;
+    let mut entries = Vec::new();
+    let mut end_span = start;
+
+    while parser.current().kind != TokenKind::RightBrace && parser.current().kind != TokenKind::Eof
+    {
+        // Key
+        let token = parser.current();
+        let key = match token.kind {
+            TokenKind::String | TokenKind::Identifier => {
+                let lexeme = parser.lexeme(token.span).unwrap_or("");
+                parser.advance();
+                lexeme.trim_matches('"').to_string()
+            }
+            _ => {
+                parser.advance();
+                continue;
+            }
+        };
+
+        let key_span = token.span;
+
+        // Optional colon
+        let _ = parser.consume_if(TokenKind::Colon);
+
+        let value = parse_json_value(parser).unwrap_or(JsonValue::Null {
+            span: parser.ast_span(key_span),
+        });
+
+        let value_span = match &value {
+            JsonValue::Object { span, .. }
+            | JsonValue::Array { span, .. }
+            | JsonValue::String { span, .. }
+            | JsonValue::Number { span, .. }
+            | JsonValue::Boolean { span, .. }
+            | JsonValue::Null { span, .. } => span.clone(),
+        };
+
+        let entry_span = parser.ast_span(key_span.merge(parser.span_from_ast(&value_span)));
+        entries.push(JsonEntry {
+            key,
+            comments: Vec::new(),
+            value,
+            span: entry_span.clone(),
+        });
+        end_span = parser.span_from_ast(&entry_span);
+
+        let _ = parser.consume_if(TokenKind::Comma);
+    }
+
+    if parser.current().kind == TokenKind::RightBrace {
+        end_span = parser.current().span;
+        parser.advance();
+    }
+
+    Some(JsonValue::Object {
+        entries,
+        span: parser.ast_span(start.merge(end_span)),
+    })
+}
+
+fn parse_json_array<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<JsonValue> {
+    let start = parser.advance().span;
+    let mut elements = Vec::new();
+    let mut end_span = start;
+
+    while parser.current().kind != TokenKind::RightBracket && parser.current().kind != TokenKind::Eof
+    {
+        if let Some(value) = parse_json_value(parser) {
+            end_span = match &value {
+                JsonValue::Object { span, .. }
+                | JsonValue::Array { span, .. }
+                | JsonValue::String { span, .. }
+                | JsonValue::Number { span, .. }
+                | JsonValue::Boolean { span, .. }
+                | JsonValue::Null { span, .. } => parser.span_from_ast(span),
+            };
+            elements.push(value);
+        } else {
+            parser.advance();
+        }
+
+        if parser.consume_if(TokenKind::Comma) {
+            continue;
+        }
+    }
+
+    if parser.current().kind == TokenKind::RightBracket {
+        end_span = parser.current().span;
+        parser.advance();
+    }
+
+    Some(JsonValue::Array {
+        elements,
+        delimiter: Default::default(),
+        span: parser.ast_span(start.merge(end_span)),
     })
 }

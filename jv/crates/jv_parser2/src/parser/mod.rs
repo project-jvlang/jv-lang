@@ -108,6 +108,11 @@ where
             .unwrap_or_else(|| Token::new(TokenKind::Eof, Span::new(0, 0)))
     }
 
+    /// 次のトークンを先読みする（消費しない）。
+    pub(crate) fn peek_next(&mut self) -> Option<Token> {
+        self.token_at(self.position + 1)
+    }
+
     /// 次のトークンへ進める。
     pub(crate) fn advance(&mut self) -> Token {
         let token = self.current();

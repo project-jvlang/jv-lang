@@ -7,10 +7,13 @@ use super::{
     types::parse_type,
 };
 use crate::{diagnostics::Diagnostic, token::TokenKind};
+use jv_ast::binding_pattern::BindingPatternKind;
 use jv_ast::statement::{
-    ForInStatement, LoopBinding, LoopStrategy, Program, Statement, ValBindingOrigin,
+    ForInStatement, LoopBinding, LoopStrategy, Program, Statement, TestDataset, TestDatasetRow,
+    TestDeclaration, TestParameter, ValBindingOrigin,
 };
 use jv_ast::types::Modifiers;
+use jv_ast::types::Literal;
 use jv_ast::{Expression, Span as AstSpan};
 
 /// プログラム全体をパースする。
@@ -38,7 +41,7 @@ pub(crate) fn parse_program<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> 
     })
 }
 
-fn parse_statement<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statement> {
+pub(crate) fn parse_statement<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statement> {
     match parser.current().kind {
         TokenKind::Val => parse_val(parser, true),
         TokenKind::Var => parse_val(parser, false),
@@ -71,6 +74,7 @@ fn parse_statement<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<St
             };
             Some(Statement::Continue(span))
         }
+        TokenKind::Test => parse_test(parser),
         _ => parse_expression_statement(parser),
     }
 }
@@ -312,7 +316,223 @@ fn parse_assignment_statement<'src, 'alloc>(
     })
 }
 
-fn parse_identifier<'src, 'alloc>(
+fn parse_test<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statement> {
+    let test_kw_span = parser.advance().span;
+
+    // Display name
+    let display_name = if parser.current().kind == TokenKind::String {
+        let tok = parser.advance();
+        parser
+            .lexeme(tok.span)
+            .map(|s| s.trim_matches('"').to_string())
+            .unwrap_or_else(|| "_".into())
+    } else {
+        "_".into()
+    };
+
+    // Dataset (inline only for now)
+    let dataset = if parser.current().kind == TokenKind::LeftBracket {
+        Some(parse_inline_dataset(parser))
+    } else {
+        None
+    };
+
+    // Parameters
+    let mut parameters = Vec::new();
+    if parser.consume_if(TokenKind::LeftParen) {
+        loop {
+            if parser.current().kind == TokenKind::RightParen || parser.current().kind == TokenKind::Eof {
+                let _ = parser.consume_if(TokenKind::RightParen);
+                break;
+            }
+
+            let (name, name_span) = match parse_identifier(parser) {
+                Some(pair) => pair,
+                None => {
+                    parser.advance();
+                    continue;
+                }
+            };
+            let type_annotation = if parser.consume_if(TokenKind::Colon) {
+                parse_type(parser)
+            } else {
+                None
+            };
+            let param_span = parser.ast_span(name_span);
+            parameters.push(TestParameter {
+                pattern: BindingPatternKind::Identifier { name, span: param_span.clone() },
+                type_annotation,
+                span: param_span,
+            });
+
+            if parser.consume_if(TokenKind::Comma) {
+                continue;
+            }
+        }
+    }
+
+    // Body
+    let body = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, test_kw_span));
+    let body_span = span_of_expr(parser, &body);
+    let span = parser.ast_span(test_kw_span.merge(body_span));
+
+    Some(Statement::TestDeclaration(TestDeclaration {
+        display_name,
+        normalized: None,
+        dataset,
+        parameters,
+        annotations: Vec::new(),
+        body,
+        span,
+    }))
+}
+
+fn parse_inline_dataset<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> TestDataset {
+    let start_span = parser.advance().span; // consume '['
+    let mut rows = Vec::new();
+
+    loop {
+        let token = parser.current();
+        if token.kind == TokenKind::RightBracket || token.kind == TokenKind::Eof {
+            let end_span = if token.kind == TokenKind::RightBracket {
+                parser.advance().span
+            } else {
+                token.span
+            };
+            let span = parser.ast_span(start_span.merge(end_span));
+            return TestDataset::InlineArray { rows, span };
+        }
+
+        if token.kind == TokenKind::LeftBracket {
+            rows.push(parse_dataset_row(parser));
+        } else {
+            parser.advance();
+        }
+    }
+}
+
+fn parse_dataset_row<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> TestDatasetRow {
+    let row_start = parser.advance().span; // consume '['
+    let mut values = Vec::new();
+    let mut last_span = row_start;
+
+    loop {
+        if parser.current().kind == TokenKind::RightBracket || parser.current().kind == TokenKind::Eof {
+            if parser.current().kind == TokenKind::RightBracket {
+                last_span = parser.current().span;
+                parser.advance();
+            }
+            break;
+        }
+
+        // Parse dataset values (literals only, including negative numbers)
+        if let Some(expr) = parse_dataset_value(parser) {
+            last_span = span_of_expr(parser, &expr);
+            values.push(expr);
+        } else {
+            // Skip unknown token
+            last_span = parser.current().span;
+            parser.advance();
+        }
+
+        if parser.consume_if(TokenKind::Comma) {
+            continue;
+        }
+    }
+
+    let span = parser.ast_span(row_start.merge(last_span));
+    TestDatasetRow { values, span }
+}
+
+/// Parse a single literal value for dataset rows.
+/// Supports: string, number (including negative), boolean, null
+fn parse_dataset_value<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expression> {
+    let token = parser.current();
+    match token.kind {
+        TokenKind::String => {
+            parser.advance();
+            let text = parser
+                .lexeme(token.span)
+                .map(|s| {
+                    // Remove surrounding quotes from string literal
+                    if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
+                        s[1..s.len() - 1].to_string()
+                    } else {
+                        s.to_string()
+                    }
+                })
+                .unwrap_or_default();
+            Some(Expression::Literal(
+                Literal::String(text),
+                parser.ast_span(token.span),
+            ))
+        }
+        TokenKind::Number => {
+            parser.advance();
+            let text = parser
+                .lexeme(token.span)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            Some(Expression::Literal(
+                Literal::Number(text),
+                parser.ast_span(token.span),
+            ))
+        }
+        TokenKind::Minus => {
+            // Negative number: consume '-' and expect number
+            let minus_span = parser.advance().span;
+            if parser.current().kind == TokenKind::Number {
+                let num_token = parser.current();
+                parser.advance();
+                let text = parser
+                    .lexeme(num_token.span)
+                    .map(|s| format!("-{}", s))
+                    .unwrap_or_else(|| "-0".to_string());
+                let span = parser.ast_span(minus_span.merge(num_token.span));
+                Some(Expression::Literal(Literal::Number(text), span))
+            } else {
+                // Just a minus without number - treat as error, return dummy
+                Some(Expression::Literal(
+                    Literal::Number("-0".to_string()),
+                    parser.ast_span(minus_span),
+                ))
+            }
+        }
+        TokenKind::TrueKw => {
+            parser.advance();
+            Some(Expression::Literal(
+                Literal::Boolean(true),
+                parser.ast_span(token.span),
+            ))
+        }
+        TokenKind::FalseKw => {
+            parser.advance();
+            Some(Expression::Literal(
+                Literal::Boolean(false),
+                parser.ast_span(token.span),
+            ))
+        }
+        TokenKind::NullKw => {
+            parser.advance();
+            Some(Expression::Literal(
+                Literal::Null,
+                parser.ast_span(token.span),
+            ))
+        }
+        TokenKind::Identifier => {
+            // Identifiers in datasets are typically used as references
+            parser.advance();
+            let name = parser
+                .lexeme(token.span)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "_".to_string());
+            Some(Expression::Identifier(name, parser.ast_span(token.span)))
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn parse_identifier<'src, 'alloc>(
     parser: &mut Parser<'src, 'alloc>,
 ) -> Option<(String, crate::span::Span)> {
     let token = parser.current();
