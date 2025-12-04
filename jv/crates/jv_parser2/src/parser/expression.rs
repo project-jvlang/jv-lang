@@ -25,6 +25,32 @@ fn parse_precedence<'src, 'alloc>(
             continue;
         }
 
+        // 三項 ?: （右結合）
+        if parser.current().kind == TokenKind::Question {
+            let l_bp = 15;
+            if l_bp < min_bp {
+                break;
+            }
+            parser.advance(); // consume '?'
+            let then_expr = parse_precedence(parser, l_bp + 1)
+                .unwrap_or_else(|| dummy_expr(parser.current().span));
+            if !parser.consume_if(TokenKind::Colon) {
+                // colon missing, continue with dummy else
+            }
+            let else_expr =
+                parse_precedence(parser, l_bp).unwrap_or_else(|| dummy_expr(parser.current().span));
+            let span = span_of_expr(&left)
+                .merge(span_of_expr(&then_expr))
+                .merge(span_of_expr(&else_expr));
+            left = Expression::If {
+                condition: Box::new(left),
+                then_branch: Box::new(then_expr),
+                else_branch: Some(Box::new(else_expr)),
+                span: to_ast_span(span),
+            };
+            continue;
+        }
+
         let token = parser.current();
         let Some((l_bp, r_bp, op)) = infix_binding_power(token.kind) else {
             break;
@@ -213,7 +239,7 @@ fn parse_postfix<'src, 'alloc>(
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("_id{}", ident_token.span.start));
             parser.advance();
-            let combined = span_of_expr(left).merge(ident_token.span);
+            let combined = span_of_expr(left).merge(token.span).merge(ident_token.span);
             let span = to_ast_span(combined);
             if null_safe {
                 Some(Expression::NullSafeMemberAccess {
@@ -232,9 +258,11 @@ fn parse_postfix<'src, 'alloc>(
         TokenKind::LeftParen => {
             let open = parser.advance().span;
             let mut args = Vec::new();
+            let mut last_span = open;
             if !parser.consume_if(TokenKind::RightParen) {
                 loop {
                     let arg = parse_expression(parser).unwrap_or_else(|| dummy_expr(open));
+                    last_span = span_of_expr(&arg);
                     args.push(jv_ast::expression::Argument::Positional(arg));
                     if parser.consume_if(TokenKind::Comma) {
                         continue;
@@ -243,7 +271,7 @@ fn parse_postfix<'src, 'alloc>(
                     break;
                 }
             }
-            let combined = span_of_expr(left).merge(open);
+            let combined = span_of_expr(left).merge(open).merge(last_span);
             Some(Expression::Call {
                 function: Box::new(left.clone()),
                 args,
@@ -256,7 +284,7 @@ fn parse_postfix<'src, 'alloc>(
             let open = parser.advance().span;
             let index = parse_expression(parser).unwrap_or_else(|| dummy_expr(open));
             let _ = parser.consume_if(TokenKind::RightBracket);
-            let combined = span_of_expr(left).merge(open);
+            let combined = span_of_expr(left).merge(open).merge(span_of_expr(&index));
             Some(Expression::IndexAccess {
                 object: Box::new(left.clone()),
                 index: Box::new(index),
