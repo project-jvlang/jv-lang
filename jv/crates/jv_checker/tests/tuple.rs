@@ -6,13 +6,15 @@ use jv_checker::{
     PrimitiveType, TypeChecker, TypeInferenceService, TypeKind, inference::type_parser,
 };
 use jv_ir::{TupleRecordStrategy, TupleUsageKind};
-use jv_parser_frontend::Parser2Pipeline;
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
+use jv_ast::{Expression, Statement, Modifiers, ValBindingOrigin};
 
 fn 構文解析(ソース: &str) -> jv_ast::Program {
-    Parser2Pipeline::default()
+    let program = Parser2Pipeline::default()
         .parse(ソース)
         .expect("構文解析が成功すること")
-        .into_program()
+        .into_program();
+    正規化(program)
 }
 
 fn 型チェック済み(ソース: &str) -> TypeChecker {
@@ -22,6 +24,31 @@ fn 型チェック済み(ソース: &str) -> TypeChecker {
         .check_program(&プログラム)
         .expect("型チェックが成功すること");
     チェッカー
+}
+
+fn 正規化(mut プログラム: jv_ast::Program) -> jv_ast::Program {
+    プログラム.statements = プログラム
+        .statements
+        .into_iter()
+        .map(|statement| match statement {
+            Statement::Assignment {
+                target: Expression::Identifier(name, _),
+                value,
+                span,
+                ..
+            } => Statement::ValDeclaration {
+                name,
+                binding: None,
+                type_annotation: None,
+                initializer: value,
+                modifiers: Modifiers::default(),
+                origin: ValBindingOrigin::Implicit,
+                span,
+            },
+            other => other,
+        })
+        .collect();
+    プログラム
 }
 
 #[test]

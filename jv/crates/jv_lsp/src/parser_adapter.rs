@@ -7,7 +7,7 @@ use jv_parser2::{
     span::compute_line_starts,
 };
 
-/// jv_parser2 を用いたパースアダプタ。インクリメンタルパースのキャッシュを
+/// jv_parser2 を用いたパーサアダプタ。インクリメンタルパースのキャッシュを
 /// ドキュメントごとに保持する。
 #[derive(Default)]
 pub struct ParserAdapter {

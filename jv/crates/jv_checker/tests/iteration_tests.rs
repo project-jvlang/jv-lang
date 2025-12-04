@@ -1,11 +1,38 @@
 use jv_checker::{CheckError, TypeChecker};
-use jv_parser_frontend::Parser2Pipeline;
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
+use jv_ast::{Expression, Statement, Modifiers, ValBindingOrigin};
 
 fn parse_program(source: &str) -> jv_ast::Program {
-    Parser2Pipeline::default()
+    let program = Parser2Pipeline::default()
         .parse(source)
         .expect("source snippet should parse")
-        .into_program()
+        .into_program();
+    normalize_implicit_assignments(program)
+}
+
+fn normalize_implicit_assignments(mut program: jv_ast::Program) -> jv_ast::Program {
+    program.statements = program
+        .statements
+        .into_iter()
+        .map(|statement| match statement {
+            Statement::Assignment {
+                target: Expression::Identifier(name, _),
+                value,
+                span,
+                ..
+            } => Statement::ValDeclaration {
+                name,
+                binding: None,
+                type_annotation: None,
+                initializer: value,
+                modifiers: Modifiers::default(),
+                origin: ValBindingOrigin::Implicit,
+                span,
+            },
+            other => other,
+        })
+        .collect();
+    program
 }
 
 #[test]

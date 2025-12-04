@@ -1050,10 +1050,19 @@ mod tests {
     }
 
     fn parse_program(source: &str) -> Program {
-        Parser2Pipeline::default()
+        let program = Parser2Pipeline::default()
             .parse(source)
             .expect("source should parse for constraint generator tests")
-            .into_program()
+            .into_program();
+        let program = normalize_implicit_assignments(&program);
+        if std::env::var("JV_DEBUG_AST").is_ok() {
+            eprintln!("constraint test AST: {:#?}", program.statements);
+        }
+        program
+    }
+
+    fn normalize_implicit_assignments(program: &Program) -> Program {
+        crate::normalize_implicit_assignments(program)
     }
 
     #[test]

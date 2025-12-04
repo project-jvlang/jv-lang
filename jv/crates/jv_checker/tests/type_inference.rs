@@ -2,16 +2,18 @@
 //!
 //! Run with: `cargo test --lib -p jv_checker`.
 
+use jv_ast::{Expression, Modifiers, Statement, ValBindingOrigin};
 use jv_checker::{CheckError, PrimitiveType, TypeChecker, TypeInferenceService, TypeKind};
 use jv_inference::service::TypeFacts;
-use jv_parser_frontend::Parser2Pipeline;
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 use serde_json::Value;
 
 fn parse_program(source: &str) -> jv_ast::Program {
-    Parser2Pipeline::default()
+    let program = Parser2Pipeline::default()
         .parse(source)
         .expect("source snippet should be valid")
-        .into_program()
+        .into_program();
+    normalize_implicit_assignments(program)
 }
 
 #[test]
@@ -274,4 +276,29 @@ fn lambda_extension_receiver_resolves_sequence_core() {
         !stream_scheme.ty.contains_unknown(),
         "stream binding should not remain Unknown"
     );
+}
+
+fn normalize_implicit_assignments(mut program: jv_ast::Program) -> jv_ast::Program {
+    program.statements = program
+        .statements
+        .into_iter()
+        .map(|statement| match statement {
+            jv_ast::Statement::Assignment {
+                target: jv_ast::Expression::Identifier(name, _),
+                value,
+                span,
+                ..
+            } => jv_ast::Statement::ValDeclaration {
+                name,
+                binding: None,
+                type_annotation: None,
+                initializer: value,
+                modifiers: jv_ast::Modifiers::default(),
+                origin: jv_ast::ValBindingOrigin::Implicit,
+                span,
+            },
+            other => other,
+        })
+        .collect();
+    program
 }

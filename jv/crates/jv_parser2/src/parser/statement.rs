@@ -1,6 +1,11 @@
 //! 文のパース処理（簡易実装）。
 
-use super::{Parser, expression::parse_expression, recovery, types::parse_type};
+use super::{
+    Parser,
+    expression::{parse_expression, span_of_expr},
+    recovery,
+    types::parse_type,
+};
 use crate::{diagnostics::Diagnostic, token::TokenKind};
 use jv_ast::statement::{
     ForInStatement, LoopBinding, LoopStrategy, Program, Statement, ValBindingOrigin,
@@ -118,11 +123,15 @@ fn parse_fun<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statemen
         skip_group(parser, TokenKind::LeftParen, TokenKind::RightParen);
     }
 
-    let return_type = if parser.consume_if(TokenKind::Arrow) {
+    let return_type = if parser.consume_if(TokenKind::Colon) {
+        parse_type(parser)
+    } else if parser.consume_if(TokenKind::Arrow) {
         parse_type(parser)
     } else {
         None
     };
+
+    let _ = parser.consume_if(TokenKind::Assign);
 
     let body = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, fn_span));
 
@@ -256,6 +265,10 @@ fn parse_throw<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statem
 fn parse_expression_statement<'src, 'alloc>(
     parser: &mut Parser<'src, 'alloc>,
 ) -> Option<Statement> {
+    if let Some(assignment) = parse_assignment_statement(parser) {
+        return Some(assignment);
+    }
+
     let expr = match parse_expression(parser) {
         Some(expr) => expr,
         None => {
@@ -266,6 +279,36 @@ fn parse_expression_statement<'src, 'alloc>(
     Some(Statement::Expression {
         expr,
         span: AstSpan::default(),
+    })
+}
+
+fn parse_assignment_statement<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<Statement> {
+    let checkpoint = parser.checkpoint();
+    let target = match parse_expression(parser) {
+        Some(expr) => expr,
+        None => {
+            parser.rewind(checkpoint);
+            return None;
+        }
+    };
+
+    if !parser.consume_if(TokenKind::Assign) {
+        parser.rewind(checkpoint);
+        return None;
+    }
+
+    let fallback_span = span_of_expr(parser, &target);
+    let value = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, fallback_span));
+    let span = parser
+        .ast_span(span_of_expr(parser, &target).merge(span_of_expr(parser, &value)));
+
+    Some(Statement::Assignment {
+        target,
+        binding_pattern: None,
+        value,
+        span,
     })
 }
 

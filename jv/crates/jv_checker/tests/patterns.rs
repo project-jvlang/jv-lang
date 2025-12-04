@@ -1,16 +1,17 @@
-use jv_ast::{Expression, Literal, Pattern, Span, Statement, WhenArm};
+use jv_ast::{Expression, Literal, Modifiers, Pattern, Span, Statement, ValBindingOrigin, WhenArm};
 use jv_checker::{
     diagnostics::from_transform_error,
     pattern::{NarrowedNullability, PatternMatchService, PatternTarget},
 };
 use jv_ir::{context::TransformContext, transform::desugar_when_expression, types::JavaType};
-use jv_parser_frontend::Parser2Pipeline;
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 
 fn parse_when_expression(source: &str) -> Expression {
     let program = Parser2Pipeline::default()
         .parse(source)
         .expect("snippet should parse")
         .into_program();
+    let program = normalize_implicit_assignments(program);
     let statement = program
         .statements
         .first()
@@ -32,6 +33,31 @@ fn analyze(source: &str) -> jv_checker::pattern::PatternMatchFacts {
     let expr = parse_when_expression(source);
     let mut service = PatternMatchService::new();
     service.analyze(&expr, PatternTarget::Java25)
+}
+
+fn normalize_implicit_assignments(mut program: jv_ast::Program) -> jv_ast::Program {
+    program.statements = program
+        .statements
+        .into_iter()
+        .map(|statement| match statement {
+            Statement::Assignment {
+                target: Expression::Identifier(name, _),
+                value,
+                span,
+                ..
+            } => Statement::ValDeclaration {
+                name,
+                binding: None,
+                type_annotation: None,
+                initializer: value,
+                modifiers: Modifiers::default(),
+                origin: ValBindingOrigin::Implicit,
+                span,
+            },
+            other => other,
+        })
+        .collect();
+    program
 }
 
 #[test]

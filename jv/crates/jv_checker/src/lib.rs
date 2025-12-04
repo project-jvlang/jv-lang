@@ -10,6 +10,7 @@ pub mod pattern;
 pub mod regex;
 pub mod telemetry;
 pub mod tuple_planner;
+mod normalize;
 
 pub use inference::{
     InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, PrimitiveType,
@@ -18,6 +19,7 @@ pub use inference::{
 pub use java::{JavaBoxingTable, JavaNullabilityPolicy, JavaPrimitive};
 pub use jv_inference::ParallelInferenceConfig;
 pub use regex::RegexAnalysis;
+pub use normalize::normalize_implicit_assignments;
 
 use crate::imports::ResolvedImport;
 use crate::tuple_planner::TuplePlanner;
@@ -488,7 +490,8 @@ impl TypeChecker {
         self.null_safety_hints.clear();
         self.tuple_plans.clear();
 
-        let binding_resolution = resolve_bindings(program);
+        let preprocessed = normalize_implicit_assignments(program);
+        let binding_resolution = resolve_bindings(&preprocessed);
         let BindingResolution {
             program: normalized,
             diagnostics,

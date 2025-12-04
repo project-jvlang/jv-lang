@@ -4,7 +4,7 @@ use super::Parser;
 use crate::token::TokenKind;
 use jv_ast::expression::BinaryMetadata;
 use jv_ast::types::{BinaryOp, Literal, UnaryOp};
-use jv_ast::{Expression, Span as AstSpan};
+use jv_ast::{Expression, Pattern, WhenArm};
 
 pub(crate) fn parse_expression<'src, 'alloc>(
     parser: &mut Parser<'src, 'alloc>,
@@ -140,6 +140,7 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
                 parser.ast_span(token.span),
             ))
         }
+        TokenKind::When => Some(parse_when_expression(parser)),
         TokenKind::LeftParen => {
             parser.advance();
             let expr = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, token.span));
@@ -176,6 +177,7 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
                 span: parser.ast_span(token.span),
             })
         }
+        TokenKind::LeftBrace => parse_block_expression(parser),
         _ => {
             // 不明なプレフィックスはダミー式で継続。
             parser.advance();
@@ -210,7 +212,7 @@ fn dummy_expr<'src, 'alloc>(parser: &Parser<'src, 'alloc>, span: crate::span::Sp
     Expression::Identifier("_".into(), parser.ast_span(span))
 }
 
-fn span_of_expr(parser: &Parser<'_, '_>, expr: &Expression) -> crate::span::Span {
+pub(crate) fn span_of_expr(parser: &Parser<'_, '_>, expr: &Expression) -> crate::span::Span {
     match expr {
         Expression::Identifier(_, span)
         | Expression::Literal(_, span)
@@ -222,6 +224,166 @@ fn span_of_expr(parser: &Parser<'_, '_>, expr: &Expression) -> crate::span::Span
         | Expression::IndexAccess { span, .. }
         | Expression::NullSafeIndexAccess { span, .. } => parser.span_from_ast(span),
         _ => crate::span::Span::new(0, 0),
+    }
+}
+
+fn parse_when_expression<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Expression {
+    let when_span = parser.advance().span;
+    let subject = if parser.consume_if(TokenKind::LeftParen) {
+        let expr = parse_expression(parser);
+        let _ = parser.consume_if(TokenKind::RightParen);
+        expr.map(Box::new)
+    } else {
+        None
+    };
+
+    let mut arms = Vec::new();
+    let mut else_arm = None;
+    let mut end_span = when_span;
+
+    if parser.consume_if(TokenKind::LeftBrace) {
+        loop {
+            let token = parser.current();
+            if token.kind == TokenKind::RightBrace || token.kind == TokenKind::Eof {
+                end_span = token.span;
+                if token.kind == TokenKind::RightBrace {
+                    parser.advance();
+                }
+                break;
+            }
+
+            if token.kind == TokenKind::Else {
+                parser.advance();
+                let _ = parser.consume_if(TokenKind::FatArrow) || parser.consume_if(TokenKind::Arrow);
+                let body =
+                    parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, token.span));
+                else_arm = Some(Box::new(body));
+            } else if let Some(arm) = parse_when_arm(parser) {
+                arms.push(arm);
+            } else {
+                // 進まないと無限ループになるので一つ消費する。
+                parser.advance();
+            }
+
+            let _ = parser.consume_if(TokenKind::Comma);
+        }
+    }
+
+    let span = parser.ast_span(when_span.merge(end_span));
+    Expression::When {
+        expr: subject,
+        arms,
+        else_arm,
+        implicit_end: None,
+        span,
+    }
+}
+
+fn parse_when_arm<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<WhenArm> {
+    let pattern = parse_when_pattern(parser)?;
+
+    if !(parser.consume_if(TokenKind::FatArrow) || parser.consume_if(TokenKind::Arrow)) {
+        // 矢印が無ければ不正な when arm として継続。
+    }
+
+    let fallback_span = pattern_span(parser, &pattern);
+    let body = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, fallback_span));
+
+    let pattern_span = pattern_span(parser, &pattern);
+    let arm_span = parser
+        .ast_span(pattern_span.merge(span_of_expr(parser, &body)));
+    Some(WhenArm {
+        pattern,
+        guard: None,
+        body,
+        span: arm_span,
+    })
+}
+
+fn parse_when_pattern<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Pattern> {
+    let token = parser.current();
+    match token.kind {
+        TokenKind::Identifier => {
+            let name = parser
+                .lexeme(token.span)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("_id{}", token.span.start));
+            parser.advance();
+
+            if name == "is" {
+                let type_token = parser.current();
+                if type_token.kind == TokenKind::Identifier {
+                    let ty = parser
+                        .lexeme(type_token.span)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| format!("_id{}", type_token.span.start));
+                    let span = token.span.merge(type_token.span);
+                    parser.advance();
+                    Some(Pattern::Constructor {
+                        name: ty,
+                        patterns: Vec::new(),
+                        span: parser.ast_span(span),
+                    })
+                } else {
+                    Some(Pattern::Identifier(name, parser.ast_span(token.span)))
+                }
+            } else {
+                Some(Pattern::Identifier(name, parser.ast_span(token.span)))
+            }
+        }
+        TokenKind::Underscore => {
+            parser.advance();
+            Some(Pattern::Wildcard(parser.ast_span(token.span)))
+        }
+        TokenKind::Number => {
+            let text = parser
+                .lexeme(token.span)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "0".to_string());
+            parser.advance();
+            Some(Pattern::Literal(
+                Literal::Number(text),
+                parser.ast_span(token.span),
+            ))
+        }
+        TokenKind::String => {
+            let text = parser
+                .lexeme(token.span)
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            parser.advance();
+            Some(Pattern::Literal(
+                Literal::String(text),
+                parser.ast_span(token.span),
+            ))
+        }
+        TokenKind::TrueKw | TokenKind::FalseKw => {
+            parser.advance();
+            let value = token.kind == TokenKind::TrueKw;
+            Some(Pattern::Literal(
+                Literal::Boolean(value),
+                parser.ast_span(token.span),
+            ))
+        }
+        TokenKind::NullKw => {
+            parser.advance();
+            Some(Pattern::Literal(
+                Literal::Null,
+                parser.ast_span(token.span),
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn pattern_span(parser: &Parser<'_, '_>, pattern: &Pattern) -> crate::span::Span {
+    match pattern {
+        Pattern::Literal(_, span)
+        | Pattern::Identifier(_, span)
+        | Pattern::Wildcard(span) => parser.span_from_ast(span),
+        Pattern::Constructor { span, .. } | Pattern::Range { span, .. } | Pattern::Guard { span, .. } => {
+            parser.span_from_ast(span)
+        }
     }
 }
 
@@ -316,4 +478,29 @@ fn parse_postfix<'src, 'alloc>(
         }
         _ => None,
     }
+}
+
+fn parse_block_expression<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<Expression> {
+    let open_span = parser.advance().span;
+    let mut depth = 1usize;
+    let mut last_span = open_span;
+
+    while depth > 0 {
+        let tok = parser.advance();
+        last_span = tok.span;
+        match tok.kind {
+            TokenKind::LeftBrace => depth += 1,
+            TokenKind::RightBrace => depth = depth.saturating_sub(1),
+            TokenKind::Eof => break,
+            _ => {}
+        }
+    }
+
+    let span = parser.ast_span(open_span.merge(last_span));
+    Some(Expression::Block {
+        statements: Vec::new(),
+        span,
+    })
 }

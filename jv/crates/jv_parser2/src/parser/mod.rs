@@ -118,7 +118,18 @@ where
     /// 指定位置のトークンを返す。足りない場合はレクシングする。
     pub(crate) fn token_at(&mut self, index: usize) -> Option<Token> {
         while self.tokens.len() <= index {
-            let next = self.lexer.next_token();
+            let mut next = self.lexer.next_token();
+            while matches!(
+                next.kind,
+                TokenKind::Whitespace
+                    | TokenKind::Newline
+                    | TokenKind::LineComment
+                    | TokenKind::BlockComment
+                    | TokenKind::JavaDocComment
+                    | TokenKind::Semicolon
+            ) {
+                next = self.lexer.next_token();
+            }
             let is_eof = next.kind == TokenKind::Eof;
             self.tokens.push(next);
             if is_eof {

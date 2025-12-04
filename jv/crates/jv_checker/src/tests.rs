@@ -96,10 +96,15 @@ fn assertion_rewrite_transform_error_includes_quick_fix() {
 }
 
 fn parse_program(source: &str) -> Program {
-    Parser2Pipeline::default()
+    let program = Parser2Pipeline::default()
         .parse(source)
         .expect("source snippet should parse")
-        .into_program()
+        .into_program();
+    let program = normalize_implicit_assignments(program);
+    if std::env::var("JV_DEBUG_AST").is_ok() {
+        eprintln!("AST statements: {:#?}", program.statements);
+    }
+    program
 }
 
 fn random_identifier(rng: &mut Rng) -> String {
@@ -113,6 +118,31 @@ fn random_identifier(rng: &mut Rng) -> String {
         ident.push(CONT[rng.usize(0..CONT.len())] as char);
     }
     ident
+}
+
+fn normalize_implicit_assignments(mut program: Program) -> Program {
+    program.statements = program
+        .statements
+        .into_iter()
+        .map(|statement| match statement {
+            Statement::Assignment {
+                target: Expression::Identifier(name, _),
+                value,
+                span,
+                ..
+            } => Statement::ValDeclaration {
+                name,
+                binding: None,
+                type_annotation: None,
+                initializer: value,
+                modifiers: Modifiers::default(),
+                origin: ValBindingOrigin::Implicit,
+                span,
+            },
+            other => other,
+        })
+        .collect();
+    program
 }
 
 #[test]

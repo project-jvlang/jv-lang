@@ -1,15 +1,17 @@
 //! Integration tests exercising the null safety pipeline end-to-end.
 
+use jv_ast::{Expression, Modifiers, Statement, ValBindingOrigin};
 use jv_checker::{CheckError, TypeChecker, TypeKind};
-use jv_parser_frontend::Parser2Pipeline;
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 use serde_json::Value;
 use test_case::test_case;
 
 fn parse_program(source: &str) -> jv_ast::Program {
-    Parser2Pipeline::default()
+    let program = Parser2Pipeline::default()
         .parse(source)
         .expect("source snippet should parse")
-        .into_program()
+        .into_program();
+    normalize_implicit_assignments(program)
 }
 
 fn collect_null_safety_messages(errors: &[CheckError]) -> Vec<String> {
@@ -43,6 +45,31 @@ fn run_null_safety_case(source: &str) -> NullSafetyCaseResult {
         messages,
         telemetry_ms,
     }
+}
+
+fn normalize_implicit_assignments(mut program: jv_ast::Program) -> jv_ast::Program {
+    program.statements = program
+        .statements
+        .into_iter()
+        .map(|statement| match statement {
+            Statement::Assignment {
+                target: Expression::Identifier(name, _),
+                value,
+                span,
+                ..
+            } => Statement::ValDeclaration {
+                name,
+                binding: None,
+                type_annotation: None,
+                initializer: value,
+                modifiers: Modifiers::default(),
+                origin: ValBindingOrigin::Implicit,
+                span,
+            },
+            other => other,
+        })
+        .collect();
+    program
 }
 
 #[test]
