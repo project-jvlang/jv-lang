@@ -78,19 +78,19 @@ const fn build_byte_handlers() -> [ByteHandler; 128] {
 #[derive(Debug)]
 pub struct Lexer<'src> {
     source: Source<'src>,
-    current: Token,
-    mode: Mode,
+    pub(crate) current: Token,
+    pub(crate) mode: Mode,
 }
 
-#[derive(Debug)]
-enum Mode {
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Mode {
     Normal,
     InString(StringContext),
     InInterpolation(StringContext, usize), // ctx, brace depth
 }
 
-#[derive(Debug, Clone)]
-struct StringContext {
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StringContext {
     segment_start: usize,
     first_segment: bool,
     has_interpolation: bool,
@@ -191,6 +191,18 @@ impl<'src> Lexer<'src> {
         self.source.offset()
     }
 
+    /// レキサー状態を取得する（チェックポイント用）。
+    pub(crate) fn state(&self) -> (usize, Token, Mode) {
+        (self.source.offset(), self.current, self.mode)
+    }
+
+    /// レキサー状態を復元する。
+    pub(crate) fn set_state(&mut self, offset: usize, current: Token, mode: Mode) {
+        self.set_offset(offset);
+        self.current = current;
+        self.mode = mode;
+    }
+
     /// ソースカーソルを任意位置へ戻す（チェックポイント復元用）。
     #[inline]
     pub(crate) fn set_offset(&mut self, offset: usize) {
@@ -225,6 +237,11 @@ impl<'src> Lexer<'src> {
     #[inline]
     pub(crate) fn slice_from(&self, start: usize) -> &'src [u8] {
         self.source.slice_from(start)
+    }
+
+    #[inline]
+    pub(crate) fn lexeme(&self, span: crate::span::Span) -> Option<&'src str> {
+        self.source.slice_span(span)
     }
 
     #[inline]

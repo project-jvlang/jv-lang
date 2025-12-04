@@ -30,7 +30,7 @@ pub struct ParseResult {
 
 /// レキサー上で構文解析を行う再帰下降パーサー。
 pub struct Parser<'src, 'alloc> {
-    lexer: Lexer<'src>,
+    pub(crate) lexer: Lexer<'src>,
     arena: &'alloc Arena,
     diagnostics: Vec<Diagnostic>,
     tokens: Vec<Token>,
@@ -71,6 +71,8 @@ impl<'src, 'alloc> Parser<'src, 'alloc> {
             self.diagnostics.len(),
             self.context,
             self.recovered,
+            self.lexer.current,
+            self.lexer.mode,
         )
     }
 
@@ -81,7 +83,11 @@ impl<'src, 'alloc> Parser<'src, 'alloc> {
         self.diagnostics.truncate(checkpoint.diagnostics_len);
         self.context = checkpoint.context;
         self.recovered = checkpoint.recovered;
-        self.lexer.set_offset(checkpoint.cursor);
+        self.lexer.set_state(
+            checkpoint.cursor,
+            checkpoint.lexer_current,
+            checkpoint.lexer_mode,
+        );
     }
 
     /// 現在のトークンを取得する（必要に応じてレクシング）。
@@ -135,6 +141,11 @@ impl<'src, 'alloc> Parser<'src, 'alloc> {
     /// 診断を追加する。
     pub(crate) fn push_diagnostic(&mut self, diagnostic: Diagnostic) {
         self.diagnostics.push(diagnostic);
+    }
+
+    /// Span に対応するソース文字列を取得する（UTF-8）。
+    pub(crate) fn lexeme(&self, span: crate::span::Span) -> Option<&'src str> {
+        self.lexer.lexeme(span)
     }
 
     /// 現在のコンテキストを一時的に追加し、元の値を返す。

@@ -60,6 +60,13 @@ impl<'src> Source<'src> {
         &self.bytes[start.min(self.len)..]
     }
 
+    /// Span から UTF-8 文字列スライスを取得する。
+    pub fn slice_span(&self, span: Span) -> Option<&'src str> {
+        let start = span.start.min(self.len as u32) as usize;
+        let end = span.end.min(self.len as u32) as usize;
+        std::str::from_utf8(&self.bytes[start..end]).ok()
+    }
+
     /// 現在オフセット（バイト単位）。
     pub fn offset(&self) -> usize {
         self.cursor

@@ -262,7 +262,11 @@ fn parse_identifier<'src, 'alloc>(
     let token = parser.current();
     if token.kind == TokenKind::Identifier {
         parser.advance();
-        Some((token_text_placeholder(&token), token.span))
+        let text = parser
+            .lexeme(token.span)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| token_text_placeholder(&token));
+        Some((text, token.span))
     } else {
         parser.push_diagnostic(Diagnostic::new("identifier expected", token.span));
         None
