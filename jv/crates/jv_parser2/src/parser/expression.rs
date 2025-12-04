@@ -268,12 +268,14 @@ fn parse_postfix<'src, 'alloc>(
                     if parser.consume_if(TokenKind::Comma) {
                         continue;
                     }
-                    if parser.consume_if(TokenKind::RightParen) {
+                    if parser.current().kind == TokenKind::RightParen {
                         close_span = parser.current().span;
+                        parser.advance();
                     }
                     break;
                 }
             } else {
+                // consume_if で進んだので current は次トークン。閉じ括弧は open に隣接する位置。
                 close_span = open;
             }
             let combined = span_of_expr(left)
@@ -292,8 +294,9 @@ fn parse_postfix<'src, 'alloc>(
             let open = parser.advance().span;
             let index = parse_expression(parser).unwrap_or_else(|| dummy_expr(open));
             let mut close_span = open;
-            if parser.consume_if(TokenKind::RightBracket) {
+            if parser.current().kind == TokenKind::RightBracket {
                 close_span = parser.current().span;
+                parser.advance();
             }
             let combined = span_of_expr(left)
                 .merge(open)
