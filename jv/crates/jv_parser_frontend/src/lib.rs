@@ -2,6 +2,7 @@
 // Extracted from jv_parser for memory-efficient compilation
 
 mod formatter;
+mod legacy_diagnostics;
 mod pipeline;
 mod views;
 

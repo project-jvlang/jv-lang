@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use jv_lsp::ParserAdapter;
-use jv_parser_frontend::Parser2Pipeline;
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 use serde_json::to_string;
 
 fn fixture(name: &str) -> String {

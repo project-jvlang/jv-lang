@@ -1,6 +1,6 @@
 use jv_ast::Span;
-use jv_parser_preprocess::PreprocessDiagnostic;
-use jv_parser_semantics::SemanticsDiagnostic;
+
+use crate::legacy_diagnostics::{PreprocessDiagnostic, SemanticsDiagnostic};
 
 /// 診断の深刻度。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

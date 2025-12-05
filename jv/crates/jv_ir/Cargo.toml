@@ -36,7 +36,6 @@ unicode-normalization = "0.1"
 [dev-dependencies]
 criterion = "0.5"
 jv_parser_frontend.workspace = true
-jv_parser_rowan.workspace = true
 
 [[bench]]
 name = "basic_syntax_sugar"

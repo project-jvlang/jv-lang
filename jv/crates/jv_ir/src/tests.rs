@@ -22,8 +22,7 @@ mod tests {
         transform_statement,
     };
     use jv_ast::*;
-    use jv_parser_frontend::ParserPipeline;
-    use jv_parser_rowan::frontend::RowanPipeline;
+    use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
     use sha2::{Digest, Sha256};
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -35,14 +34,14 @@ mod tests {
     }
 
     fn parse_program(source: &str) -> Program {
-        RowanPipeline::default()
+        Parser2Pipeline::default()
             .parse(source)
             .expect("snippet should parse")
             .into_program()
     }
 
     fn parse_when_expression(source: &str) -> Expression {
-        let frontend = RowanPipeline::default()
+        let frontend = Parser2Pipeline::default()
             .parse(source)
             .expect("fixture should parse");
         let (program, _, _) = frontend.into_parts();
@@ -120,7 +119,7 @@ mod tests {
             }
         "#;
 
-        let frontend = RowanPipeline::default()
+        let frontend = Parser2Pipeline::default()
             .parse(source)
             .expect("parse succeeds");
         let program = frontend.into_program();
@@ -6836,7 +6835,7 @@ fun sample(value: Any): Int {
                 continue;
             }
 
-            let frontend = match RowanPipeline::default().parse(&source) {
+            let frontend = match Parser2Pipeline::default().parse(&source) {
                 Ok(frontend) => frontend,
                 Err(err) => {
                     failures.push((display, format!("parse error: {err}")));
@@ -6863,7 +6862,7 @@ fun sample(value: Any): Int {
     #[test]
     fn transform_quick_tour_lowers_successfully() {
         let source = include_str!("../../../examples/quick-tour.jv");
-        let frontend = RowanPipeline::default()
+        let frontend = Parser2Pipeline::default()
             .parse(source)
             .expect("quick-tour example should parse");
         let program = frontend.into_program();
@@ -6889,7 +6888,7 @@ fun sample(value: Any): Int {
             let display = path.display().to_string();
             let source = fs::read_to_string(&path)
                 .unwrap_or_else(|err| panic!("failed to read {}: {err}", display));
-            let frontend = RowanPipeline::default()
+            let frontend = Parser2Pipeline::default()
                 .parse(&source)
                 .unwrap_or_else(|err| panic!("Rowan parse failed for {}: {:?}", display, err));
             let program = frontend.into_program();

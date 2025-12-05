@@ -1,8 +1,7 @@
 use std::io::Write;
 
 use anyhow::{Result, anyhow};
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 
 /// Render the Concurrency learning module showcasing virtual threads.
 pub fn render<W: Write>(writer: &mut W) -> Result<()> {
@@ -60,7 +59,7 @@ impl LessonExample {
 }
 
 fn validate_jv(source: &str) -> Result<()> {
-    RowanPipeline::default()
+    Parser2Pipeline::default()
         .parse(source)
         .map(|_| ())
         .map_err(|err| anyhow!("{:?}", err))

@@ -105,7 +105,7 @@ where
     }
 
     /// 現在のトークンを取得する（必要に応じてレクシング）。
-    pub(crate) fn current(&mut self) -> Token {
+    pub fn current(&mut self) -> Token {
         self.token_at(self.position)
             .unwrap_or_else(|| Token::new(TokenKind::Eof, Span::new(0, 0)))
     }

@@ -10,8 +10,7 @@ use jv_cli::pipeline::{
 };
 use jv_codegen_java::{generate_java_source_with_config, JavaCodeGenConfig};
 use jv_ir::{TransformContext, transform::transform_program_with_context};
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 use jv_pm::JavaTarget;
 
 fn workspace_root() -> PathBuf {
@@ -43,7 +42,7 @@ fn normalize(text: &str) -> String {
 }
 
 fn generate_java_source_from_text(source: &str, target: JavaTarget) -> String {
-    let program = RowanPipeline::default()
+    let program = Parser2Pipeline::default()
         .parse(source)
         .expect("ソース解析に失敗しました")
         .into_program();
@@ -118,7 +117,7 @@ fn tuple_demo_example_preserves_interpolation_calls() {
     let source =
         fs::read_to_string(&example_path).expect("tuple_demo.jv の読み込みに失敗しました");
 
-    let program = RowanPipeline::default()
+    let program = Parser2Pipeline::default()
         .parse(&source)
         .expect("tuple_demo.jv の解析に失敗しました")
         .into_program();

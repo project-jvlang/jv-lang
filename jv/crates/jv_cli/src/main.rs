@@ -12,8 +12,7 @@ use jv_checker::diagnostics::{
 };
 use jv_fmt::JavaFormatter;
 use jv_ir::transform_program;
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 
 use jv_cli::commands;
 use jv_cli::pipeline::project::output::PreparedOutput;
@@ -411,7 +410,7 @@ fn main() -> Result<()> {
 
 fn repl() -> Result<()> {
     println!("jv REPL (type :help for help, :quit to exit)");
-    let pipeline = RowanPipeline::default();
+    let pipeline = Parser2Pipeline::default();
 
     let mut buffer = String::new();
     loop {
@@ -678,7 +677,7 @@ mod tests {
 
 fn format_jv_files(files: Vec<String>) -> Result<()> {
     println!("Formatting {} file(s)...", files.len());
-    let pipeline = RowanPipeline::default();
+    let pipeline = Parser2Pipeline::default();
 
     for file in &files {
         if !Path::new(file).exists() {

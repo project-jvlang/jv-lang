@@ -7,4 +7,3 @@ edition = "2021"
 
 [dev-dependencies]
 jv_parser_frontend = { path = "../jv_parser_frontend" }
-jv_parser_rowan = { path = "../jv_parser_rowan" }

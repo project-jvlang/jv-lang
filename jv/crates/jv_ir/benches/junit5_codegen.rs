@@ -5,8 +5,7 @@ use std::time::{Duration, Instant};
 use crate::{JavaCodeGenConfig, JavaTarget, generate_java_source_with_config};
 use jv_ir::transform::transform_program_with_context_profiled;
 use jv_ir::{TransformContext, TransformProfiler};
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 
 const ITERATIONS: usize = 6;
 const WARMUP_SKIP: usize = 1;
@@ -48,7 +47,7 @@ fn assert_junit5_within_threshold(max_ratio: f64) -> BenchReport {
 
 fn run_junit5_bench(iterations: usize) -> BenchReport {
     let (baseline_source, junit_source) = load_sample_sources();
-    let pipeline = RowanPipeline::default();
+    let pipeline = Parser2Pipeline::default();
     let config = JavaCodeGenConfig::for_target(JavaTarget::Java25);
 
     let baseline_samples = run_iterations(&baseline_source, iterations, &pipeline, &config);
@@ -63,7 +62,7 @@ fn run_junit5_bench(iterations: usize) -> BenchReport {
 fn run_iterations(
     source: &str,
     iterations: usize,
-    pipeline: &RowanPipeline,
+    pipeline: &Parser2Pipeline,
     config: &JavaCodeGenConfig,
 ) -> Vec<PipelineRunMetrics> {
     let mut runs = Vec::with_capacity(iterations);
@@ -75,7 +74,7 @@ fn run_iterations(
 
 fn measure_single_iteration(
     source: &str,
-    pipeline: &RowanPipeline,
+    pipeline: &Parser2Pipeline,
     config: &JavaCodeGenConfig,
 ) -> PipelineRunMetrics {
     let parse_start = Instant::now();

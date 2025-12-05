@@ -24,8 +24,7 @@ use jv_ir::{
     IrGenericMetadata, IrProgram, IrStatement, IrTypeLevelValue, IrTypeParameter, IrVariance,
     JavaType, JavaWildcardKind, TransformContext, transform_program_with_context,
 };
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 use serde::Serialize;
 
 use crate::java_type_names::derive_type_name;
@@ -1129,7 +1128,7 @@ fn visit_embedded_stdlib(
     modules: &mut Vec<StdlibModule>,
     catalog: &mut StdlibCatalog,
 ) -> Result<()> {
-    let pipeline = RowanPipeline::default();
+    let pipeline = Parser2Pipeline::default();
     #[cfg(feature = "dump-sequence-ast")]
     let debug_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
     let cursor = Cursor::new(bundled_stdlib::STDLIB_ZIP);
@@ -1349,7 +1348,7 @@ fn compile_module(
     parallel_config: ParallelInferenceConfig,
     symbol_index: &Arc<SymbolIndex>,
 ) -> Result<StdlibModuleArtifacts> {
-    let pipeline = RowanPipeline::default();
+    let pipeline = Parser2Pipeline::default();
     let frontend_output = match pipeline.parse(&module.source) {
         Ok(output) => output,
         Err(error) => {
@@ -1707,7 +1706,7 @@ mod tests {
     use jv_ast::Span;
     use jv_checker::imports::resolution::{ResolvedImport, ResolvedImportKind};
     use jv_ir::{IrModifiers, IrStatement, LoggingMetadata};
-    use jv_parser_rowan::frontend::RowanPipeline;
+    use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 
     use std::{
         fs,
@@ -1716,7 +1715,7 @@ mod tests {
     };
 
     fn parse_program(source: &str) -> Program {
-        RowanPipeline::default()
+        Parser2Pipeline::default()
             .parse(source)
             .expect("source should parse for embedded stdlib tests")
             .into_program()

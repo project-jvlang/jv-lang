@@ -8,8 +8,7 @@ use jv_ast::Span;
 use jv_checker::TypeChecker;
 use jv_codegen_java::generate_java_source;
 use jv_ir::transform_program;
-use jv_parser_frontend::{ParseError, ParserPipeline};
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser_frontend::{ParseError, Parser2Pipeline, ParserPipeline};
 
 const DEFAULT_SNIPPET: &str = r#"fun main() {
     println("こんにちは、インタラクティブエディタ！")
@@ -230,7 +229,7 @@ impl SessionState {
         }
 
         writeln!(writer, "\n🧪 構文チェックを実行中...")?;
-        let pipeline = RowanPipeline::default();
+        let pipeline = Parser2Pipeline::default();
         let frontend_output = match pipeline.parse(&source) {
             Ok(output) => {
                 writeln!(writer, "✅ 構文チェックOK")?;

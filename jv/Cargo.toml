@@ -3,10 +3,7 @@ resolver = "2"
 members = [
     "crates/jv_support",
     "crates/jv_lexer",
-    "crates/jv_parser_preprocess",
-    "crates/jv_parser_semantics",
     "crates/jv_parser_frontend",
-    "crates/jv_parser_rowan",
     "crates/jv_parser2",
     "crates/jv_dsl_features",
     "crates/jv_dsl_api",
@@ -66,10 +63,7 @@ semver = { version = "1.0", features = ["serde"] }
 
 # Internal crates
 jv_lexer = { path = "crates/jv_lexer" }
-jv_parser_preprocess = { path = "crates/jv_parser_preprocess" }
-jv_parser_semantics = { path = "crates/jv_parser_semantics" }
 jv_parser_frontend = { path = "crates/jv_parser_frontend" }
-jv_parser_rowan = { path = "crates/jv_parser_rowan" }
 jv_parser2 = { path = "crates/jv_parser2" }
 jv_dsl_api = { path = "crates/jv_dsl_api" }
 jv_dsl_builtin = { path = "crates/jv_dsl_builtin" }

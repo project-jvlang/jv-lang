@@ -506,8 +506,7 @@ pub mod pipeline {
         TransformPools, TransformProfiler, transform_program_with_context,
         transform_program_with_context_profiled,
     };
-    use jv_parser_frontend::ParserPipeline;
-    use jv_parser_rowan::frontend::RowanPipeline;
+    use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
     use serde_json::json;
     use std::collections::{BTreeMap, HashSet};
     use std::ffi::OsStr;
@@ -702,7 +701,7 @@ pub mod pipeline {
             .with_context(|| format!("Failed to read file: {}", entrypoint.display()))?;
 
         let parse_start = Instant::now();
-        let frontend_output = match RowanPipeline::default().parse(&source) {
+        let frontend_output = match Parser2Pipeline::default().parse(&source) {
             Ok(output) => output,
             Err(error) => {
                 if let Some(diagnostic) = from_parse_error(&error) {

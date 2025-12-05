@@ -32,9 +32,7 @@ harness = false
 clap.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
-jv_lexer.workspace = true
 jv_parser_frontend.workspace = true
-jv_parser_rowan.workspace = true
 jv_ir = { workspace = true, features = ["debug-ir"] }
 jv_codegen_java.workspace = true
 jv_build.workspace = true

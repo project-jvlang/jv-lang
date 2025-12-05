@@ -1,7 +1,7 @@
 use jv_ast::{Program, Span, Statement};
 use jv_lexer::Token;
-use jv_parser_preprocess::PreprocessDiagnostic;
-use jv_parser_semantics::SemanticsDiagnostic;
+
+use crate::legacy_diagnostics::{PreprocessDiagnostic, SemanticsDiagnostic};
 
 use crate::formatter::Diagnostic;
 

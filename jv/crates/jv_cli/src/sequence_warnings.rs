@@ -466,11 +466,10 @@ impl SequenceWarningCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_parser_frontend::ParserPipeline;
-    use jv_parser_rowan::frontend::RowanPipeline;
+    use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 
     fn parse(source: &str) -> Program {
-        RowanPipeline::default()
+        Parser2Pipeline::default()
             .parse(source)
             .expect("source should parse for sequence warnings")
             .into_program()
