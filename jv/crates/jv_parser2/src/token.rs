@@ -76,6 +76,7 @@ pub enum TokenKind {
     Else,
     For,
     In,
+    Is,
     While,
     Do,
     Return,

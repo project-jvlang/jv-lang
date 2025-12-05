@@ -2,11 +2,36 @@
 
 use super::{Parser, statement::parse_statement};
 use crate::token::TokenKind;
-use crate::parser::statement::parse_identifier;
 use jv_ast::json::{JsonEntry, JsonLiteral, JsonValue};
-use jv_ast::expression::BinaryMetadata;
-use jv_ast::types::{BinaryOp, Literal, UnaryOp};
+use jv_ast::expression::{BinaryMetadata, Parameter, TupleContextFlags, TupleFieldMeta, LabeledSpan};
+use jv_ast::types::{BinaryOp, Literal, Span as AstSpan, UnaryOp};
 use jv_ast::{Expression, Pattern, WhenArm};
+use super::types::parse_type;
+use super::CollectedComment;
+
+/// Check if a token kind can start an expression
+fn is_expression_start(kind: TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Identifier
+            | TokenKind::Underscore
+            | TokenKind::ImplicitParam
+            | TokenKind::Number
+            | TokenKind::String
+            | TokenKind::Character
+            | TokenKind::TrueKw
+            | TokenKind::FalseKw
+            | TokenKind::NullKw
+            | TokenKind::LeftParen
+            | TokenKind::LeftBracket
+            | TokenKind::LeftBrace
+            | TokenKind::Minus
+            | TokenKind::Not
+            | TokenKind::If
+            | TokenKind::When
+            | TokenKind::PipeLeft
+    )
+}
 
 pub(crate) fn parse_expression<'src, 'alloc>(
     parser: &mut Parser<'src, 'alloc>,
@@ -144,10 +169,84 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
         }
         TokenKind::When => Some(parse_when_expression(parser)),
         TokenKind::LeftParen => {
-            parser.advance();
-            let expr = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, token.span));
-            let _ = parser.consume_if(TokenKind::RightParen);
-            Some(expr)
+            let start_span = parser.advance().span;
+
+            // 括弧開始時のコメントをクリア（前のコンテキストのコメント）
+            parser.clear_pending_comments();
+
+            // Empty tuple ()
+            if parser.current().kind == TokenKind::RightParen {
+                let end_span = parser.advance().span;
+                return Some(Expression::Tuple {
+                    elements: Vec::new(),
+                    fields: Vec::new(),
+                    context: TupleContextFlags::default(),
+                    span: parser.ast_span(start_span.merge(end_span)),
+                });
+            }
+
+            let mut elements = Vec::new();
+            let mut fields = Vec::new();
+            let mut element_index = 0usize;
+
+            // Loop to collect elements (space or comma separated) with their comments
+            loop {
+                // Skip commas
+                let _ = parser.consume_if(TokenKind::Comma);
+
+                if parser.current().kind == TokenKind::RightParen {
+                    break;
+                }
+                if parser.current().kind == TokenKind::Eof {
+                    break;
+                }
+
+                // current() を呼ぶと、その前のコメントが pending_comments に溜まる
+                let _ = parser.current();
+                let comments = parser.take_pending_comments();
+
+                // Check if next token can be an expression
+                if !is_expression_start(parser.current().kind) {
+                    break;
+                }
+
+                let elem_span_start = parser.current().span;
+                if let Some(elem) = parse_expression(parser) {
+                    // コメントからフィールドメタデータを構築
+                    let field_meta = build_tuple_field_meta(
+                        &comments,
+                        &elem,
+                        element_index,
+                        parser.ast_span(elem_span_start),
+                    );
+                    elements.push(elem);
+                    fields.push(field_meta);
+                    element_index += 1;
+                } else {
+                    break;
+                }
+            }
+
+            let end_span = if parser.current().kind == TokenKind::RightParen {
+                parser.advance().span
+            } else {
+                start_span
+            };
+
+            let span = parser.ast_span(start_span.merge(end_span));
+
+            if elements.len() == 1 {
+                // Single element - just grouping, return the inner expression
+                Some(elements.into_iter().next().unwrap())
+            } else {
+                // Multiple elements - tuple literal
+                Some(Expression::Tuple {
+                    elements,
+                    fields,
+                    context: TupleContextFlags::default(),
+                    span,
+                })
+            }
         }
         TokenKind::Minus => {
             parser.advance();
@@ -199,6 +298,9 @@ fn infix_binding_power(kind: TokenKind) -> Option<(u8, u8, BinaryOp)> {
         TokenKind::LessEqual => (50, 51, BinaryOp::LessEqual),
         TokenKind::Greater => (50, 51, BinaryOp::Greater),
         TokenKind::GreaterEqual => (50, 51, BinaryOp::GreaterEqual),
+        // NOTE: `is` is NOT included as an infix operator because it should only
+        // appear in pattern matching contexts (when arms), not as a general expression operator.
+        // This prevents `"body" is Type` from being parsed when the `is` belongs to the next when arm.
         TokenKind::Equal => (40, 41, BinaryOp::Equal),
         TokenKind::NotEqual => (40, 41, BinaryOp::NotEqual),
         TokenKind::RangeExclusive => (35, 36, BinaryOp::RangeExclusive),
@@ -285,6 +387,13 @@ fn parse_when_expression<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Exp
 fn parse_when_arm<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<WhenArm> {
     let pattern = parse_when_pattern(parser)?;
 
+    // Check for guard condition: `&& expr`
+    let guard = if parser.consume_if(TokenKind::And) {
+        parse_expression(parser)
+    } else {
+        None
+    };
+
     if !(parser.consume_if(TokenKind::FatArrow) || parser.consume_if(TokenKind::Arrow)) {
         // 矢印が無ければ不正な when arm として継続。
     }
@@ -297,7 +406,7 @@ fn parse_when_arm<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Whe
         .ast_span(pattern_span.merge(span_of_expr(parser, &body)));
     Some(WhenArm {
         pattern,
-        guard: None,
+        guard,
         body,
         span: arm_span,
     })
@@ -313,25 +422,55 @@ fn parse_when_pattern<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option
                 .unwrap_or_else(|| format!("_id{}", token.span.start));
             parser.advance();
 
-            if name == "is" {
+            // Check for `identifier is Type` pattern (for subjectless when)
+            if parser.current().kind == TokenKind::Is {
+                let _is_span = parser.advance().span;
                 let type_token = parser.current();
                 if type_token.kind == TokenKind::Identifier {
                     let ty = parser
                         .lexeme(type_token.span)
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| format!("_id{}", type_token.span.start));
-                    let span = token.span.merge(type_token.span);
+                    let type_span = type_token.span;
                     parser.advance();
-                    Some(Pattern::Constructor {
-                        name: ty,
-                        patterns: Vec::new(),
-                        span: parser.ast_span(span),
-                    })
-                } else {
-                    Some(Pattern::Identifier(name, parser.ast_span(token.span)))
+
+                    // Create a Guard pattern with `identifier is Type` as the condition
+                    let condition = Expression::Binary {
+                        left: Box::new(Expression::Identifier(name.clone(), parser.ast_span(token.span))),
+                        op: BinaryOp::Is,
+                        right: Box::new(Expression::Identifier(ty, parser.ast_span(type_span))),
+                        span: parser.ast_span(token.span.merge(type_span)),
+                        metadata: BinaryMetadata::default(),
+                    };
+                    let full_span = token.span.merge(type_span);
+                    return Some(Pattern::Guard {
+                        pattern: Box::new(Pattern::Wildcard(parser.ast_span(token.span))),
+                        condition,
+                        span: parser.ast_span(full_span),
+                    });
                 }
+            }
+
+            Some(Pattern::Identifier(name, parser.ast_span(token.span)))
+        }
+        // Handle standalone `is Type` pattern (for when expressions with subject)
+        TokenKind::Is => {
+            parser.advance();
+            let type_token = parser.current();
+            if type_token.kind == TokenKind::Identifier {
+                let ty = parser
+                    .lexeme(type_token.span)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("_id{}", type_token.span.start));
+                let span = token.span.merge(type_token.span);
+                parser.advance();
+                Some(Pattern::Constructor {
+                    name: ty,
+                    patterns: Vec::new(),
+                    span: parser.ast_span(span),
+                })
             } else {
-                Some(Pattern::Identifier(name, parser.ast_span(token.span)))
+                None
             }
         }
         TokenKind::Underscore => {
@@ -496,6 +635,29 @@ fn parse_postfix<'src, 'alloc>(
                 span: parser.ast_span(combined),
             })
         }
+        TokenKind::LeftBrace => {
+            // Trailing lambda syntax: `obj.method { lambda }` becomes `obj.method({ lambda })`
+            // Only applies when left is a MemberAccess (method call context)
+            if !matches!(left, Expression::MemberAccess { .. } | Expression::NullSafeMemberAccess { .. }) {
+                return None;
+            }
+
+            // Try to parse as arrow lambda
+            if let Some(lambda) = try_parse_arrow_lambda(parser) {
+                let lambda_span = span_of_expr(parser, &lambda);
+                let combined = span_of_expr(parser, left).merge(lambda_span);
+                return Some(Expression::Call {
+                    function: Box::new(left.clone()),
+                    args: vec![jv_ast::expression::Argument::Positional(lambda)],
+                    type_arguments: Vec::new(),
+                    argument_metadata: Default::default(),
+                    span: parser.ast_span(combined),
+                });
+            }
+
+            // Not an arrow lambda - don't consume as trailing lambda
+            None
+        }
         _ => None,
     }
 }
@@ -525,11 +687,158 @@ fn parse_block_expression<'src, 'alloc>(
     Some(Expression::Block { statements, span })
 }
 
+/// Attempt to parse arrow lambda syntax: `{ params -> body }` or `{ (params) -> body }`
+/// Returns None if the content does not follow arrow lambda pattern.
+fn try_parse_arrow_lambda<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<Expression> {
+    let checkpoint = parser.checkpoint();
+    let open_span = parser.advance().span; // consume '{'
+
+    // First, try to find an arrow token in the block
+    // We scan ahead to check if there's a `->` or `=>` at the right position
+    let mut has_arrow = false;
+    let mut depth = 1;
+    let mut lookahead_pos = 0;
+
+    loop {
+        let tok = parser.peek_ahead(lookahead_pos);
+        match tok.kind {
+            TokenKind::Arrow | TokenKind::FatArrow => {
+                if depth == 1 {
+                    has_arrow = true;
+                    break;
+                }
+            }
+            TokenKind::LeftParen | TokenKind::LeftBrace | TokenKind::LeftBracket => {
+                depth += 1;
+            }
+            TokenKind::RightParen | TokenKind::RightBracket => {
+                depth -= 1;
+            }
+            TokenKind::RightBrace => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            TokenKind::Eof => break,
+            _ => {}
+        }
+        lookahead_pos += 1;
+        // Limit lookahead to prevent scanning entire file
+        if lookahead_pos > 100 {
+            break;
+        }
+    }
+
+    if !has_arrow {
+        parser.rewind(checkpoint);
+        return None;
+    }
+
+    // Parse parameters: either `param` or `(param1, param2, ...)`
+    let mut parameters = Vec::new();
+
+    if parser.current().kind == TokenKind::LeftParen {
+        parser.advance(); // consume '('
+        while parser.current().kind != TokenKind::RightParen && parser.current().kind != TokenKind::Eof {
+            if let Some(param) = parse_lambda_parameter(parser) {
+                parameters.push(param);
+            } else {
+                parser.rewind(checkpoint);
+                return None;
+            }
+            // Skip comma between parameters
+            if parser.current().kind == TokenKind::Comma {
+                parser.advance();
+            }
+        }
+        if parser.current().kind == TokenKind::RightParen {
+            parser.advance(); // consume ')'
+        }
+    } else {
+        // Single parameter without parentheses
+        if let Some(param) = parse_lambda_parameter(parser) {
+            parameters.push(param);
+        } else {
+            parser.rewind(checkpoint);
+            return None;
+        }
+    }
+
+    // Expect arrow token
+    if !matches!(parser.current().kind, TokenKind::Arrow | TokenKind::FatArrow) {
+        parser.rewind(checkpoint);
+        return None;
+    }
+    parser.advance(); // consume '->' or '=>'
+
+    // Parse body expression
+    let body = parse_expression(parser).unwrap_or_else(|| {
+        let span = parser.current().span;
+        Expression::Identifier("_".into(), parser.ast_span(span))
+    });
+
+    // Expect closing brace
+    let end_span = if parser.current().kind == TokenKind::RightBrace {
+        parser.advance().span
+    } else {
+        parser.current().span
+    };
+
+    let span = parser.ast_span(open_span.merge(end_span));
+    Some(Expression::Lambda {
+        parameters,
+        body: Box::new(body),
+        span,
+    })
+}
+
+/// Parse a single lambda parameter: `name` or `name: Type`
+fn parse_lambda_parameter<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<Parameter> {
+    let token = parser.current();
+    let name = match token.kind {
+        TokenKind::Identifier => {
+            parser.lexeme(token.span).map(|s| s.to_string()).unwrap_or_default()
+        }
+        TokenKind::Underscore => "_".to_string(),
+        _ => return None,
+    };
+    let name_span = token.span;
+    parser.advance();
+
+    // Optional type annotation: `: Type`
+    let type_annotation = if parser.current().kind == TokenKind::Colon {
+        parser.advance(); // consume ':'
+        parse_type(parser)
+    } else {
+        None
+    };
+
+    Some(Parameter {
+        name,
+        type_annotation,
+        default_value: None,
+        modifiers: Default::default(),
+        span: parser.ast_span(name_span),
+    })
+}
+
 fn parse_json_or_block<'src, 'alloc>(
     parser: &mut Parser<'src, 'alloc>,
 ) -> Option<Expression> {
-    // Peek ahead: if { is followed by a statement keyword, it's a block, not JSON.
+    // Try parsing as arrow lambda: `{ param -> expr }` or `{ (params) -> expr }`
+    // Must be checked first to handle `{ ident -> ... }` which could look like JSON key.
+    if let Some(lambda) = try_parse_arrow_lambda(parser) {
+        return Some(lambda);
+    }
+
+    // Peek ahead: if { is followed by a statement keyword or expression start, it's likely a block, not JSON.
     // This prevents misinterpreting `{ val x = ... }` as a JSON object with key "val".
+    // Also handles `{ (expr) }` and similar block expressions.
     let next_token = parser.peek_next().map(|t| t.kind);
     if matches!(
         next_token,
@@ -548,6 +857,11 @@ fn parse_json_or_block<'src, 'alloc>(
                 | TokenKind::Continue
                 | TokenKind::When
                 | TokenKind::Test
+                | TokenKind::LeftParen  // Block starting with tuple/grouped expression
+                | TokenKind::LeftBracket // Block starting with array literal
+                | TokenKind::LeftBrace   // Nested block
+                | TokenKind::Minus       // Block starting with negation
+                | TokenKind::Not         // Block starting with !
         )
     ) {
         return parse_block_expression(parser);
@@ -745,4 +1059,78 @@ fn parse_json_array<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<J
         delimiter: Default::default(),
         span: parser.ast_span(start.merge(end_span)),
     })
+}
+
+/// コメントと式からTupleFieldMetaを構築する
+///
+/// - 行コメント (`// label`) → `primary_label`
+/// - ブロックコメント (`/* label */`) → `secondary_labels`
+/// - 式がIdentifierなら → `identifier_hint`
+fn build_tuple_field_meta(
+    comments: &[CollectedComment],
+    element: &Expression,
+    fallback_index: usize,
+    span: AstSpan,
+) -> TupleFieldMeta {
+    let mut primary_label: Option<String> = None;
+    let mut secondary_labels: Vec<LabeledSpan> = Vec::new();
+
+    for comment in comments {
+        let label = extract_label_from_comment(&comment.text, comment.is_line_comment);
+        if let Some(name) = label {
+            if comment.is_line_comment && primary_label.is_none() {
+                // 最初の行コメントが primary_label
+                primary_label = Some(name);
+            } else {
+                // ブロックコメントまたは追加の行コメントは secondary_labels
+                secondary_labels.push(LabeledSpan {
+                    name,
+                    span: span.clone(),
+                });
+            }
+        }
+    }
+
+    // 式がIdentifierなら identifier_hint として記録
+    let identifier_hint = match element {
+        Expression::Identifier(name, _) => Some(name.clone()),
+        _ => None,
+    };
+
+    TupleFieldMeta {
+        primary_label,
+        secondary_labels,
+        identifier_hint,
+        fallback_index,
+        span,
+    }
+}
+
+/// コメントテキストからラベルを抽出する
+///
+/// - 行コメント: `// primaryFirst` → "primaryFirst"
+/// - ブロックコメント: `/* extraAlias */` → "extraAlias"
+fn extract_label_from_comment(text: &str, is_line_comment: bool) -> Option<String> {
+    let trimmed = if is_line_comment {
+        // `// label` or `//label`
+        text.trim_start_matches('/').trim()
+    } else {
+        // `/* label */` or `/*label*/`
+        text.trim_start_matches('/').trim_start_matches('*')
+            .trim_end_matches('/').trim_end_matches('*')
+            .trim()
+    };
+
+    if trimmed.is_empty() {
+        None
+    } else {
+        // ラベルは識別子として有効な単語のみ（最初の単語を取る）
+        let label = trimmed.split_whitespace().next()?;
+        // 識別子として妥当かチェック（簡易版：英数字とアンダースコアのみ）
+        if label.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            Some(label.to_string())
+        } else {
+            None
+        }
+    }
 }

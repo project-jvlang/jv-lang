@@ -28,6 +28,13 @@ pub struct ParseResult<'alloc> {
     pub recovered: bool,
 }
 
+/// コメントトークンの種類（行コメント or ブロックコメント）とテキスト
+#[derive(Debug, Clone)]
+pub struct CollectedComment {
+    pub is_line_comment: bool,
+    pub text: String,
+}
+
 /// レキサー上で構文解析を行う再帰下降パーサー。
 pub struct Parser<'src, 'alloc>
 where
@@ -42,6 +49,8 @@ where
     context: JvContext,
     recovered: bool,
     recovery_metrics: crate::parser::recovery::RecoveryMetrics,
+    /// 次のトークンの前に現れたコメントを一時保存
+    pending_comments: Vec<CollectedComment>,
 }
 
 impl<'src, 'alloc> Parser<'src, 'alloc>
@@ -60,6 +69,7 @@ where
             context: JvContext::empty(),
             recovered: false,
             recovery_metrics: crate::parser::recovery::RecoveryMetrics::default(),
+            pending_comments: Vec::new(),
         }
     }
 
@@ -115,6 +125,12 @@ where
         self.token_at(self.position + 1)
     }
 
+    /// 指定オフセット分先のトークンを先読みする（消費しない）。
+    pub(crate) fn peek_ahead(&mut self, offset: usize) -> Token {
+        self.token_at(self.position + offset)
+            .unwrap_or_else(|| Token::new(TokenKind::Eof, Span::new(0, 0)))
+    }
+
     /// 次のトークンへ進める。
     pub(crate) fn advance(&mut self) -> Token {
         let token = self.current();
@@ -123,6 +139,7 @@ where
     }
 
     /// 指定位置のトークンを返す。足りない場合はレクシングする。
+    /// コメントは pending_comments に収集される。
     pub(crate) fn token_at(&mut self, index: usize) -> Option<Token> {
         while self.tokens.len() <= index {
             let mut next = self.lexer.next_token();
@@ -135,6 +152,17 @@ where
                     | TokenKind::JavaDocComment
                     | TokenKind::Semicolon
             ) {
+                // コメントトークンを収集
+                if matches!(next.kind, TokenKind::LineComment | TokenKind::BlockComment) {
+                    let start = next.span.start as usize;
+                    let end = next.span.end as usize;
+                    if let Some(text) = self.lexer.source_text().get(start..end) {
+                        self.pending_comments.push(CollectedComment {
+                            is_line_comment: next.kind == TokenKind::LineComment,
+                            text: text.to_string(),
+                        });
+                    }
+                }
                 next = self.lexer.next_token();
             }
             let is_eof = next.kind == TokenKind::Eof;
@@ -144,6 +172,16 @@ where
             }
         }
         self.tokens.get(index).copied()
+    }
+
+    /// 現在保持しているコメントを取り出してクリアする
+    pub(crate) fn take_pending_comments(&mut self) -> Vec<CollectedComment> {
+        std::mem::take(&mut self.pending_comments)
+    }
+
+    /// 保持しているコメントをクリアする
+    pub(crate) fn clear_pending_comments(&mut self) {
+        self.pending_comments.clear();
     }
 
     /// 指定のトークン種別にマッチするか確認し、成功時は進める。

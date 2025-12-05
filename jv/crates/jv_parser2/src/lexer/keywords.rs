@@ -41,6 +41,7 @@ pub(crate) fn keyword_from_bytes(text: &[u8]) -> Option<TokenKind> {
             b"import" => Some(TokenKind::Import),
             b"in" => Some(TokenKind::In),
             b"info" => Some(TokenKind::Info),
+            b"is" => Some(TokenKind::Is),
             _ => None,
         },
         b'l' => match text {

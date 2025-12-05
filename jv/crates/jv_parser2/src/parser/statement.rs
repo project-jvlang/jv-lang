@@ -13,6 +13,7 @@ use jv_ast::statement::{
     TestDatasetRow, TestDeclaration, TestParameter, ValBindingOrigin,
 };
 use jv_ast::types::{BinaryOp, Literal, Modifiers};
+use jv_ast::expression::{Parameter, ParameterModifiers};
 use jv_ast::{Expression, Span as AstSpan};
 
 /// プログラム全体をパースする。
@@ -121,10 +122,12 @@ fn parse_fun<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statemen
     let fn_span = parser.advance().span;
     let (name, name_span) = parse_identifier(parser)?;
 
-    // 引数・戻り値は後続タスクで詳細実装。ここでは括弧をスキップ。
-    if parser.consume_if(TokenKind::LeftParen) {
-        skip_group(parser, TokenKind::LeftParen, TokenKind::RightParen);
-    }
+    // Parse function parameters
+    let parameters = if parser.consume_if(TokenKind::LeftParen) {
+        parse_parameters(parser)
+    } else {
+        Vec::new()
+    };
 
     let return_type = if parser.consume_if(TokenKind::Colon) {
         parse_type(parser)
@@ -144,13 +147,99 @@ fn parse_fun<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statemen
         type_parameters: Vec::new(),
         generic_signature: None,
         where_clause: None,
-        parameters: Vec::new(),
+        parameters,
         return_type,
         primitive_return: None,
         body: Box::new(body),
         modifiers: Modifiers::default(),
         span: parser.ast_span(span),
     })
+}
+
+/// Parse function parameters: `(name: Type = default, ...)`
+fn parse_parameters<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Vec<Parameter> {
+    let mut parameters = Vec::new();
+
+    // Handle empty parameter list
+    if parser.current().kind == TokenKind::RightParen {
+        parser.advance();
+        return parameters;
+    }
+
+    loop {
+        let param_start = parser.current().span;
+
+        // Parse parameter name
+        let (name, name_span) = match parse_identifier(parser) {
+            Some(id) => id,
+            None => {
+                // Skip to next comma or closing paren
+                while !matches!(
+                    parser.current().kind,
+                    TokenKind::Comma | TokenKind::RightParen | TokenKind::Eof
+                ) {
+                    parser.advance();
+                }
+                if parser.consume_if(TokenKind::Comma) {
+                    continue;
+                }
+                break;
+            }
+        };
+
+        // Track end span - starts at name, may extend with type or default
+        let mut param_end = name_span;
+
+        // Parse optional type annotation `: Type`
+        let type_annotation = if parser.consume_if(TokenKind::Colon) {
+            let type_start = parser.current().span;
+            let ty = parse_type(parser);
+            if ty.is_some() {
+                // Extend span through the type
+                param_end = type_start;
+            }
+            ty
+        } else {
+            None
+        };
+
+        // Parse optional default value `= expr`
+        let default_value = if parser.consume_if(TokenKind::Assign) {
+            let expr = parse_expression(parser);
+            if let Some(ref e) = expr {
+                // Extend span through the expression
+                param_end = param_end.merge(span_of_expr(parser, e));
+            }
+            expr
+        } else {
+            None
+        };
+
+        let param_span = param_start.merge(param_end);
+
+        parameters.push(Parameter {
+            name,
+            type_annotation,
+            default_value,
+            modifiers: ParameterModifiers::default(),
+            span: parser.ast_span(param_span),
+        });
+
+        // Check for comma (more parameters) or end
+        if parser.consume_if(TokenKind::Comma) {
+            // Handle trailing comma
+            if parser.current().kind == TokenKind::RightParen {
+                break;
+            }
+            continue;
+        }
+        break;
+    }
+
+    // Consume closing paren
+    let _ = parser.consume_if(TokenKind::RightParen);
+
+    parameters
 }
 
 fn parse_class<'src, 'alloc>(
@@ -584,6 +673,10 @@ pub(crate) fn parse_identifier<'src, 'alloc>(
             .map(|s| s.to_string())
             .unwrap_or_else(|| token_text_placeholder(&token));
         Some((text, token.span))
+    } else if token.kind == TokenKind::Underscore {
+        // `_` wildcard pattern is also valid as an identifier
+        parser.advance();
+        Some(("_".to_string(), token.span))
     } else {
         parser.push_diagnostic(Diagnostic::new("identifier expected", token.span));
         None
@@ -598,6 +691,52 @@ fn dummy_expr<'src, 'alloc>(parser: &Parser<'src, 'alloc>, span: crate::span::Sp
     Expression::Identifier("_".into(), parser.ast_span(span))
 }
 
+#[cfg(test)]
+mod statement_tests {
+    use super::*;
+    use crate::{allocator::Arena, lexer::Lexer, source::Source};
+    use crate::parser::Parser;
+
+    fn parse_source(input: &str) -> Vec<Statement> {
+        let source = Source::from_str(input);
+        let lexer = Lexer::new(source);
+        let arena = Arena::new();
+        let mut parser = Parser::new(lexer, &arena);
+        let program = parse_program(&mut parser).unwrap();
+        program.statements
+    }
+
+    #[test]
+    fn parses_function_with_tuple_return_type() {
+        let stmts = parse_source(r#"fun produce(): (Int String) {
+    (1 "ok")
+}"#);
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0] {
+            Statement::FunctionDeclaration { name, return_type, body, .. } => {
+                assert_eq!(name, "produce");
+                assert!(return_type.is_some(), "return type should be present");
+                let ret = return_type.as_ref().unwrap();
+                match ret {
+                    jv_ast::TypeAnnotation::Simple(s) => {
+                        assert!(s.starts_with('('), "should start with '(': {}", s);
+                    }
+                    other => panic!("expected Simple, got {:?}", other),
+                }
+                // Body should be a Block containing a Tuple expression
+                match body.as_ref() {
+                    Expression::Block { statements, .. } => {
+                        assert_eq!(statements.len(), 1, "block should have one statement");
+                    }
+                    other => panic!("expected Block, got {:?}", other),
+                }
+            }
+            other => panic!("expected FunctionDeclaration, got {:?}", other),
+        }
+    }
+}
+
+#[allow(dead_code)]
 fn skip_group<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>, open: TokenKind, close: TokenKind) {
     let mut depth = 1;
     while depth > 0 {

@@ -31,6 +31,7 @@ pub enum TokenType {
     Else,
     For,
     In,
+    Is, // is (type check operator)
     While,
     Do,
     Return,

@@ -279,6 +279,7 @@ fn map_token_type(kind: TokenKind, lexeme: &str) -> TokenType {
         TokenKind::Else => TokenType::Else,
         TokenKind::For => TokenType::For,
         TokenKind::In => TokenType::In,
+        TokenKind::Is => TokenType::Is,
         TokenKind::While => TokenType::While,
         TokenKind::Do => TokenType::Do,
         TokenKind::Return => TokenType::Return,
