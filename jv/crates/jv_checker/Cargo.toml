@@ -11,7 +11,6 @@ autobenches = false
 thiserror = { workspace = true }
 serde = { workspace = true }
 jv_ast = { workspace = true }
-jv_lexer = { workspace = true }
 jv_parser_frontend = { workspace = true }
 jv_ir = { workspace = true }
 jv_inference = { workspace = true }

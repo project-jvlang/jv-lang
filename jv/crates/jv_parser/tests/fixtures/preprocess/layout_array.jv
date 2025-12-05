@@ -1,7 +1,0 @@
-val numbers = [1 2 3 4]
-
-val summed = sum(
-    1
-    /* keep */
-    2
-)

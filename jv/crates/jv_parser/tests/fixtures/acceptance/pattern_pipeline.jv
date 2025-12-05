@@ -1,7 +1,0 @@
-val stage = when (tokenKind) {
-    "json" -> "stage0-json"
-    "call" -> "stage0-call"
-    else -> "stage1-syntax"
-}
-
-val pipeline = stage + "-complete"

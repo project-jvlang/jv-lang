@@ -1,9 +1,6 @@
 // P0-001: lexer tokens定義・パース - TDD Red Phase
 // Reference: 作業指示-20250830.md:19-20
 
-pub mod pipeline;
-pub mod plugins;
-
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -185,31 +182,11 @@ pub enum StringDelimiterKind {
     SingleQuote,
 }
 
-impl StringDelimiterKind {
-    fn allows_interpolation(self) -> bool {
-        !matches!(self, StringDelimiterKind::SingleQuote)
-    }
-
-    fn normalize_indentation(self) -> bool {
-        matches!(self, StringDelimiterKind::TripleQuote)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StringLiteralMetadata {
     pub delimiter: StringDelimiterKind,
     pub allows_interpolation: bool,
     pub normalize_indentation: bool,
-}
-
-impl StringLiteralMetadata {
-    fn from_kind(kind: StringDelimiterKind) -> Self {
-        Self {
-            delimiter: kind,
-            allows_interpolation: kind.allows_interpolation(),
-            normalize_indentation: kind.normalize_indentation(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -421,50 +398,3 @@ pub enum LexError {
     #[error("Lookahead buffer overflow (requested {requested} bytes)")]
     LookaheadOverflow { requested: usize },
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LayoutMode {
-    Enabled,
-    Disabled,
-}
-
-pub struct Lexer {
-    input: String,
-    layout_mode: LayoutMode,
-}
-
-impl Lexer {
-    pub fn new(input: String) -> Self {
-        Self {
-            input,
-            layout_mode: LayoutMode::Enabled,
-        }
-    }
-
-    pub fn with_layout_mode(input: String, layout_mode: LayoutMode) -> Self {
-        Self { input, layout_mode }
-    }
-
-    pub fn tokenize(&mut self) -> Result<Vec<Token>, LexError> {
-        use crate::pipeline::{
-            CharScanner, Classifier, Emitter, LexerContext, LexerPipeline, Normalizer,
-            PipelineStages, TokenPluginManager,
-        };
-
-        let mut context = LexerContext::with_layout_mode(&self.input, self.layout_mode);
-        let stages = PipelineStages::new(
-            CharScanner::new(),
-            Normalizer::new(),
-            Classifier::new(),
-            Emitter::new(),
-        );
-        let plugins = TokenPluginManager::with_default_plugins();
-        let mut pipeline = LexerPipeline::new(stages, plugins);
-        let mut tokens = Vec::new();
-        pipeline.run(&mut context, &mut tokens)?;
-        Ok(tokens)
-    }
-}
-
-#[cfg(test)]
-mod tests;

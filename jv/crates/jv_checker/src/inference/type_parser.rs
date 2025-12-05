@@ -6,10 +6,9 @@
 
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{TypeError, TypeKind};
-use jv_ast::TypeAnnotation;
+use jv_ast::{Statement, TypeAnnotation};
 use jv_ast::types::{TupleTypeDescriptor, TupleTypeElement};
-use jv_lexer::{LayoutMode, Lexer};
-use jv_type_inference_java::{TypeAnnotationSource, lower_type_annotation};
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 
 /// 型注釈を `TypeKind` に変換する。
 pub fn parse_type_annotation(annotation: &TypeAnnotation) -> Result<TypeKind, TypeError> {
@@ -177,27 +176,38 @@ fn flush_segment(buffer: &mut String, elements: &mut Vec<String>) {
 }
 
 fn lower_tuple_element(tuple_source: &str, segment: &str) -> Result<TypeAnnotation, String> {
-    let mut lexer = Lexer::with_layout_mode(segment.to_string(), LayoutMode::Disabled);
-    let tokens = lexer.tokenize().map_err(|error| {
-        format!("要素 `{segment}` の字句解析に失敗しました (注釈 `{tuple_source}`): {error}")
-    })?;
-
-    if tokens.is_empty() {
+    let trimmed = segment.trim();
+    if trimmed.is_empty() {
         return Err(format!(
             "要素 `{segment}` が空です (元の注釈 `{tuple_source}`)"
         ));
     }
 
-    lower_type_annotation(TypeAnnotationSource::Tokens(&tokens))
-        .map(|lowered| lowered.into_annotation())
-        .map_err(|error| match error.message() {
-            message if message.is_empty() => {
-                format!(
-                    "要素 `{segment}` を型として解釈できませんでした (注釈 `{tuple_source}`)"
-                )
-            }
-            message => format!(
-                "要素 `{segment}` を型として解釈できませんでした (注釈 `{tuple_source}`): {message}",
-            ),
-        })
+    // Parser2Pipeline を使用して型注釈をパースする。
+    // `val _: TYPE = null` という形式でラップしてパースし、型注釈を抽出する。
+    let wrapper = format!("val _: {trimmed} = null");
+    let pipeline = Parser2Pipeline::default();
+
+    let output = pipeline.parse(&wrapper).map_err(|error| {
+        format!(
+            "要素 `{segment}` の解析に失敗しました (注釈 `{tuple_source}`): {error}"
+        )
+    })?;
+
+    let program = output.into_program();
+    let stmt = program.statements.into_iter().next().ok_or_else(|| {
+        format!(
+            "要素 `{segment}` を型として解釈できませんでした (注釈 `{tuple_source}`)"
+        )
+    })?;
+
+    match stmt {
+        Statement::ValDeclaration {
+            type_annotation: Some(ty),
+            ..
+        } => Ok(ty),
+        _ => Err(format!(
+            "要素 `{segment}` を型として解釈できませんでした (注釈 `{tuple_source}`)"
+        )),
+    }
 }
