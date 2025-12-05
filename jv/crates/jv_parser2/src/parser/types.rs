@@ -26,10 +26,15 @@ pub(crate) fn parse_type<'src, 'alloc>(
         }
 
         if parser.consume_if(TokenKind::At) {
-            if let Some((unit_name, span)) = parse_ident(parser) {
+            // Check for bracketed unit: @[unit]
+            let is_bracketed = parser.consume_if(TokenKind::LeftBracket);
+            if let Some((unit_name, span)) = parse_unit_name(parser) {
+                if is_bracketed {
+                    let _ = parser.consume_if(TokenKind::RightBracket);
+                }
                 let unit = UnitSymbol {
                     name: unit_name,
-                    is_bracketed: false,
+                    is_bracketed,
                     has_default_marker: false,
                     span: parser.ast_span(span),
                 };
@@ -201,6 +206,47 @@ fn parse_ident<'src, 'alloc>(
             token.span,
         ));
         None
+    }
+}
+
+/// Parse a unit name, accepting identifiers or special symbols like ℃
+fn parse_unit_name<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<(String, crate::span::Span)> {
+    let token = parser.current();
+
+    // Check for regular identifier first
+    if token.kind == TokenKind::Identifier {
+        let name = parser
+            .lexeme(token.span)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("_id{}", token.span.start));
+        parser.advance();
+        return Some((name, token.span));
+    }
+
+    // Accept any token that's not a structural delimiter as a unit symbol
+    match token.kind {
+        TokenKind::LeftBrace
+        | TokenKind::RightBrace
+        | TokenKind::LeftParen
+        | TokenKind::RightParen
+        | TokenKind::LeftBracket
+        | TokenKind::RightBracket
+        | TokenKind::Comma
+        | TokenKind::Semicolon
+        | TokenKind::Assign
+        | TokenKind::Eof
+        | TokenKind::Newline => None,
+        _ => {
+            // Accept any other token as a unit symbol (handles ℃, etc.)
+            let name = parser
+                .lexeme(token.span)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "_unit".to_string());
+            parser.advance();
+            Some((name, token.span))
+        }
     }
 }
 

@@ -3,8 +3,9 @@
 use super::{Parser, statement::parse_statement};
 use crate::token::TokenKind;
 use jv_ast::json::{JsonEntry, JsonLiteral, JsonValue};
-use jv_ast::expression::{BinaryMetadata, Parameter, TupleContextFlags, TupleFieldMeta, LabeledSpan};
-use jv_ast::types::{BinaryOp, Literal, Span as AstSpan, UnaryOp};
+use jv_ast::expression::{BinaryMetadata, Parameter, StringPart, TupleContextFlags, TupleFieldMeta, LabeledSpan};
+use jv_ast::types::{BinaryOp, Literal, Span as AstSpan, UnaryOp, UnitSymbol};
+use jv_ast::expression::UnitSpacingStyle;
 use jv_ast::{Expression, Pattern, WhenArm};
 use super::types::parse_type;
 use super::CollectedComment;
@@ -18,6 +19,7 @@ fn is_expression_start(kind: TokenKind) -> bool {
             | TokenKind::ImplicitParam
             | TokenKind::Number
             | TokenKind::String
+            | TokenKind::StringStart
             | TokenKind::Character
             | TokenKind::TrueKw
             | TokenKind::FalseKw
@@ -31,6 +33,163 @@ fn is_expression_start(kind: TokenKind) -> bool {
             | TokenKind::When
             | TokenKind::PipeLeft
     )
+}
+
+/// Parse string interpolation: `"text ${expr} more text"`
+/// Token sequence: StringStart, expression tokens, StringMid/StringEnd, ...
+fn parse_string_interpolation<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<Expression> {
+    let start_span = parser.current().span;
+    let mut parts = Vec::new();
+
+    // Process the first text segment (StringStart token includes text before first ${)
+    let start_text = extract_string_content(parser);
+    if !start_text.is_empty() {
+        parts.push(StringPart::Text(start_text));
+    }
+    parser.advance(); // consume StringStart
+
+    loop {
+        // Parse the interpolated expression
+        if let Some(expr) = parse_expression(parser) {
+            parts.push(StringPart::Expression(expr));
+        }
+
+        // Check for StringMid (more interpolations) or StringEnd (done)
+        let tok = parser.current();
+        match tok.kind {
+            TokenKind::StringMid => {
+                let mid_text = extract_string_content(parser);
+                if !mid_text.is_empty() {
+                    parts.push(StringPart::Text(mid_text));
+                }
+                parser.advance(); // consume StringMid, continue to next expression
+            }
+            TokenKind::StringEnd => {
+                let end_text = extract_string_content(parser);
+                if !end_text.is_empty() {
+                    parts.push(StringPart::Text(end_text));
+                }
+                let end_span = tok.span;
+                parser.advance(); // consume StringEnd
+                let span = parser.ast_span(start_span.merge(end_span));
+                return Some(Expression::StringInterpolation { parts, span });
+            }
+            TokenKind::Eof => {
+                // Unterminated string interpolation
+                let span = parser.ast_span(start_span);
+                return Some(Expression::StringInterpolation { parts, span });
+            }
+            _ => {
+                // Unexpected token, try to recover
+                parser.advance();
+            }
+        }
+    }
+}
+
+/// Extract the string content from a StringStart/StringMid/StringEnd token.
+/// These tokens contain the literal text before/between/after interpolations.
+fn extract_string_content<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> String {
+    let token = parser.current();
+    let text = parser.lexeme(token.span).unwrap_or("");
+
+    // The lexer includes quotes and ${, we need to extract just the text content
+    // StringStart: "text${  -> extract "text"
+    // StringMid: }text${  -> extract "text"
+    // StringEnd: }text"  -> extract "text"
+    let mut result = String::new();
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+
+    if len == 0 {
+        return result;
+    }
+
+    // Find start index (skip opening quote or closing brace)
+    let start = match token.kind {
+        TokenKind::StringStart => {
+            if bytes.first() == Some(&b'"') { 1 } else { 0 }
+        }
+        TokenKind::StringMid | TokenKind::StringEnd => {
+            if bytes.first() == Some(&b'}') { 1 } else { 0 }
+        }
+        _ => 0,
+    };
+
+    // Find end index (skip ${ or closing quote)
+    let end = match token.kind {
+        TokenKind::StringStart | TokenKind::StringMid => {
+            // Look for ${ at the end
+            if len >= 2 && bytes[len - 2] == b'$' && bytes[len - 1] == b'{' {
+                len - 2
+            } else {
+                len
+            }
+        }
+        TokenKind::StringEnd => {
+            // Look for closing quote at the end
+            if bytes.last() == Some(&b'"') {
+                len - 1
+            } else {
+                len
+            }
+        }
+        _ => len,
+    };
+
+    if start < end {
+        result = text[start..end].to_string();
+    }
+
+    // Unescape the content
+    unescape_string(&result)
+}
+
+/// Unescape string escape sequences
+fn unescape_string(s: &str) -> String {
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => result.push('\n'),
+                Some('t') => result.push('\t'),
+                Some('r') => result.push('\r'),
+                Some('\\') => result.push('\\'),
+                Some('"') => result.push('"'),
+                Some('u') => {
+                    // Unicode escape: \uXXXX
+                    let mut hex = String::new();
+                    for _ in 0..4 {
+                        if let Some(&c) = chars.peek() {
+                            if c.is_ascii_hexdigit() {
+                                hex.push(chars.next().unwrap());
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                        if let Some(ch) = char::from_u32(code) {
+                            result.push(ch);
+                        }
+                    }
+                }
+                Some(other) => {
+                    result.push('\\');
+                    result.push(other);
+                }
+                None => result.push('\\'),
+            }
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
 }
 
 pub(crate) fn parse_expression<'src, 'alloc>(
@@ -145,6 +304,9 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
                 Literal::String(text),
                 parser.ast_span(token.span),
             ))
+        }
+        TokenKind::StringStart => {
+            parse_string_interpolation(parser)
         }
         TokenKind::TrueKw => {
             parser.advance();
@@ -659,6 +821,51 @@ fn parse_postfix<'src, 'alloc>(
 
             // Not an arrow lambda - don't consume as trailing lambda
             None
+        }
+        TokenKind::At => {
+            // Unit literal syntax: `value @ unit` or `value@[unit]`
+            let at_span = parser.advance().span; // consume @
+
+            // Check for bracketed unit: @[unit]
+            let is_bracketed = parser.consume_if(TokenKind::LeftBracket);
+
+            let ident_token = parser.current();
+            if ident_token.kind != TokenKind::Identifier {
+                return None;
+            }
+            let unit_name = parser
+                .lexeme(ident_token.span)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("_id{}", ident_token.span.start));
+            let unit_span = ident_token.span;
+            parser.advance();
+
+            if is_bracketed {
+                let _ = parser.consume_if(TokenKind::RightBracket);
+            }
+
+            // Determine spacing style (heuristic based on spans)
+            let left_span = span_of_expr(parser, left);
+            let space_before_at = at_span.start > left_span.end;
+            let space_after_at = unit_span.start > at_span.end;
+
+            let combined = left_span.merge(at_span).merge(unit_span);
+            let span = parser.ast_span(combined);
+
+            Some(Expression::UnitLiteral {
+                value: Box::new(left.clone()),
+                unit: UnitSymbol {
+                    name: unit_name,
+                    is_bracketed,
+                    has_default_marker: false,
+                    span: parser.ast_span(unit_span),
+                },
+                spacing: UnitSpacingStyle {
+                    space_before_at,
+                    space_after_at,
+                },
+                span,
+            })
         }
         _ => None,
     }

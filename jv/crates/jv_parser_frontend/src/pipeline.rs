@@ -266,6 +266,7 @@ fn map_token_type(kind: TokenKind, lexeme: &str) -> TokenType {
         TokenKind::Semicolon => TokenType::Semicolon,
         TokenKind::Colon => TokenType::Colon,
         TokenKind::DoubleColon => TokenType::DoubleColon,
+        TokenKind::ColonEqual => TokenType::ColonEqual,
         TokenKind::At => TokenType::At,
         TokenKind::Val => TokenType::Val,
         TokenKind::Var => TokenType::Var,

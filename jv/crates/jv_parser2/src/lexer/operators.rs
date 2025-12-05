@@ -100,11 +100,16 @@ pub(crate) fn lex_operator(lexer: &mut Lexer<'_>) -> Token {
         b',' => TokenKind::Comma,
         b';' => TokenKind::Semicolon,
         b':' => {
-            if matches!(lexer.peek(), Some(b':')) {
-                lexer.advance();
-                TokenKind::DoubleColon
-            } else {
-                TokenKind::Colon
+            match lexer.peek() {
+                Some(b':') => {
+                    lexer.advance();
+                    TokenKind::DoubleColon
+                }
+                Some(b'=') => {
+                    lexer.advance();
+                    TokenKind::ColonEqual
+                }
+                _ => TokenKind::Colon,
             }
         }
         b'(' => TokenKind::LeftParen,

@@ -61,6 +61,7 @@ pub enum TokenKind {
     Semicolon,
     Colon,
     DoubleColon,
+    ColonEqual, // :=
     At,
 
     // キーワード（ここから連続で並べること）

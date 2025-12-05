@@ -10,8 +10,10 @@ use crate::{diagnostics::Diagnostic, token::TokenKind};
 use jv_ast::binding_pattern::BindingPatternKind;
 use jv_ast::statement::{
     ForInStatement, LoopBinding, LoopStrategy, NumericRangeLoop, Program, Statement, TestDataset,
-    TestDatasetRow, TestDeclaration, TestParameter, ValBindingOrigin,
+    TestDatasetRow, TestDeclaration, TestParameter, UnitConversionBlock, UnitConversionKind,
+    UnitDependency, UnitRelation, UnitTypeDefinition, UnitTypeMember, ValBindingOrigin,
 };
+use jv_ast::types::UnitSymbol;
 use jv_ast::types::{BinaryOp, Literal, Modifiers};
 use jv_ast::expression::{Parameter, ParameterModifiers};
 use jv_ast::{Expression, Span as AstSpan};
@@ -182,6 +184,7 @@ pub(crate) fn parse_statement<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -
             Some(Statement::Continue(span))
         }
         TokenKind::Test => parse_test(parser),
+        TokenKind::At => parse_unit_type_definition(parser),
         _ => parse_expression_statement(parser),
     }
 }
@@ -1086,5 +1089,177 @@ fn skip_group<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>, open: TokenKind, 
         } else if tok.kind == close {
             depth -= 1;
         }
+    }
+}
+
+/// Parse unit type definition: `@ Category(BaseType) symbol! { ... }`
+fn parse_unit_type_definition<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<Statement> {
+    let start_span = parser.advance().span; // consume '@'
+
+    // Parse category name (identifier)
+    let (category, _category_span) = parse_identifier(parser)?;
+
+    // Parse base type in parentheses: (Double)
+    if !parser.consume_if(TokenKind::LeftParen) {
+        parser.push_diagnostic(Diagnostic::new("expected '(' after category name", start_span));
+        return None;
+    }
+    let base_type = parse_type(parser).unwrap_or_else(|| jv_ast::types::TypeAnnotation::Simple("Object".into()));
+    let _ = parser.consume_if(TokenKind::RightParen);
+
+    // Parse unit symbol: m, m!, m? etc.
+    // Unit symbols can be non-identifier characters like ℃, so we accept any token
+    let (unit_name, unit_span) = parse_unit_symbol_name(parser)?;
+    let has_default_marker = parser.consume_if(TokenKind::Not);
+    let is_bracketed = false; // Unit definitions don't use bracketed syntax
+
+    let unit = UnitSymbol {
+        name: unit_name,
+        is_bracketed,
+        has_default_marker,
+        span: parser.ast_span(unit_span),
+    };
+
+    // Parse body: { ... }
+    let mut members = Vec::new();
+    if parser.consume_if(TokenKind::LeftBrace) {
+        while parser.current().kind != TokenKind::RightBrace && parser.current().kind != TokenKind::Eof
+        {
+            if let Some(member) = parse_unit_type_member(parser) {
+                members.push(member);
+            } else {
+                // Skip unknown tokens
+                parser.advance();
+            }
+        }
+        let _ = parser.consume_if(TokenKind::RightBrace);
+    }
+
+    let end_span = parser.current().span;
+    let span = parser.ast_span(start_span.merge(end_span));
+
+    Some(Statement::UnitTypeDefinition(UnitTypeDefinition {
+        category,
+        base_type,
+        name: unit,
+        members,
+        span,
+    }))
+}
+
+/// Parse a unit symbol name, accepting identifiers or special symbols like ℃
+fn parse_unit_symbol_name<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<(String, crate::span::Span)> {
+    let token = parser.current();
+
+    // Check for regular identifier first
+    if token.kind == TokenKind::Identifier {
+        let name = parser
+            .lexeme(token.span)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("_id{}", token.span.start));
+        parser.advance();
+        return Some((name, token.span));
+    }
+
+    // Accept any token that's not a structural delimiter as a unit symbol
+    match token.kind {
+        TokenKind::LeftBrace
+        | TokenKind::RightBrace
+        | TokenKind::LeftParen
+        | TokenKind::RightParen
+        | TokenKind::LeftBracket
+        | TokenKind::RightBracket
+        | TokenKind::Comma
+        | TokenKind::Semicolon
+        | TokenKind::Eof
+        | TokenKind::Newline => None,
+        _ => {
+            // Accept any other token as a unit symbol (handles ℃, etc.)
+            let name = parser
+                .lexeme(token.span)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "_unit".to_string());
+            parser.advance();
+            Some((name, token.span))
+        }
+    }
+}
+
+/// Parse a member inside unit type definition body
+fn parse_unit_type_member<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<UnitTypeMember> {
+    let token = parser.current();
+
+    match token.kind {
+        // @Conversion { } or @ReverseConversion { }
+        TokenKind::At => {
+            let start_span = parser.advance().span; // consume '@'
+            let (name, _name_span) = parse_identifier(parser)?;
+
+            let kind = match name.as_str() {
+                "Conversion" => UnitConversionKind::Conversion,
+                "ReverseConversion" => UnitConversionKind::ReverseConversion,
+                _ => return None, // Unknown block type
+            };
+
+            // Parse optional body
+            let mut body = Vec::new();
+            if parser.consume_if(TokenKind::LeftBrace) {
+                while parser.current().kind != TokenKind::RightBrace
+                    && parser.current().kind != TokenKind::Eof
+                {
+                    if let Some(stmt) = parse_statement(parser) {
+                        body.push(stmt);
+                    } else {
+                        parser.advance();
+                    }
+                }
+                let _ = parser.consume_if(TokenKind::RightBrace);
+            }
+
+            let end_span = parser.current().span;
+            Some(UnitTypeMember::Conversion(UnitConversionBlock {
+                kind,
+                body,
+                span: parser.ast_span(start_span.merge(end_span)),
+            }))
+        }
+        // Identifier followed by := or -> means UnitDependency
+        TokenKind::Identifier => {
+            let (name, name_span) = parse_identifier(parser)?;
+
+            // Check for := (definition assignment)
+            if parser.consume_if(TokenKind::ColonEqual) {
+                let value = parse_expression(parser)?;
+                let end_span = span_of_expr(parser, &value);
+                return Some(UnitTypeMember::Dependency(UnitDependency {
+                    name,
+                    relation: UnitRelation::DefinitionAssign,
+                    value: Some(value),
+                    target: None,
+                    span: parser.ast_span(name_span.merge(end_span)),
+                }));
+            }
+
+            // Check for -> (conversion arrow reference)
+            if parser.consume_if(TokenKind::Arrow) {
+                let (ref_name, ref_span) = parse_identifier(parser)?;
+                return Some(UnitTypeMember::Dependency(UnitDependency {
+                    name,
+                    relation: UnitRelation::ConversionArrow,
+                    value: None,
+                    target: Some(ref_name),
+                    span: parser.ast_span(name_span.merge(ref_span)),
+                }));
+            }
+
+            None
+        }
+        _ => None,
     }
 }
