@@ -37,8 +37,7 @@ use jv_inference::{
 };
 use jv_ir::types::{IrImport, IrImportDetail};
 use jv_ir::{TransformContext, transform_program_with_context};
-use jv_lexer::{Token, TokenMetadata, TokenType};
-use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
+use jv_parser_frontend::{Parser2Pipeline, ParserPipeline, Token, TokenMetadata, TokenType};
 use serde::{Deserialize, Serialize};
 use services::completion::logging::{log_block_snippet_completions, manifest_logging_completions};
 use services::diagnostics::logging::collect_logging_diagnostics;

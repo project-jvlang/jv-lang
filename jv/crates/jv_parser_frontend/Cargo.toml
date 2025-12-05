@@ -5,10 +5,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-jv_lexer.workspace = true
 jv_ast.workspace = true
 jv_parser2 = { path = "../jv_parser2" }
 thiserror.workspace = true
+serde.workspace = true
 
 [lib]
 crate-type = ["rlib"]

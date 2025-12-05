@@ -1,5 +1,6 @@
-// P0-001: lexer tokens定義・パース - TDD Red Phase
-// Reference: 作業指示-20250830.md:19-20
+//! Token type definitions for jv language.
+//!
+//! This module provides the core token types used throughout the parser and related tooling.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

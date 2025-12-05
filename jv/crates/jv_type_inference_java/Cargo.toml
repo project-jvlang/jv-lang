@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 thiserror = { workspace = true }
 jv_ast = { path = "../jv_ast" }
-jv_lexer = { path = "../jv_lexer" }
+jv_parser_frontend = { path = "../jv_parser_frontend" }

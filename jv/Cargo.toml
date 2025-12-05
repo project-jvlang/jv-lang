@@ -2,7 +2,6 @@
 resolver = "2"
 members = [
     "crates/jv_support",
-    "crates/jv_lexer",
     "crates/jv_parser_frontend",
     "crates/jv_parser2",
     "crates/jv_dsl_features",
@@ -62,7 +61,6 @@ indexmap = { version = "2.2", features = ["serde"] }
 semver = { version = "1.0", features = ["serde"] }
 
 # Internal crates
-jv_lexer = { path = "crates/jv_lexer" }
 jv_parser_frontend = { path = "crates/jv_parser_frontend" }
 jv_parser2 = { path = "crates/jv_parser2" }
 jv_dsl_api = { path = "crates/jv_dsl_api" }

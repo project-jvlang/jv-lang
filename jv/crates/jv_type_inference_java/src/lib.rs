@@ -6,7 +6,7 @@
 //! 型情報を取得できる。
 
 use jv_ast::{types::UnitSymbol, Span, TypeAnnotation};
-use jv_lexer::{Token, TokenType};
+use jv_parser_frontend::{Token, TokenType};
 use std::borrow::Cow;
 use thiserror::Error;
 
@@ -973,21 +973,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn lower_tuple_type_annotation_from_lexer() {
-        use jv_lexer::Lexer;
-        let mut lexer = Lexer::new("(Int String)".to_string());
-        let mut tokens = lexer.tokenize().expect("lexing should succeed");
-        if let Some(last) = tokens.last() {
-            if matches!(last.token_type, TokenType::Eof) {
-                tokens.pop();
-            }
-        }
-        let lowered =
-            lower_type_annotation_from_tokens(&tokens).expect("should lower tuple annotation");
-        assert_eq!(
-            lowered.annotation(),
-            &TypeAnnotation::Simple("(Int String)".into())
-        );
-    }
 }

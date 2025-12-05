@@ -1,5 +1,6 @@
 use jv_ast::{Program, Span, Statement};
-use jv_lexer::Token;
+
+use crate::tokens::Token;
 
 use crate::legacy_diagnostics::{PreprocessDiagnostic, SemanticsDiagnostic};
 

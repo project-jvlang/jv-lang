@@ -1,9 +1,12 @@
 use crate::{
     formatter::{DiagnosticContext, DiagnosticFormatter, DiagnosticSeverity, ParserDiagnosticView},
+    tokens::{
+        ExplicitSeparatorLocation, FieldNameLabelToken, LayoutCommaMetadata, LayoutSequenceKind,
+        LexError, Token, TokenMetadata, TokenTrivia, TokenType,
+    },
     views::{FrontendDiagnostics, FrontendOutput},
 };
 use jv_ast::{Program, Span};
-use jv_lexer::{FieldNameLabelToken, LexError, Token, TokenMetadata, TokenTrivia, TokenType};
 use jv_parser2::{
     Arena, Lexer as Parser2Lexer, Parser as Parser2, Source as Parser2Source, TokenKind,
     span::{compute_line_starts, offset_to_location},
@@ -318,9 +321,9 @@ fn build_metadata(kind: TokenKind, lexeme: &str, line: usize, column: usize) -> 
             raw: lexeme.to_string(),
             pattern: lexeme.trim_matches('/').to_string(),
         }],
-        TokenKind::LayoutComma => vec![TokenMetadata::LayoutComma(jv_lexer::LayoutCommaMetadata {
-            sequence: jv_lexer::LayoutSequenceKind::Array,
-            explicit_separator: Some(jv_lexer::ExplicitSeparatorLocation { line, column }),
+        TokenKind::LayoutComma => vec![TokenMetadata::LayoutComma(LayoutCommaMetadata {
+            sequence: LayoutSequenceKind::Array,
+            explicit_separator: Some(ExplicitSeparatorLocation { line, column }),
         })],
         _ => Vec::new(),
     }
