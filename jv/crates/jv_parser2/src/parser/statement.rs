@@ -253,6 +253,11 @@ fn parse_fun<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statemen
         None
     };
 
+    // Skip where clause if present: `where T : int, T : char`
+    if parser.current().kind == TokenKind::Where {
+        skip_where_clause(parser);
+    }
+
     let _ = parser.consume_if(TokenKind::Assign);
 
     let body = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, fn_span));
@@ -333,6 +338,22 @@ fn skip_type_bound<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) {
     }
 }
 
+/// Skip where clause: `where T : int, T : char, T : short`
+fn skip_where_clause<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) {
+    parser.advance(); // consume 'where'
+
+    // Skip until we see '{' or '=' which starts the body
+    loop {
+        let tok = parser.current();
+        match tok.kind {
+            TokenKind::LeftBrace | TokenKind::Assign | TokenKind::Eof => break,
+            _ => {
+                parser.advance();
+            }
+        }
+    }
+}
+
 /// Parse function name, handling receiver syntax: Type<T>.methodName
 fn parse_function_name<'src, 'alloc>(
     parser: &mut Parser<'src, 'alloc>,
@@ -383,7 +404,7 @@ fn parse_function_name<'src, 'alloc>(
     Some((name, start_span))
 }
 
-/// Parse function parameters: `(name: Type = default, ...)`
+/// Parse function parameters: `(name: Type = default, ...)` or `(val name: Type, ...)`
 fn parse_parameters<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Vec<Parameter> {
     let mut parameters = Vec::new();
 
@@ -395,6 +416,9 @@ fn parse_parameters<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Vec<Para
 
     loop {
         let param_start = parser.current().span;
+
+        // Skip optional val/var modifier (for data class parameters)
+        let _ = parser.consume_if(TokenKind::Val) || parser.consume_if(TokenKind::Var);
 
         // Parse parameter name
         let (name, name_span) = match parse_identifier(parser) {
@@ -501,16 +525,45 @@ fn parse_class<'src, 'alloc>(
     }
 }
 
+/// Parse `data ClassName(params)` without a body block
 fn parse_class_bodyless<'src, 'alloc>(
-    _parser: &mut Parser<'src, 'alloc>,
+    parser: &mut Parser<'src, 'alloc>,
     is_data: bool,
 ) -> Option<Statement> {
-    let span = AstSpan::default();
+    // Parse class name
+    let name_token = parser.current();
+    let name = if name_token.kind == TokenKind::Identifier {
+        parser
+            .lexeme(name_token.span)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("_Class{}", name_token.span.start))
+    } else {
+        parser.push_diagnostic(Diagnostic::new("class name expected", name_token.span));
+        return None;
+    };
+    let name_span = name_token.span;
+    parser.advance();
+
+    // Parse optional type parameters: <T, R>
+    let type_parameters = if parser.consume_if(TokenKind::Less) {
+        parse_type_parameters(parser)
+    } else {
+        Vec::new()
+    };
+
+    // Parse constructor parameters: (val name: Type, ...)
+    let parameters = if parser.consume_if(TokenKind::LeftParen) {
+        parse_parameters(parser)
+    } else {
+        Vec::new()
+    };
+
+    let span = parser.ast_span(name_span);
     if is_data {
         Some(Statement::DataClassDeclaration {
-            name: String::new(),
-            parameters: Vec::new(),
-            type_parameters: Vec::new(),
+            name,
+            parameters,
+            type_parameters,
             generic_signature: None,
             is_mutable: false,
             modifiers: Modifiers::default(),
@@ -518,8 +571,8 @@ fn parse_class_bodyless<'src, 'alloc>(
         })
     } else {
         Some(Statement::ClassDeclaration {
-            name: String::new(),
-            type_parameters: Vec::new(),
+            name,
+            type_parameters,
             generic_signature: None,
             superclass: None,
             interfaces: Vec::new(),
@@ -626,6 +679,11 @@ fn parse_throw<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statem
 fn parse_expression_statement<'src, 'alloc>(
     parser: &mut Parser<'src, 'alloc>,
 ) -> Option<Statement> {
+    // Try typed assignment first: `identifier: Type = value`
+    if let Some(typed_assignment) = try_parse_typed_assignment(parser) {
+        return Some(typed_assignment);
+    }
+
     if let Some(assignment) = parse_assignment_statement(parser) {
         return Some(assignment);
     }
@@ -640,6 +698,58 @@ fn parse_expression_statement<'src, 'alloc>(
     Some(Statement::Expression {
         expr,
         span: AstSpan::default(),
+    })
+}
+
+/// Try to parse `identifier: Type = value` as an implicit val declaration.
+/// Returns None if the pattern doesn't match.
+fn try_parse_typed_assignment<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<Statement> {
+    // Check pattern: Identifier Colon ... Assign
+    if parser.current().kind != TokenKind::Identifier {
+        return None;
+    }
+    if parser.peek_ahead(1).kind != TokenKind::Colon {
+        return None;
+    }
+
+    let checkpoint = parser.checkpoint();
+
+    // Parse identifier
+    let name_token = parser.current();
+    let name = parser
+        .lexeme(name_token.span)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("_id{}", name_token.span.start));
+    let name_span = name_token.span;
+    parser.advance(); // consume identifier
+
+    // Consume ':'
+    parser.advance();
+
+    // Parse type
+    let type_annotation = parse_type(parser);
+
+    // Check for '='
+    if !parser.consume_if(TokenKind::Assign) {
+        // Not a typed assignment, rewind
+        parser.rewind(checkpoint);
+        return None;
+    }
+
+    // Parse value
+    let initializer = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, name_span));
+
+    // Use ImplicitTyped since we have a type annotation
+    Some(Statement::ValDeclaration {
+        name,
+        binding: None,
+        type_annotation,
+        initializer,
+        modifiers: Modifiers::default(),
+        origin: ValBindingOrigin::ImplicitTyped,
+        span: parser.ast_span(name_span),
     })
 }
 
