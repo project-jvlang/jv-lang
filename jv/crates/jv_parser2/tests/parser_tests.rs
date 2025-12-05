@@ -1,4 +1,5 @@
 use jv_parser2::{Arena, Parser, Source, lexer::Lexer, parser::incremental::IncrementalCache};
+use jv_ast::Statement;
 
 #[test]
 fn parse_smoke_empty_program() {
@@ -67,5 +68,32 @@ fn expression_spans_respect_newlines() {
             },
         },
         other => panic!("expected val declaration, got {:?}", other),
+    }
+}
+
+#[test]
+fn parses_package_with_function() {
+    let code = r#"package org.jv.test
+
+fun main() {
+    println("test")
+}
+"#;
+    let source = Source::from_str(code);
+    let lexer = Lexer::new(source);
+    let arena = Arena::new();
+    let mut parser = Parser::new(lexer, &arena);
+    let result = parser.parse();
+
+    assert!(result.diagnostics.is_empty(), "diagnostics: {:?}", result.diagnostics);
+    let prog = result.ast.expect("should parse").to_owned();
+    assert_eq!(prog.package.as_deref(), Some("org.jv.test"), "package should be parsed");
+    assert_eq!(prog.statements.len(), 1, "should have one function statement");
+
+    match &prog.statements[0] {
+        Statement::FunctionDeclaration { name, .. } => {
+            assert_eq!(name, "main", "function name should be main");
+        }
+        other => panic!("expected FunctionDeclaration, got {:?}", other),
     }
 }

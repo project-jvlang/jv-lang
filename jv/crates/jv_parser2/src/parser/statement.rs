@@ -18,6 +18,22 @@ use jv_ast::{Expression, Span as AstSpan};
 
 /// プログラム全体をパースする。
 pub(crate) fn parse_program<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Program> {
+    // Parse optional package declaration
+    let package = if parser.current().kind == TokenKind::Package {
+        parse_package(parser)
+    } else {
+        None
+    };
+
+    // Parse import statements
+    let mut imports = Vec::new();
+    while parser.current().kind == TokenKind::Import {
+        if let Some(import) = parse_import(parser) {
+            imports.push(import);
+        }
+    }
+
+    // Parse remaining statements
     let mut statements = Vec::new();
     while parser.current().kind != TokenKind::Eof {
         match parse_statement(parser) {
@@ -34,10 +50,101 @@ pub(crate) fn parse_program<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> 
     }
 
     Some(Program {
-        package: None,
-        imports: Vec::new(),
+        package,
+        imports,
         statements,
         span: AstSpan::default(),
+    })
+}
+
+/// Parse package declaration: `package com.example.app`
+fn parse_package<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<String> {
+    let start_span = parser.advance().span; // consume 'package'
+
+    // Parse package path: com.example.app
+    // Note: keywords can be part of package names (e.g., org.jv.test)
+    let mut path = String::new();
+    loop {
+        let token = parser.current();
+        // Accept identifiers and keywords as package path parts
+        if token.kind == TokenKind::Identifier || token.kind.is_keyword() {
+            if let Some(text) = parser.lexeme(token.span) {
+                if !path.is_empty() {
+                    path.push('.');
+                }
+                path.push_str(text);
+            }
+            parser.advance();
+        } else {
+            break;
+        }
+
+        // Check for dot separator
+        if parser.current().kind == TokenKind::Dot {
+            parser.advance();
+        } else {
+            break;
+        }
+    }
+
+    if path.is_empty() {
+        parser.push_diagnostic(Diagnostic::new("package name expected", start_span));
+        return None;
+    }
+
+    Some(path)
+}
+
+/// Parse import statement: `import java.util.*` or `import java.util.List`
+fn parse_import<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statement> {
+    let start_span = parser.advance().span; // consume 'import'
+
+    // Parse import path: java.util.List or java.util.*
+    // Note: keywords can be part of import paths
+    let mut path = String::new();
+    let mut is_wildcard = false;
+
+    loop {
+        let token = parser.current();
+        // Accept identifiers and keywords as import path parts
+        if token.kind == TokenKind::Identifier || token.kind.is_keyword() {
+            if let Some(text) = parser.lexeme(token.span) {
+                if !path.is_empty() {
+                    path.push('.');
+                }
+                path.push_str(text);
+            }
+            parser.advance();
+        } else if token.kind == TokenKind::Multiply {
+            if !path.is_empty() {
+                path.push('.');
+            }
+            path.push('*');
+            is_wildcard = true;
+            parser.advance();
+            break;
+        } else {
+            break;
+        }
+
+        // Check for dot separator
+        if parser.current().kind == TokenKind::Dot {
+            parser.advance();
+        } else {
+            break;
+        }
+    }
+
+    if path.is_empty() {
+        parser.push_diagnostic(Diagnostic::new("import path expected", start_span));
+        return None;
+    }
+
+    Some(Statement::Import {
+        path,
+        alias: None,
+        is_wildcard,
+        span: parser.ast_span(start_span),
     })
 }
 
