@@ -9,11 +9,10 @@ use super::{
 use crate::{diagnostics::Diagnostic, token::TokenKind};
 use jv_ast::binding_pattern::BindingPatternKind;
 use jv_ast::statement::{
-    ForInStatement, LoopBinding, LoopStrategy, Program, Statement, TestDataset, TestDatasetRow,
-    TestDeclaration, TestParameter, ValBindingOrigin,
+    ForInStatement, LoopBinding, LoopStrategy, NumericRangeLoop, Program, Statement, TestDataset,
+    TestDatasetRow, TestDeclaration, TestParameter, ValBindingOrigin,
 };
-use jv_ast::types::Modifiers;
-use jv_ast::types::Literal;
+use jv_ast::types::{BinaryOp, Literal, Modifiers};
 use jv_ast::{Expression, Span as AstSpan};
 
 /// プログラム全体をパースする。
@@ -218,6 +217,11 @@ fn parse_class_bodyless<'src, 'alloc>(
 
 fn parse_for<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statement> {
     let for_span = parser.advance().span;
+
+    // jv syntax: for (binding in iterable) body
+    // Consume optional opening parenthesis
+    let has_paren = parser.consume_if(TokenKind::LeftParen);
+
     let (name, name_span) = parse_identifier(parser)?;
 
     let binding = LoopBinding {
@@ -232,16 +236,53 @@ fn parse_for<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statemen
     }
 
     let iterable = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, for_span));
+
+    // Consume closing parenthesis if we had an opening one
+    if has_paren && !parser.consume_if(TokenKind::RightParen) {
+        parser.push_diagnostic(Diagnostic::new("\")\" expected in for-in loop", for_span));
+    }
+
     let body = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, for_span));
+
+    // Detect numeric range expressions and set appropriate strategy
+    let strategy = detect_loop_strategy(&iterable);
 
     let span = for_span.merge(name_span);
     Some(Statement::ForIn(ForInStatement {
         binding,
         iterable,
-        strategy: LoopStrategy::Unknown,
+        strategy,
         body: Box::new(body),
         span: parser.ast_span(span),
     }))
+}
+
+/// Detect if the iterable expression is a numeric range and return appropriate strategy.
+fn detect_loop_strategy(iterable: &Expression) -> LoopStrategy {
+    match iterable {
+        Expression::Binary {
+            left,
+            op,
+            right,
+            span,
+            ..
+        } => match op {
+            BinaryOp::RangeExclusive => LoopStrategy::NumericRange(NumericRangeLoop {
+                start: (**left).clone(),
+                end: (**right).clone(),
+                inclusive: false,
+                span: span.clone(),
+            }),
+            BinaryOp::RangeInclusive => LoopStrategy::NumericRange(NumericRangeLoop {
+                start: (**left).clone(),
+                end: (**right).clone(),
+                inclusive: true,
+                span: span.clone(),
+            }),
+            _ => LoopStrategy::Unknown,
+        },
+        _ => LoopStrategy::Unknown,
+    }
 }
 
 fn parse_return<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statement> {
