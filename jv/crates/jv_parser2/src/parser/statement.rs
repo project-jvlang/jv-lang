@@ -119,8 +119,17 @@ fn parse_val<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>, is_val: bool) -> O
 }
 
 fn parse_fun<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statement> {
-    let fn_span = parser.advance().span;
-    let (name, name_span) = parse_identifier(parser)?;
+    let fn_span = parser.advance().span; // consume 'fun'
+
+    // Parse optional type parameters: fun <T, R> ...
+    let type_parameters = if parser.consume_if(TokenKind::Less) {
+        parse_type_parameters(parser)
+    } else {
+        Vec::new()
+    };
+
+    // Parse function name (possibly with receiver: Type.method)
+    let (name, name_span) = parse_function_name(parser)?;
 
     // Parse function parameters
     let parameters = if parser.consume_if(TokenKind::LeftParen) {
@@ -144,7 +153,7 @@ fn parse_fun<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statemen
     let span = fn_span.merge(name_span);
     Some(Statement::FunctionDeclaration {
         name,
-        type_parameters: Vec::new(),
+        type_parameters,
         generic_signature: None,
         where_clause: None,
         parameters,
@@ -154,6 +163,117 @@ fn parse_fun<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statemen
         modifiers: Modifiers::default(),
         span: parser.ast_span(span),
     })
+}
+
+/// Parse type parameters: <T, R : Bound, ...>
+fn parse_type_parameters<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Vec<String> {
+    let mut params = Vec::new();
+
+    loop {
+        let token = parser.current();
+        if token.kind == TokenKind::Identifier {
+            let name = parser
+                .lexeme(token.span)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("_T{}", params.len()));
+            parser.advance();
+            params.push(name);
+
+            // Skip type bound: `: Bound<T>`
+            if parser.consume_if(TokenKind::Colon) {
+                skip_type_bound(parser);
+            }
+        }
+
+        if parser.consume_if(TokenKind::Comma) {
+            continue;
+        }
+        if parser.consume_if(TokenKind::Greater) {
+            break;
+        }
+        if parser.current().kind == TokenKind::Eof {
+            break;
+        }
+        // Skip unexpected tokens
+        parser.advance();
+    }
+
+    params
+}
+
+/// Skip a type bound like `Comparable<R>` in `<R : Comparable<R>>`
+fn skip_type_bound<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) {
+    // Consume the bound type name
+    if parser.current().kind == TokenKind::Identifier {
+        parser.advance();
+    }
+
+    // Handle generic bounds: Comparable<R>
+    if parser.consume_if(TokenKind::Less) {
+        let mut depth = 1;
+        while depth > 0 && parser.current().kind != TokenKind::Eof {
+            let tok = parser.current();
+            if tok.kind == TokenKind::Less {
+                depth += 1;
+            } else if tok.kind == TokenKind::Greater {
+                depth -= 1;
+            }
+            parser.advance();
+            if depth == 0 {
+                break;
+            }
+        }
+    }
+}
+
+/// Parse function name, handling receiver syntax: Type<T>.methodName
+fn parse_function_name<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<(String, crate::span::Span)> {
+    let token = parser.current();
+    if token.kind != TokenKind::Identifier {
+        parser.push_diagnostic(Diagnostic::new("function name expected", token.span));
+        return None;
+    }
+
+    let mut name = parser
+        .lexeme(token.span)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("_fn{}", token.span.start));
+    let start_span = token.span;
+    parser.advance();
+
+    // Handle generic type: Type<T>
+    if parser.consume_if(TokenKind::Less) {
+        name.push('<');
+        let mut depth = 1;
+        while depth > 0 && parser.current().kind != TokenKind::Eof {
+            let tok = parser.current();
+            if tok.kind == TokenKind::Less {
+                depth += 1;
+            } else if tok.kind == TokenKind::Greater {
+                depth -= 1;
+            }
+            if let Some(text) = parser.lexeme(tok.span) {
+                name.push_str(text);
+            }
+            parser.advance();
+        }
+    }
+
+    // Handle receiver: .methodName
+    if parser.consume_if(TokenKind::Dot) {
+        name.push('.');
+        let method_token = parser.current();
+        if method_token.kind == TokenKind::Identifier {
+            if let Some(method_name) = parser.lexeme(method_token.span) {
+                name.push_str(method_name);
+            }
+            parser.advance();
+        }
+    }
+
+    Some((name, start_span))
 }
 
 /// Parse function parameters: `(name: Type = default, ...)`

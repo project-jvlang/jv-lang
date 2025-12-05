@@ -596,13 +596,15 @@ fn parse_postfix<'src, 'alloc>(
                 close_span = open;
             }
 
-            // Emit JV2102 diagnostic if commas were used in function call arguments
+            // Emit JV2102 diagnostic if commas were used in function call arguments (warning only)
             if has_comma {
                 let diagnostic_span = first_comma_span.unwrap_or(open);
-                parser.push_diagnostic(crate::diagnostics::Diagnostic::new(
-                    "JV2102: 関数呼び出しでカンマ区切りはサポートされません。位置引数は空白または改行で区切ってください。\nJV2102: Function calls do not support comma separators. Separate positional arguments with whitespace or newlines.",
-                    diagnostic_span,
-                ));
+                parser.push_diagnostic(
+                    crate::diagnostics::Diagnostic::new(
+                        "JV2102: 関数呼び出しでカンマ区切りはサポートされません。位置引数は空白または改行で区切ってください。\nJV2102: Function calls do not support comma separators. Separate positional arguments with whitespace or newlines.",
+                        diagnostic_span,
+                    ).with_kind(crate::diagnostics::DiagnosticKind::Warning)
+                );
             }
 
             let combined = span_of_expr(parser, left)

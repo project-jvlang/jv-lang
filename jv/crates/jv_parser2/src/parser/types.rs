@@ -55,9 +55,9 @@ pub(crate) fn parse_type<'src, 'alloc>(
 }
 
 fn parse_primary_type<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<TypeAnnotation> {
-    // タプル型: (Type1 Type2 ...) または (Type1, Type2, ...)
+    // 関数型またはタプル型: (Type1, Type2) -> ReturnType または (Type1 Type2)
     if parser.current().kind == TokenKind::LeftParen {
-        return parse_tuple_type(parser);
+        return parse_paren_type(parser);
     }
 
     let (name, name_span) = parse_ident(parser)?;
@@ -95,91 +95,93 @@ fn parse_primary_type<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option
     Some(ty)
 }
 
-/// タプル型をパース: (Type1 Type2) または (Type1, Type2)
-/// TypeAnnotation::Simple("(Type1 Type2)") として返す
-fn parse_tuple_type<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<TypeAnnotation> {
-    let start_span = parser.advance().span; // consume '('
-    let mut elements = Vec::new();
-    let mut depth = 1;
+/// 括弧で始まる型をパース: 関数型 `(T) -> R` またはタプル型 `(T U)`
+fn parse_paren_type<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<TypeAnnotation> {
+    let _start_span = parser.advance().span; // consume '('
 
-    // 括弧内の各型要素を収集
-    while depth > 0 && parser.current().kind != TokenKind::Eof {
-        match parser.current().kind {
-            TokenKind::LeftParen => {
-                depth += 1;
-                // ネストしたタプルの場合は再帰的にパース
-                if let Some(nested) = parse_tuple_type(parser) {
-                    if let TypeAnnotation::Simple(s) = nested {
-                        elements.push(s);
-                    }
-                }
-            }
-            TokenKind::RightParen => {
-                depth -= 1;
-                if depth == 0 {
-                    parser.advance(); // consume ')'
-                    break;
-                }
-            }
-            TokenKind::Comma => {
-                // カンマは無視（スペース区切りと同じ扱い）
-                parser.advance();
-            }
-            TokenKind::Identifier => {
-                // 型名を取得
-                if let Some((type_name, _)) = parse_ident(parser) {
-                    // ジェネリクス引数をチェック
-                    let mut full_type = type_name;
-                    if parser.current().kind == TokenKind::Less {
-                        full_type.push('<');
-                        parser.advance();
-                        let mut generic_depth = 1;
-                        while generic_depth > 0 && parser.current().kind != TokenKind::Eof {
-                            let tok = parser.current();
-                            if tok.kind == TokenKind::Less {
-                                generic_depth += 1;
-                            } else if tok.kind == TokenKind::Greater {
-                                generic_depth -= 1;
-                            }
-                            if let Some(text) = parser.lexeme(tok.span) {
-                                full_type.push_str(text);
-                            }
-                            parser.advance();
-                            if generic_depth > 0 && tok.kind == TokenKind::Comma {
-                                full_type.push(' ');
-                            }
-                        }
-                    }
-                    // 配列マーカー[]
-                    while parser.current().kind == TokenKind::LeftBracket {
-                        parser.advance();
-                        if parser.current().kind == TokenKind::RightBracket {
-                            parser.advance();
-                        }
-                        full_type.push_str("[]");
-                    }
-                    // Nullable ?
-                    while parser.current().kind == TokenKind::Question {
-                        parser.advance();
-                        full_type.push('?');
-                    }
-                    elements.push(full_type);
-                }
-            }
-            _ => {
-                // 予期しないトークンはスキップ
-                parser.advance();
-            }
+    // 空の括弧 () の場合
+    if parser.current().kind == TokenKind::RightParen {
+        parser.advance(); // consume ')'
+        // () -> R は引数なし関数型
+        if parser.current().kind == TokenKind::Arrow {
+            parser.advance(); // consume '->'
+            let return_type = parse_type(parser)?;
+            return Some(TypeAnnotation::Function {
+                params: Vec::new(),
+                return_type: Box::new(return_type),
+            });
+        }
+        // 単なる () は空タプル
+        return Some(TypeAnnotation::Simple("()".to_string()));
+    }
+
+    // 括弧内の型を収集
+    let mut param_types = Vec::new();
+    loop {
+        // カンマをスキップ
+        let _ = parser.consume_if(TokenKind::Comma);
+
+        if parser.current().kind == TokenKind::RightParen {
+            break;
+        }
+        if parser.current().kind == TokenKind::Eof {
+            break;
+        }
+
+        // 内部の型をパース
+        if let Some(inner_ty) = parse_type(parser) {
+            param_types.push(inner_ty);
+        } else {
+            // パース失敗時はスキップ
+            parser.advance();
         }
     }
 
-    if elements.is_empty() {
+    // ')' を消費
+    let _ = parser.consume_if(TokenKind::RightParen);
+
+    // '->' が続くなら関数型
+    if parser.current().kind == TokenKind::Arrow {
+        parser.advance(); // consume '->'
+        let return_type = parse_type(parser).unwrap_or_else(|| TypeAnnotation::Simple("_".into()));
+        return Some(TypeAnnotation::Function {
+            params: param_types,
+            return_type: Box::new(return_type),
+        });
+    }
+
+    // そうでなければタプル型（文字列形式で返す）
+    if param_types.is_empty() {
         return None;
     }
 
-    // "(Type1 Type2)" 形式の文字列として返す
-    let tuple_str = format!("({elements})", elements = elements.join(" "));
+    // タプル型を "(Type1 Type2)" 形式の文字列として返す
+    let elements: Vec<String> = param_types
+        .iter()
+        .map(|ty| type_annotation_to_string(ty))
+        .collect();
+    let tuple_str = format!("({})", elements.join(" "));
     Some(TypeAnnotation::Simple(tuple_str))
+}
+
+/// TypeAnnotation を文字列に変換（タプル型表現用）
+fn type_annotation_to_string(ty: &TypeAnnotation) -> String {
+    match ty {
+        TypeAnnotation::Simple(s) => s.clone(),
+        TypeAnnotation::Nullable(inner) => format!("{}?", type_annotation_to_string(inner)),
+        TypeAnnotation::Array(inner) => format!("{}[]", type_annotation_to_string(inner)),
+        TypeAnnotation::Generic { name, type_args } => {
+            let args: Vec<String> = type_args.iter().map(type_annotation_to_string).collect();
+            format!("{}<{}>", name, args.join(", "))
+        }
+        TypeAnnotation::Function { params, return_type } => {
+            let param_strs: Vec<String> = params.iter().map(type_annotation_to_string).collect();
+            format!("({}) -> {}", param_strs.join(", "), type_annotation_to_string(return_type))
+        }
+        TypeAnnotation::Unit { base, unit, .. } => {
+            format!("{}@{}", type_annotation_to_string(base), unit.name)
+        }
+    }
 }
 
 fn parse_ident<'src, 'alloc>(
