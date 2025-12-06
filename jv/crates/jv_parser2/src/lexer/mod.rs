@@ -151,21 +151,28 @@ impl<'src> Lexer<'src> {
                     TokenKind::LeftBrace => {
                         depth += 1;
                         self.mode = Mode::InInterpolation(ctx, depth);
+                        token
                     }
                     TokenKind::RightBrace => {
-                        if depth > 0 {
+                        if depth > 1 {
+                            // Nested brace inside interpolation - keep going
                             depth -= 1;
-                        }
-                        if depth == 0 {
+                            self.mode = Mode::InInterpolation(ctx, depth);
+                            token
+                        } else {
+                            // depth == 1: this brace closes the interpolation
+                            // Don't return the RightBrace - instead transition to InString
+                            // and recursively get the next string segment token
                             ctx.segment_start = self.source.offset();
                             self.mode = Mode::InString(ctx);
-                        } else {
-                            self.mode = Mode::InInterpolation(ctx, depth);
+                            self.read_next_token() // get StringMid or StringEnd
                         }
                     }
-                    _ => self.mode = Mode::InInterpolation(ctx, depth),
+                    _ => {
+                        self.mode = Mode::InInterpolation(ctx, depth);
+                        token
+                    }
                 }
-                token
             }
             Mode::Normal => self.read_normal_token(),
         }
