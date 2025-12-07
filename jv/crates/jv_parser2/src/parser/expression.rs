@@ -4,6 +4,7 @@ use super::{Parser, statement::parse_statement};
 use crate::token::TokenKind;
 use jv_ast::json::{JsonEntry, JsonLiteral, JsonValue};
 use jv_ast::expression::{BinaryMetadata, Parameter, StringPart, TupleContextFlags, TupleFieldMeta, LabeledSpan};
+use jv_ast::SequenceDelimiter;
 use jv_ast::types::{BinaryOp, Literal, Span as AstSpan, UnaryOp, UnitSymbol};
 use jv_ast::expression::UnitSpacingStyle;
 use jv_ast::{Expression, Pattern, WhenArm};
@@ -736,22 +737,34 @@ fn parse_postfix<'src, 'alloc>(
             let mut first_comma_span: Option<crate::span::Span> = None;
             if !parser.consume_if(TokenKind::RightParen) {
                 loop {
+                    // Check for closing paren first
+                    if parser.current().kind == TokenKind::RightParen {
+                        close_span = parser.current().span;
+                        parser.advance();
+                        break;
+                    }
+                    if parser.current().kind == TokenKind::Eof {
+                        break;
+                    }
+                    // Track position to detect if we make progress
+                    let pos_before = parser.token_position();
                     let arg = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, open));
+                    let pos_after = parser.token_position();
+                    if pos_before == pos_after {
+                        // No progress made, break to avoid infinite loop
+                        break;
+                    }
                     last_span = span_of_expr(parser, &arg);
                     args.push(jv_ast::expression::Argument::Positional(arg));
+                    // Handle optional comma (jv uses space-separated args, but allow commas)
                     if parser.current().kind == TokenKind::Comma {
                         if !has_comma {
                             first_comma_span = Some(parser.current().span);
                         }
                         has_comma = true;
                         parser.advance();
-                        continue;
                     }
-                    if parser.current().kind == TokenKind::RightParen {
-                        close_span = parser.current().span;
-                        parser.advance();
-                    }
-                    break;
+                    // Continue to parse next argument (space-separated in jv)
                 }
             } else {
                 // consume_if で進んだので current は次トークン。閉じ括弧は open に隣接する位置。
@@ -1111,7 +1124,41 @@ fn parse_array_literal<'src, 'alloc>(
         }));
     }
     parser.rewind(checkpoint);
-    None
+
+    // Fall back to parsing as a general expression array
+    parse_general_array_literal(parser)
+}
+
+/// Parse a general array literal `[expr1 expr2 expr3]` with arbitrary expressions.
+fn parse_general_array_literal<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<Expression> {
+    if parser.current().kind != TokenKind::LeftBracket {
+        return None;
+    }
+    let start = parser.advance().span;
+    let mut elements = Vec::new();
+    let mut end_span = start;
+
+    while parser.current().kind != TokenKind::RightBracket && parser.current().kind != TokenKind::Eof
+    {
+        if let Some(expr) = parse_expression(parser) {
+            elements.push(expr);
+        } else {
+            break;
+        }
+    }
+
+    if parser.current().kind == TokenKind::RightBracket {
+        end_span = parser.current().span;
+        parser.advance();
+    }
+
+    Some(Expression::Array {
+        elements,
+        delimiter: SequenceDelimiter::Whitespace,
+        span: parser.ast_span(start.merge(end_span)),
+    })
 }
 
 fn parse_json_value<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<JsonValue> {
@@ -1236,7 +1283,9 @@ fn parse_json_array<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<J
             };
             elements.push(value);
         } else {
-            parser.advance();
+            // Not a JSON value - this is not a pure JSON array.
+            // Return None to trigger fallback to general array parsing.
+            return None;
         }
 
         if parser.current().kind == TokenKind::Comma {
@@ -1252,6 +1301,9 @@ fn parse_json_array<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<J
     if parser.current().kind == TokenKind::RightBracket {
         end_span = parser.current().span;
         parser.advance();
+    } else {
+        // Missing closing bracket - not a valid JSON array
+        return None;
     }
 
     // Emit JV2101 diagnostic if commas were used in array literal
