@@ -158,6 +158,47 @@ counter = counter + explicit"#;
 }
 
 #[test]
+fn parses_unit_syntax_source() {
+    let source = r#"
+@ 長さ(Double) m! {
+    基準 := 1
+    @Conversion {}
+}
+
+val 歩行距離 = 1250 @ m
+val 室温: Double@[K] = 298.15
+"#;
+    let src = Source::from_str(source);
+    let lexer = Lexer::new(src);
+    let arena = Arena::new();
+    let mut parser = Parser::new(lexer, &arena);
+    let result = parser.parse();
+
+    if !result.diagnostics.is_empty() {
+        for diag in &result.diagnostics {
+            eprintln!("Diagnostic: {} at {:?}", diag.message, diag.span);
+        }
+    }
+
+    let prog = result.ast.expect("should parse").to_owned();
+    eprintln!("\nParsed {} statements:", prog.statements.len());
+    for (i, stmt) in prog.statements.iter().enumerate() {
+        eprintln!("[{}] {:?}", i, std::mem::discriminant(stmt));
+    }
+
+    // We expect: UnitTypeDefinition + 2 ValDeclarations = 3 statements
+    assert!(prog.statements.len() >= 3, "expected at least 3 statements, got {}", prog.statements.len());
+
+    // First should be UnitTypeDefinition
+    assert!(matches!(&prog.statements[0], Statement::UnitTypeDefinition { .. }),
+            "first statement should be UnitTypeDefinition, got {:?}", std::mem::discriminant(&prog.statements[0]));
+
+    // Check for val declarations
+    let val_count = prog.statements.iter().filter(|s| matches!(s, Statement::ValDeclaration { .. })).count();
+    assert!(val_count >= 2, "expected at least 2 ValDeclarations, got {}", val_count);
+}
+
+#[test]
 fn parses_string_interpolation_with_member_access() {
     let code = r#"fun render(item) {
     return "${item.name} - ${status}"

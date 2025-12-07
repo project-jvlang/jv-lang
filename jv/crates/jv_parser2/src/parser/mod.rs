@@ -216,6 +216,11 @@ where
         &self.diagnostics
     }
 
+    /// 現在のトークン位置を返す（進行状況追跡用）。
+    pub(crate) fn token_position(&self) -> usize {
+        self.position
+    }
+
     /// Span に対応するソース文字列を取得する（UTF-8）。
     pub(crate) fn lexeme(&self, span: crate::span::Span) -> Option<&'src str> {
         self.lexer.lexeme(span)

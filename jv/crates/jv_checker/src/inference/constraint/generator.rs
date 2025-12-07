@@ -302,6 +302,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
     ) {
         let symbol_ty = self.env.fresh_type_variable();
         let mut representative = initializer_ty.clone().unwrap_or_else(|| TypeKind::Unknown);
+        let mut annotated_type: Option<TypeKind> = None;
 
         if let Some(ann) = annotation {
             let annotated = self.type_from_annotation(ann);
@@ -310,14 +311,19 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     ConstraintKind::Equal(symbol_ty.clone(), annotated.clone()),
                     Some("declaration annotation must match symbol"),
                 );
+                annotated_type = Some(annotated.clone());
                 representative = annotated;
             }
         }
 
         if let Some(init) = initializer_ty {
+            // When there's an explicit annotation, check assignability against
+            // the annotated type to properly handle boxing/unboxing conversions.
+            // Without annotation, use the type variable.
+            let target = annotated_type.unwrap_or_else(|| symbol_ty.clone());
             self.push_assignability_constraint(
                 init.clone(),
-                symbol_ty.clone(),
+                target,
                 Some("initializer must satisfy declaration"),
             );
             if matches!(representative, TypeKind::Unknown) {

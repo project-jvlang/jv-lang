@@ -38,14 +38,18 @@ pub(crate) fn parse_program<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> 
     // Parse remaining statements
     let mut statements = Vec::new();
     while parser.current().kind != TokenKind::Eof {
+        let pos_before = parser.token_position();
         match parse_statement(parser) {
             Some(stmt) => statements.push(stmt),
             None => {
-                // 回復して次へ。
-                recovery::recover_to_sync_point(parser);
-                parser.recovery_metrics.recovered += 1;
-                if parser.current().kind == TokenKind::Semicolon {
-                    parser.advance();
+                // Only recover if we made no progress (actual parse error).
+                // If we advanced (e.g., skipped Newline/Semicolon), no recovery needed.
+                if parser.token_position() == pos_before {
+                    recovery::recover_to_sync_point(parser);
+                    parser.recovery_metrics.recovered += 1;
+                    if parser.current().kind == TokenKind::Semicolon {
+                        parser.advance();
+                    }
                 }
             }
         }
@@ -152,6 +156,16 @@ fn parse_import<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<State
 
 pub(crate) fn parse_statement<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statement> {
     match parser.current().kind {
+        // Skip newlines and semicolons - they are not statements
+        TokenKind::Newline | TokenKind::Semicolon => {
+            parser.advance();
+            None
+        }
+        // Right braces are delimiters, not statements - advance past them
+        TokenKind::RightBrace => {
+            parser.advance();
+            None
+        }
         TokenKind::Val => parse_val(parser, true),
         TokenKind::Var => parse_val(parser, false),
         TokenKind::Fun => parse_fun(parser),

@@ -1240,6 +1240,10 @@ pub fn transform_expression(
             implicit_end,
             span,
         } => desugar_when_expression(subject, arms, else_arm, implicit_end, span, context),
+        Expression::UnitLiteral { value, .. } => {
+            // Transform the underlying value expression; unit annotation is metadata only
+            transform_expression(*value, context)
+        }
         _ => Ok(IrExpression::Literal(Literal::Null, Span::default())),
     }
 }
