@@ -298,6 +298,7 @@ fn map_token_type(kind: TokenKind, lexeme: &str) -> TokenType {
         TokenKind::Warn => TokenType::Warn,
         TokenKind::Error => TokenType::Error,
         TokenKind::Assert => TokenType::Identifier(lexeme.to_string()),
+        TokenKind::As => TokenType::Identifier(lexeme.to_string()),
         TokenKind::StringStart => TokenType::StringStart,
         TokenKind::StringMid => TokenType::StringMid,
         TokenKind::StringEnd => TokenType::StringEnd,

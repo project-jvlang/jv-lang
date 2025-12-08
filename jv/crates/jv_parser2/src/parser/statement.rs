@@ -106,14 +106,14 @@ fn parse_import<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<State
     let start_span = parser.advance().span; // consume 'import'
 
     // Parse import path: java.util.List or java.util.*
-    // Note: keywords can be part of import paths
+    // Note: keywords can be part of import paths (except 'as')
     let mut path = String::new();
     let mut is_wildcard = false;
 
     loop {
         let token = parser.current();
-        // Accept identifiers and keywords as import path parts
-        if token.kind == TokenKind::Identifier || token.kind.is_keyword() {
+        // Accept identifiers and keywords as import path parts (but not 'as')
+        if token.kind == TokenKind::Identifier || (token.kind.is_keyword() && token.kind != TokenKind::As) {
             if let Some(text) = parser.lexeme(token.span) {
                 if !path.is_empty() {
                     path.push('.');
@@ -144,9 +144,28 @@ fn parse_import<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<State
         return None;
     }
 
+    // Check for alias: `import java.time.LocalDate as Date`
+    let alias = if parser.current().kind == TokenKind::As {
+        parser.advance(); // consume 'as'
+        let token = parser.current();
+        if token.kind == TokenKind::Identifier {
+            let alias_span = token.span;
+            let alias_text = parser.lexeme(alias_span)
+                .map(|s| s.to_string());
+            parser.advance();
+            alias_text
+        } else {
+            let err_span = token.span;
+            parser.push_diagnostic(Diagnostic::new("alias name expected after 'as'", err_span));
+            None
+        }
+    } else {
+        None
+    };
+
     Some(Statement::Import {
         path,
-        alias: None,
+        alias,
         is_wildcard,
         span: parser.ast_span(start_span),
     })

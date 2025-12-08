@@ -97,6 +97,7 @@ pub enum TokenKind {
     Warn,
     Error,
     Assert,
+    As,
     // キーワード終端の次に番兵を置き、総数チェックに利用する。
     KeywordSentinel,
 
@@ -117,7 +118,7 @@ pub enum TokenKind {
 impl TokenKind {
     /// キーワード領域の開始・終了を返す。
     const KEYWORD_START: TokenKind = TokenKind::Val;
-    const KEYWORD_END: TokenKind = TokenKind::Assert;
+    const KEYWORD_END: TokenKind = TokenKind::As;
 
     /// キーワードかどうか。
     pub const fn is_keyword(self) -> bool {

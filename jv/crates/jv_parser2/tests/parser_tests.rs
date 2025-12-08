@@ -335,3 +335,131 @@ fn parses_string_interpolation_with_member_access() {
         other => panic!("expected FunctionDeclaration, got {:?}", other),
     }
 }
+
+#[test]
+fn typed_assignment_uses_implicit_typed_origin() {
+    use jv_ast::ValBindingOrigin;
+    
+    let source = Source::from_str("typed: Int = 2");
+    let lexer = Lexer::new(source);
+    let arena = Arena::new();
+    let mut parser = Parser::new(lexer, &arena);
+    let result = parser.parse();
+    assert!(result.diagnostics.is_empty(), "no errors: {:?}", result.diagnostics);
+    let prog = result.ast.unwrap().to_owned();
+    assert_eq!(prog.statements.len(), 1);
+    match &prog.statements[0] {
+        Statement::ValDeclaration { name, origin, .. } => {
+            assert_eq!(name, "typed");
+            assert_eq!(*origin, ValBindingOrigin::ImplicitTyped, "expected ImplicitTyped origin but got {:?}", origin);
+        }
+        other => panic!("expected ValDeclaration but got {:?}", other),
+    }
+}
+
+#[test]
+fn full_binding_test_source_produces_correct_origins() {
+    use jv_ast::ValBindingOrigin;
+    
+    let source = Source::from_str(r#"result = 1
+typed: Int = 2
+val explicit = result + typed
+var counter = 0
+counter = counter + explicit
+"#);
+    let lexer = Lexer::new(source);
+    let arena = Arena::new();
+    let mut parser = Parser::new(lexer, &arena);
+    let result = parser.parse();
+    let prog = result.ast.unwrap().to_owned();
+    
+    eprintln!("Parsed {} statements", prog.statements.len());
+    for (i, stmt) in prog.statements.iter().enumerate() {
+        match stmt {
+            Statement::ValDeclaration { name, origin, .. } => {
+                eprintln!("Statement {}: ValDeclaration {} origin={:?}", i, name, origin);
+            }
+            Statement::VarDeclaration { name, .. } => {
+                eprintln!("Statement {}: VarDeclaration {}", i, name);
+            }
+            Statement::Assignment { target, .. } => {
+                eprintln!("Statement {}: Assignment to {:?}", i, target);
+            }
+            other => {
+                eprintln!("Statement {}: {:?}", i, std::any::type_name_of_val(other));
+            }
+        }
+    }
+    
+    // Check statement 0: result = 1 should be an Assignment (will be normalized later)
+    assert!(matches!(&prog.statements[0], Statement::Assignment { .. }), "Statement 0 should be Assignment");
+    
+    // Check statement 1: typed: Int = 2 should be ValDeclaration with ImplicitTyped
+    match &prog.statements[1] {
+        Statement::ValDeclaration { name, origin, .. } => {
+            assert_eq!(name, "typed");
+            assert_eq!(*origin, ValBindingOrigin::ImplicitTyped, "typed should have ImplicitTyped origin, got {:?}", origin);
+        }
+        other => panic!("Statement 1 should be ValDeclaration but got {:?}", other),
+    }
+    
+    // Check statement 2: val explicit = ... should be ValDeclaration with ExplicitKeyword  
+    match &prog.statements[2] {
+        Statement::ValDeclaration { name, origin, .. } => {
+            assert_eq!(name, "explicit");
+            assert_eq!(*origin, ValBindingOrigin::ExplicitKeyword, "explicit should have ExplicitKeyword origin");
+        }
+        other => panic!("Statement 2 should be ValDeclaration but got {:?}", other),
+    }
+    
+    // Check statement 3: var counter = 0 should be VarDeclaration
+    assert!(matches!(&prog.statements[3], Statement::VarDeclaration { .. }), "Statement 3 should be VarDeclaration");
+
+    // Check statement 4: counter = counter + explicit should be Assignment (reassignment)
+    assert!(matches!(&prog.statements[4], Statement::Assignment { .. }), "Statement 4 should be Assignment");
+}
+
+#[test]
+fn parses_as_type_cast_in_lambda() {
+    let code = r#"val f = { candidate -> (candidate as Number).longValue() }"#;
+    let source = Source::from_str(code);
+    let lexer = Lexer::new(source);
+    let arena = Arena::new();
+    let mut parser = Parser::new(lexer, &arena);
+    let result = parser.parse();
+    
+    eprintln!("Diagnostics: {:?}", result.diagnostics);
+    let prog = result.ast.unwrap().to_owned();
+    
+    eprintln!("Parsed {} statements", prog.statements.len());
+    for (i, stmt) in prog.statements.iter().enumerate() {
+        eprintln!("Statement {}: {:?}", i, stmt);
+    }
+    
+    assert!(result.diagnostics.is_empty(), "Should parse without diagnostics: {:?}", result.diagnostics);
+    assert_eq!(prog.statements.len(), 1, "Should have one statement");
+    
+    match &prog.statements[0] {
+        Statement::ValDeclaration { name, initializer, .. } => {
+            assert_eq!(name, "f");
+            match initializer {
+                jv_ast::Expression::Lambda { parameters, body, .. } => {
+                    assert_eq!(parameters.len(), 1, "Lambda should have one parameter");
+                    assert_eq!(parameters[0].name, "candidate", "Parameter name should be 'candidate'");
+                    eprintln!("Lambda body: {:?}", body);
+                    // The body should NOT be an identifier "_"
+                    match body.as_ref() {
+                        jv_ast::Expression::Identifier(name, _) if name == "_" => {
+                            panic!("Lambda body should not be underscore placeholder! Body: {:?}", body);
+                        }
+                        _ => {
+                            // Expected - body is something other than underscore
+                        }
+                    }
+                }
+                other => panic!("Initializer should be Lambda but got {:?}", other),
+            }
+        }
+        other => panic!("Statement should be ValDeclaration but got {:?}", other),
+    }
+}

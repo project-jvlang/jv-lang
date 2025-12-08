@@ -4,7 +4,7 @@ use super::{Parser, statement::parse_statement};
 use crate::token::TokenKind;
 use jv_ast::json::{JsonEntry, JsonLiteral, JsonValue};
 use jv_ast::expression::{BinaryMetadata, Parameter, StringPart, TupleContextFlags, TupleFieldMeta, LabeledSpan};
-use jv_ast::types::{BinaryOp, Literal, Span as AstSpan, UnaryOp, UnitSymbol};
+use jv_ast::types::{BinaryOp, Literal, RegexLiteral, Span as AstSpan, UnaryOp, UnitSymbol};
 use jv_ast::expression::UnitSpacingStyle;
 use jv_ast::{Expression, Pattern, Statement, WhenArm};
 use super::types::parse_type;
@@ -22,6 +22,7 @@ fn is_expression_start(kind: TokenKind) -> bool {
             | TokenKind::RawString
             | TokenKind::StringStart
             | TokenKind::Character
+            | TokenKind::Regex
             | TokenKind::TrueKw
             | TokenKind::FalseKw
             | TokenKind::NullKw
@@ -212,6 +213,28 @@ fn parse_precedence<'src, 'alloc>(
             continue;
         }
 
+        // Type cast: `expr as Type`
+        // Binding power: 45 (between comparison and equality)
+        if parser.current().kind == TokenKind::As {
+            let as_bp = 45;
+            if as_bp >= min_bp {
+                let as_span = parser.advance().span; // consume 'as'
+                if let Some(target) = parse_type(parser) {
+                    let expr_span = span_of_expr(parser, &left);
+                    // Use as_span as the end span (type parsing doesn't advance past the type)
+                    let span = expr_span.merge(as_span);
+                    left = Expression::TypeCast {
+                        expr: Box::new(left),
+                        target,
+                        span: parser.ast_span(span),
+                    };
+                    continue;
+                }
+                // If parse_type fails, we've consumed 'as' but can't form a TypeCast.
+                // This is an error condition but we just break out.
+            }
+        }
+
         // 三項 ?: （右結合）
         if parser.current().kind == TokenKind::Question {
             let l_bp = 15;
@@ -330,6 +353,59 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
                 Literal::String(content),
                 parser.ast_span(token.span),
             ))
+        }
+        TokenKind::Character => {
+            parser.advance();
+            let text = parser
+                .lexeme(token.span)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "'?'".to_string());
+            // Extract the character from 'x' format
+            let ch = if text.len() >= 3 && text.starts_with('\'') && text.ends_with('\'') {
+                let inner = &text[1..text.len()-1];
+                // Handle escape sequences
+                if inner.starts_with('\\') && inner.len() >= 2 {
+                    match inner.chars().nth(1) {
+                        Some('n') => '\n',
+                        Some('r') => '\r',
+                        Some('t') => '\t',
+                        Some('\\') => '\\',
+                        Some('\'') => '\'',
+                        Some('0') => '\0',
+                        _ => inner.chars().next().unwrap_or('?'),
+                    }
+                } else {
+                    inner.chars().next().unwrap_or('?')
+                }
+            } else {
+                '?'
+            };
+            Some(Expression::Literal(
+                Literal::Character(ch),
+                parser.ast_span(token.span),
+            ))
+        }
+        TokenKind::Regex => {
+            parser.advance();
+            let raw = parser
+                .lexeme(token.span)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "//".to_string());
+            // Extract pattern from /pattern/ format
+            let pattern = if raw.len() >= 2 && raw.starts_with('/') && raw.ends_with('/') {
+                raw[1..raw.len()-1].to_string()
+            } else {
+                raw.clone()
+            };
+            let span = parser.ast_span(token.span);
+            Some(Expression::RegexLiteral(RegexLiteral {
+                pattern,
+                raw,
+                span,
+                origin: None,
+                const_key: None,
+                template_segments: Vec::new(),
+            }))
         }
         TokenKind::StringStart => {
             parse_string_interpolation(parser)
@@ -515,7 +591,8 @@ pub(crate) fn span_of_expr(parser: &Parser<'_, '_>, expr: &Expression) -> crate:
         | Expression::NullSafeMemberAccess { span, .. }
         | Expression::Call { span, .. }
         | Expression::IndexAccess { span, .. }
-        | Expression::NullSafeIndexAccess { span, .. } => parser.span_from_ast(span),
+        | Expression::NullSafeIndexAccess { span, .. }
+        | Expression::TypeCast { span, .. } => parser.span_from_ast(span),
         _ => crate::span::Span::new(0, 0),
     }
 }
@@ -1226,6 +1303,7 @@ fn parse_array_literal<'src, 'alloc>(
     parser: &mut Parser<'src, 'alloc>,
 ) -> Option<Expression> {
     let checkpoint = parser.checkpoint();
+    // First try to parse as JSON array (for pure JSON data literals)
     if let Some(JsonValue::Array { elements, delimiter, span }) = parse_json_array(parser) {
         return Some(Expression::JsonLiteral(JsonLiteral {
             value: JsonValue::Array {
@@ -1240,7 +1318,63 @@ fn parse_array_literal<'src, 'alloc>(
         }));
     }
     parser.rewind(checkpoint);
-    None
+
+    // Fall back to parsing as Expression::Array with arbitrary expressions
+    parse_expression_array(parser)
+}
+
+/// Parse array literal containing arbitrary expressions: [expr1 expr2 expr3]
+fn parse_expression_array<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<Expression> {
+    if parser.current().kind != TokenKind::LeftBracket {
+        return None;
+    }
+
+    let start = parser.advance().span;
+    let mut elements = Vec::new();
+    let mut end_span = start;
+    let mut has_comma = false;
+    let mut first_comma_span: Option<crate::span::Span> = None;
+
+    while parser.current().kind != TokenKind::RightBracket && parser.current().kind != TokenKind::Eof {
+        if let Some(expr) = parse_expression(parser) {
+            end_span = parser.span_from_ast(expr.span());
+            elements.push(expr);
+        } else {
+            // If we can't parse an expression, skip the token
+            parser.advance();
+        }
+
+        if parser.current().kind == TokenKind::Comma {
+            if !has_comma {
+                first_comma_span = Some(parser.current().span);
+            }
+            has_comma = true;
+            parser.advance();
+            continue;
+        }
+    }
+
+    if parser.current().kind == TokenKind::RightBracket {
+        end_span = parser.current().span;
+        parser.advance();
+    }
+
+    // Emit JV2102 diagnostic if commas were used in array literal (warning)
+    if has_comma {
+        let diagnostic_span = first_comma_span.unwrap_or(start);
+        parser.push_diagnostic(crate::diagnostics::Diagnostic::new(
+            "JV2102: 配列リテラルでカンマ区切りはサポートされません。空白または改行のみで要素を分けてください。\nJV2102: Array literals do not support comma separators. Use whitespace or newlines between elements.",
+            diagnostic_span,
+        ).with_kind(crate::diagnostics::DiagnosticKind::Warning));
+    }
+
+    Some(Expression::Array {
+        elements,
+        delimiter: Default::default(),
+        span: parser.ast_span(start.merge(end_span)),
+    })
 }
 
 fn parse_json_value<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<JsonValue> {
@@ -1365,7 +1499,9 @@ fn parse_json_array<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<J
             };
             elements.push(value);
         } else {
-            parser.advance();
+            // Non-JSON token encountered - this is not a pure JSON array
+            // Return None to fall back to Expression::Array parsing
+            return None;
         }
 
         if parser.current().kind == TokenKind::Comma {

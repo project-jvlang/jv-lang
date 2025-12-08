@@ -7,6 +7,7 @@ pub(crate) fn keyword_from_bytes(text: &[u8]) -> Option<TokenKind> {
     }
     match text[0] {
         b'a' => match text {
+            b"as" => Some(TokenKind::As),
             b"assert" => Some(TokenKind::Assert),
             _ => None,
         },

@@ -152,6 +152,14 @@ impl BindingResolver {
                                 span: Some(span.clone()),
                             });
                         }
+                        // Variable already exists (either immutable or mutable), treat as Assignment
+                        // Don't register a new binding, just return as Assignment statement
+                        return Statement::Assignment {
+                            target: Expression::Identifier(name, span.clone()),
+                            binding_pattern: None,
+                            value: initializer,
+                            span,
+                        };
                     } else if self.is_self_reference(&name, &initializer) {
                         self.diagnostics.push(CheckError::ValidationError {
                             message: missing_initializer_message(&name),
