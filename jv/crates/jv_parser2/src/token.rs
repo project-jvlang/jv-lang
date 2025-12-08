@@ -22,6 +22,7 @@ pub enum TokenKind {
     Character,
     Boolean,
     Regex,
+    RawString, // Triple-quoted multiline string (""" ... """)
 
     // 演算子・記号
     Assign,

@@ -193,6 +193,18 @@ fn parse_literal_pattern<'src, 'alloc>(
     let lit = match tok.kind {
         TokenKind::Number => Literal::Number(parser.lexeme(tok.span).unwrap_or("0").to_string()),
         TokenKind::String => Literal::String(parser.lexeme(tok.span).unwrap_or("").to_string()),
+        TokenKind::RawString => {
+            let raw_text = parser.lexeme(tok.span).unwrap_or("");
+            let content = if raw_text.len() >= 6 {
+                let inner = &raw_text[3..raw_text.len() - 3];
+                let trimmed = inner.strip_prefix('\n').unwrap_or(inner);
+                // Keep actual newlines to allow codegen to detect multiline content
+                format!("\"{}\"", trimmed.replace('\\', "\\\\").replace('"', "\\\""))
+            } else {
+                "\"\"".to_string()
+            };
+            Literal::String(content)
+        }
         TokenKind::TrueKw => Literal::Boolean(true),
         TokenKind::FalseKw => Literal::Boolean(false),
         TokenKind::NullKw => Literal::Null,

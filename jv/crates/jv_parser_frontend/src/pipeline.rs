@@ -223,6 +223,7 @@ fn map_token_type(kind: TokenKind, lexeme: &str) -> TokenType {
         }
         TokenKind::Number => TokenType::Number(lexeme.to_string()),
         TokenKind::String => TokenType::String(lexeme.to_string()),
+        TokenKind::RawString => TokenType::String(lexeme.to_string()),
         TokenKind::StringInterpolation => TokenType::StringInterpolation(lexeme.to_string()),
         TokenKind::Character => {
             let ch = lexeme.trim_matches('\'').chars().next().unwrap_or_default();

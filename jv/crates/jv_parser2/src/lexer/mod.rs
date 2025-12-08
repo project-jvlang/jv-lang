@@ -190,6 +190,10 @@ impl<'src> Lexer<'src> {
             None => Token::new(TokenKind::Eof, self.source.span_from(start, start)),
             Some(byte) if byte < 128 => {
                 if byte == b'"' {
+                    // Check for triple-quote raw string: """
+                    if self.is_triple_quote() {
+                        return string::lex_raw_string(self);
+                    }
                     let mut ctx = StringContext {
                         segment_start: start,
                         first_segment: true,
@@ -204,6 +208,12 @@ impl<'src> Lexer<'src> {
             }
             Some(_) => unicode::lex_unicode_identifier(self),
         }
+    }
+
+    /// Check if current position has triple quotes (`"""`)
+    fn is_triple_quote(&self) -> bool {
+        let bytes = self.source.remaining_bytes();
+        bytes.len() >= 3 && bytes[0] == b'"' && bytes[1] == b'"' && bytes[2] == b'"'
     }
 
     #[inline]
@@ -268,6 +278,11 @@ impl<'src> Lexer<'src> {
     #[inline]
     pub(crate) fn source_text(&self) -> &'src str {
         self.source.as_str()
+    }
+
+    #[inline]
+    pub(crate) fn source(&self) -> &Source<'src> {
+        &self.source
     }
 
     #[inline]

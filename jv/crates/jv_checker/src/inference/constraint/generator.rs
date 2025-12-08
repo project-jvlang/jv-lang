@@ -688,15 +688,49 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 return None;
             }
 
-            // Find a candidate matching the argument count
-            for (receiver, scheme) in &candidates {
-                let instantiated = self.env.instantiate(scheme);
-                if let TypeKind::Function(params, _) = &instantiated {
-                    if params.len() == arg_count {
-                        self.enqueue_receiver_constraint(*id, receiver, property);
-                        return Some(instantiated);
+            // Collect all candidates matching the argument count
+            let matching_candidates: Vec<_> = candidates
+                .iter()
+                .filter(|(_, scheme)| {
+                    let instantiated = self.env.instantiate(scheme);
+                    if let TypeKind::Function(params, _) = &instantiated {
+                        params.len() == arg_count
+                    } else {
+                        false
+                    }
+                })
+                .collect();
+
+            // Check for ambiguity when multiple candidates match
+            if matching_candidates.len() > 1 {
+                let mut usage_count = *self.type_var_usage.get(id).unwrap_or(&0);
+                if usage_count == 0 {
+                    if let Some(origin) = self.env.type_origin(*id) {
+                        usage_count = *self.type_var_usage.get(&origin).unwrap_or(&0);
                     }
                 }
+                if usage_count == 0 {
+                    let candidate_names: Vec<&'static str> =
+                        matching_candidates.iter().map(|(recv, _)| *recv).collect();
+                    let message = format!(
+                        "ambiguous extension method '{}' at {}:{}; matching receivers: {}",
+                        property,
+                        span.start_line,
+                        span.start_column,
+                        candidate_names.join(", ")
+                    );
+                    let constraint =
+                        Constraint::new(ConstraintKind::Placeholder(DIAG_AMBIGUOUS_EXTENSION))
+                            .with_note(message);
+                    self.constraints.push(constraint);
+                    return None;
+                }
+            }
+
+            // Use the first matching candidate
+            if let Some((receiver, scheme)) = matching_candidates.first() {
+                self.enqueue_receiver_constraint(*id, receiver, property);
+                return Some(self.env.instantiate(scheme));
             }
 
             // Fall back to first candidate if no exact arity match

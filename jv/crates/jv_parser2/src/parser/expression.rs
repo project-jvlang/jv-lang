@@ -19,6 +19,7 @@ fn is_expression_start(kind: TokenKind) -> bool {
             | TokenKind::ImplicitParam
             | TokenKind::Number
             | TokenKind::String
+            | TokenKind::RawString
             | TokenKind::StringStart
             | TokenKind::Character
             | TokenKind::TrueKw
@@ -307,6 +308,26 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
                 .unwrap_or_default();
             Some(Expression::Literal(
                 Literal::String(text),
+                parser.ast_span(token.span),
+            ))
+        }
+        TokenKind::RawString => {
+            parser.advance();
+            let raw_text = parser.lexeme(token.span).unwrap_or("");
+            // Strip the triple quotes and extract content
+            // The lexeme includes the """ delimiters
+            let content = if raw_text.len() >= 6 {
+                let inner = &raw_text[3..raw_text.len() - 3];
+                // Remove leading newline if present (after opening """)
+                let trimmed = inner.strip_prefix('\n').unwrap_or(inner);
+                // Keep the content with wrapping quotes but preserve actual newlines
+                // This allows codegen to detect multiline content for text blocks
+                format!("\"{}\"", trimmed.replace('\\', "\\\\").replace('"', "\\\""))
+            } else {
+                "\"\"".to_string()
+            };
+            Some(Expression::Literal(
+                Literal::String(content),
                 parser.ast_span(token.span),
             ))
         }

@@ -99,6 +99,11 @@ impl<'src> Source<'src> {
         // `new` でUTF-8検証済み。
         unsafe { std::str::from_utf8_unchecked(self.bytes) }
     }
+
+    /// 現在位置から末尾までのバイトスライスを返す。
+    pub fn remaining_bytes(&self) -> &'src [u8] {
+        &self.bytes[self.cursor.min(self.len)..]
+    }
 }
 
 #[cfg(test)]

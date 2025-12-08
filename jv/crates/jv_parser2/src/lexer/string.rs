@@ -138,3 +138,49 @@ fn validate_char_escape(lexer: &mut Lexer<'_>) -> bool {
         Some(_) | None => false,
     }
 }
+
+/// Lex a raw/multiline string literal delimited by triple quotes (`"""`).
+/// The content is preserved as-is without escape processing.
+pub(crate) fn lex_raw_string(lexer: &mut Lexer<'_>) -> crate::Token {
+    let start = lexer.current_offset();
+
+    // Consume opening """
+    lexer.advance_by(3);
+
+    // Skip optional leading newline after opening """
+    if matches!(lexer.peek(), Some(b'\n')) {
+        lexer.advance();
+    } else if matches!(lexer.peek(), Some(b'\r')) {
+        lexer.advance();
+        if matches!(lexer.peek(), Some(b'\n')) {
+            lexer.advance();
+        }
+    }
+
+    // Consume until closing """
+    loop {
+        match lexer.peek() {
+            None => {
+                // EOF without closing - return invalid token
+                return lexer.make_token(TokenKind::Invalid, start);
+            }
+            Some(b'"') => {
+                // Check for closing """
+                let remaining = lexer.source().remaining_bytes();
+                if remaining.len() >= 3
+                    && remaining[0] == b'"'
+                    && remaining[1] == b'"'
+                    && remaining[2] == b'"'
+                {
+                    // Found closing """
+                    lexer.advance_by(3);
+                    return lexer.make_token(TokenKind::RawString, start);
+                }
+                lexer.advance();
+            }
+            Some(_) => {
+                lexer.advance();
+            }
+        }
+    }
+}
