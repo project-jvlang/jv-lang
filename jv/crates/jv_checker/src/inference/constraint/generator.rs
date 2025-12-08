@@ -402,6 +402,9 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                 else_branch,
                 ..
             } => {
+                // Emit JV3103: `if` expressions are forbidden in jv; use `when` instead
+                self.report_type_error(TypeError::ForbiddenIfExpression);
+
                 let cond_ty = self.infer_expression(condition);
                 self.push_constraint(
                     ConstraintKind::Convertible {

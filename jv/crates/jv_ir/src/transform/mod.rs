@@ -846,6 +846,14 @@ pub fn transform_expression(
             if name.is_empty() {
                 return Ok(IrExpression::Literal(Literal::String(String::new()), span));
             }
+            // Handle `_` discard pattern as unit/void - it's a wildcard that shouldn't be resolved
+            if name == "_" {
+                return Ok(IrExpression::TupleLiteral {
+                    elements: vec![],
+                    java_type: JavaType::Void,
+                    span,
+                });
+            }
             if let Some(java_type) = context.lookup_variable(&name).cloned() {
                 return Ok(IrExpression::Identifier {
                     name,
@@ -1243,6 +1251,26 @@ pub fn transform_expression(
         Expression::UnitLiteral { value, .. } => {
             // Transform the underlying value expression; unit annotation is metadata only
             transform_expression(*value, context)
+        }
+        Expression::IndexAccess {
+            object,
+            index,
+            span,
+        } => {
+            let receiver = transform_expression(*object, context)?;
+            let index_expr = transform_expression(*index, context)?;
+            let element_type = extract_java_type(&receiver)
+                .map(|t| match t {
+                    JavaType::Array { element_type, .. } => *element_type,
+                    _ => JavaType::object(),
+                })
+                .unwrap_or_else(JavaType::object);
+            Ok(IrExpression::ArrayAccess {
+                array: Box::new(receiver),
+                index: Box::new(index_expr),
+                java_type: element_type,
+                span,
+            })
         }
         _ => Ok(IrExpression::Literal(Literal::Null, Span::default())),
     }

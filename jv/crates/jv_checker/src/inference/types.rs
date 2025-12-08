@@ -198,6 +198,8 @@ pub enum TypeError {
     IncompatibleConversion { from: String, to: String },
     #[error("invalid tuple annotation `{annotation}`: {reason}")]
     InvalidTupleAnnotation { annotation: String, reason: String },
+    #[error("JV3103: `if` expressions are not supported; use `when` instead")]
+    ForbiddenIfExpression,
 }
 
 impl TypeError {

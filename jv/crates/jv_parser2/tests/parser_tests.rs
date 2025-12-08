@@ -463,3 +463,45 @@ fn parses_as_type_cast_in_lambda() {
         other => panic!("Statement should be ValDeclaration but got {:?}", other),
     }
 }
+
+#[test]
+fn parses_if_expression() {
+    let code = r#"val value = if (true) 1 else 0"#;
+    let source = Source::from_str(code);
+    let lexer = Lexer::new(source);
+    let arena = Arena::new();
+    let mut parser = Parser::new(lexer, &arena);
+    let result = parser.parse();
+    
+    eprintln!("Diagnostics: {:?}", result.diagnostics);
+    let prog = result.ast.unwrap().to_owned();
+    
+    eprintln!("Parsed {} statements", prog.statements.len());
+    for (i, stmt) in prog.statements.iter().enumerate() {
+        eprintln!("Statement {}: {:?}", i, stmt);
+    }
+    
+    assert_eq!(prog.statements.len(), 1, "Should have one statement");
+    
+    match &prog.statements[0] {
+        Statement::ValDeclaration { name, initializer, .. } => {
+            assert_eq!(name, "value");
+            eprintln!("Initializer: {:?}", initializer);
+            // The initializer should be an If expression
+            match initializer {
+                jv_ast::Expression::If { condition, then_branch, else_branch, .. } => {
+                    eprintln!("If condition: {:?}", condition);
+                    eprintln!("If then: {:?}", then_branch);
+                    eprintln!("If else: {:?}", else_branch);
+                }
+                jv_ast::Expression::Identifier(name, _) if name == "_" => {
+                    panic!("Initializer should not be underscore placeholder! Got: {:?}", initializer);
+                }
+                other => {
+                    eprintln!("Expected If expression but got: {:?}", other);
+                }
+            }
+        }
+        other => panic!("Statement should be ValDeclaration but got {:?}", other),
+    }
+}

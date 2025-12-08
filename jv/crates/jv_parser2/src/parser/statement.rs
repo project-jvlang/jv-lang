@@ -1059,7 +1059,13 @@ fn token_text_placeholder(token: &crate::token::Token) -> String {
 }
 
 fn dummy_expr<'src, 'alloc>(parser: &Parser<'src, 'alloc>, span: crate::span::Span) -> Expression {
-    Expression::Identifier("_".into(), parser.ast_span(span))
+    // Use unit tuple () as placeholder to avoid scope resolution errors
+    Expression::Tuple {
+        elements: Vec::new(),
+        fields: Vec::new(),
+        context: Default::default(),
+        span: parser.ast_span(span),
+    }
 }
 
 #[cfg(test)]

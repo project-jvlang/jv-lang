@@ -432,6 +432,7 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
             ))
         }
         TokenKind::When => Some(parse_when_expression(parser)),
+        TokenKind::If => Some(parse_if_expression(parser)),
         TokenKind::LeftParen => {
             let start_span = parser.advance().span;
 
@@ -578,7 +579,13 @@ fn infix_binding_power(kind: TokenKind) -> Option<(u8, u8, BinaryOp)> {
 }
 
 fn dummy_expr<'src, 'alloc>(parser: &Parser<'src, 'alloc>, span: crate::span::Span) -> Expression {
-    Expression::Identifier("_".into(), parser.ast_span(span))
+    // Use unit tuple () as placeholder to avoid scope resolution errors
+    Expression::Tuple {
+        elements: Vec::new(),
+        fields: Vec::new(),
+        context: Default::default(),
+        span: parser.ast_span(span),
+    }
 }
 
 pub(crate) fn span_of_expr(parser: &Parser<'_, '_>, expr: &Expression) -> crate::span::Span {
@@ -592,7 +599,8 @@ pub(crate) fn span_of_expr(parser: &Parser<'_, '_>, expr: &Expression) -> crate:
         | Expression::Call { span, .. }
         | Expression::IndexAccess { span, .. }
         | Expression::NullSafeIndexAccess { span, .. }
-        | Expression::TypeCast { span, .. } => parser.span_from_ast(span),
+        | Expression::TypeCast { span, .. }
+        | Expression::If { span, .. } => parser.span_from_ast(span),
         _ => crate::span::Span::new(0, 0),
     }
 }
@@ -645,6 +653,47 @@ fn parse_when_expression<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Exp
         arms,
         else_arm,
         implicit_end: None,
+        span,
+    }
+}
+
+/// Parses an if expression: `if (condition) then_branch else else_branch`
+fn parse_if_expression<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Expression {
+    let if_span = parser.advance().span; // consume 'if'
+
+    // Parse condition - expect parentheses
+    let condition = if parser.consume_if(TokenKind::LeftParen) {
+        let cond = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, if_span));
+        let _ = parser.consume_if(TokenKind::RightParen);
+        cond
+    } else {
+        // Allow condition without parens (Kotlin-style is optional)
+        parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, if_span))
+    };
+
+    // Parse then branch
+    let then_branch = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, if_span));
+
+    // Parse optional else branch
+    let else_branch = if parser.current().kind == TokenKind::Else {
+        parser.advance(); // consume 'else'
+        Some(Box::new(
+            parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, if_span)),
+        ))
+    } else {
+        None
+    };
+
+    let end_span = else_branch
+        .as_ref()
+        .map(|e| span_of_expr(parser, e))
+        .unwrap_or_else(|| span_of_expr(parser, &then_branch));
+    let span = parser.ast_span(if_span.merge(end_span));
+
+    Expression::If {
+        condition: Box::new(condition),
+        then_branch: Box::new(then_branch),
+        else_branch,
         span,
     }
 }
@@ -1172,7 +1221,13 @@ fn try_parse_arrow_lambda<'src, 'alloc>(
     // Convert statements to body expression
     let body = if statements.is_empty() {
         let span = parser.current().span;
-        Expression::Identifier("_".into(), parser.ast_span(span))
+        // Empty lambda body - use unit tuple () as placeholder
+        Expression::Tuple {
+            elements: Vec::new(),
+            fields: Vec::new(),
+            context: Default::default(),
+            span: parser.ast_span(span),
+        }
     } else if statements.len() == 1 {
         // Single statement: extract as expression if possible
         match statements.pop().unwrap() {
