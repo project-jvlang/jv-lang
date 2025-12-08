@@ -623,11 +623,6 @@ fn compile_repository_fixtures_without_interpolation() {
         if path.to_string_lossy().contains("/unit_syntax/errors/") {
             continue;
         }
-        // Skip unit_syntax/literals/ - unit literal codegen requires tuple planner support
-        // that is not yet integrated with parser2 pipeline
-        if path.to_string_lossy().contains("/unit_syntax/literals/") {
-            continue;
-        }
         let source = match fs::read_to_string(&path) {
             Ok(content) => content,
             Err(err) => {
