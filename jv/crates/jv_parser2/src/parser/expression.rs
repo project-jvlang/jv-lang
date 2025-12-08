@@ -4,10 +4,9 @@ use super::{Parser, statement::parse_statement};
 use crate::token::TokenKind;
 use jv_ast::json::{JsonEntry, JsonLiteral, JsonValue};
 use jv_ast::expression::{BinaryMetadata, Parameter, StringPart, TupleContextFlags, TupleFieldMeta, LabeledSpan};
-use jv_ast::SequenceDelimiter;
 use jv_ast::types::{BinaryOp, Literal, Span as AstSpan, UnaryOp, UnitSymbol};
 use jv_ast::expression::UnitSpacingStyle;
-use jv_ast::{Expression, Pattern, WhenArm};
+use jv_ast::{Expression, Pattern, Statement, WhenArm};
 use super::types::parse_type;
 use super::CollectedComment;
 
@@ -282,7 +281,12 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
                 .lexeme(token.span)
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("_id{}", token.span.start));
-            Some(Expression::Identifier(name, parser.ast_span(token.span)))
+            // Handle `this` keyword as Expression::This
+            if name == "this" {
+                Some(Expression::This(parser.ast_span(token.span)))
+            } else {
+                Some(Expression::Identifier(name, parser.ast_span(token.span)))
+            }
         }
         TokenKind::Number => {
             parser.advance();
@@ -737,34 +741,56 @@ fn parse_postfix<'src, 'alloc>(
             let mut first_comma_span: Option<crate::span::Span> = None;
             if !parser.consume_if(TokenKind::RightParen) {
                 loop {
-                    // Check for closing paren first
-                    if parser.current().kind == TokenKind::RightParen {
-                        close_span = parser.current().span;
-                        parser.advance();
-                        break;
-                    }
-                    if parser.current().kind == TokenKind::Eof {
-                        break;
-                    }
-                    // Track position to detect if we make progress
-                    let pos_before = parser.token_position();
                     let arg = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, open));
-                    let pos_after = parser.token_position();
-                    if pos_before == pos_after {
-                        // No progress made, break to avoid infinite loop
-                        break;
-                    }
                     last_span = span_of_expr(parser, &arg);
                     args.push(jv_ast::expression::Argument::Positional(arg));
-                    // Handle optional comma (jv uses space-separated args, but allow commas)
+
+                    // Check for comma (optional separator)
                     if parser.current().kind == TokenKind::Comma {
                         if !has_comma {
                             first_comma_span = Some(parser.current().span);
                         }
                         has_comma = true;
                         parser.advance();
+                        continue;
                     }
-                    // Continue to parse next argument (space-separated in jv)
+
+                    // End of arguments when we see RightParen
+                    if parser.current().kind == TokenKind::RightParen {
+                        close_span = parser.current().span;
+                        parser.advance();
+                        break;
+                    }
+
+                    // EOF means unclosed parens - stop parsing
+                    if parser.current().kind == TokenKind::Eof {
+                        break;
+                    }
+
+                    // JV supports comma-less argument lists: operation(left right)
+                    // Check if next token could start an expression - if so, continue parsing
+                    // Otherwise, treat as end of arguments
+                    let next = parser.current().kind;
+                    let could_be_expr = matches!(
+                        next,
+                        TokenKind::Identifier
+                            | TokenKind::Number
+                            | TokenKind::String
+                            | TokenKind::Character
+                            | TokenKind::LeftParen
+                            | TokenKind::LeftBracket
+                            | TokenKind::LeftBrace
+                            | TokenKind::Minus
+                            | TokenKind::Not
+                            | TokenKind::TrueKw
+                            | TokenKind::FalseKw
+                            | TokenKind::NullKw
+                    );
+                    if !could_be_expr {
+                        // Not an expression start - unclosed parens but we stop here
+                        break;
+                    }
+                    // Continue parsing next argument without comma
                 }
             } else {
                 // consume_if で進んだので current は次トークン。閉じ括弧は open に隣接する位置。
@@ -813,23 +839,45 @@ fn parse_postfix<'src, 'alloc>(
             })
         }
         TokenKind::LeftBrace => {
-            // Trailing lambda syntax: `obj.method { lambda }` becomes `obj.method({ lambda })`
-            // Only applies when left is a MemberAccess (method call context)
-            if !matches!(left, Expression::MemberAccess { .. } | Expression::NullSafeMemberAccess { .. }) {
-                return None;
-            }
+            // Trailing lambda syntax:
+            // - `obj.method { lambda }` becomes `obj.method({ lambda })`
+            // - `obj.method(arg) { lambda }` becomes `obj.method(arg, { lambda })`
+            // Applies when left is a MemberAccess or a Call expression
 
-            // Try to parse as arrow lambda
+            // Try to parse as arrow lambda first
             if let Some(lambda) = try_parse_arrow_lambda(parser) {
                 let lambda_span = span_of_expr(parser, &lambda);
-                let combined = span_of_expr(parser, left).merge(lambda_span);
-                return Some(Expression::Call {
-                    function: Box::new(left.clone()),
-                    args: vec![jv_ast::expression::Argument::Positional(lambda)],
-                    type_arguments: Vec::new(),
-                    argument_metadata: Default::default(),
-                    span: parser.ast_span(combined),
-                });
+                let left_span = span_of_expr(parser, left);
+                let combined = left_span.merge(lambda_span);
+
+                match left {
+                    Expression::MemberAccess { .. } | Expression::NullSafeMemberAccess { .. } => {
+                        // `obj.method { lambda }` -> Call with lambda as only argument
+                        return Some(Expression::Call {
+                            function: Box::new(left.clone()),
+                            args: vec![jv_ast::expression::Argument::Positional(lambda)],
+                            type_arguments: Vec::new(),
+                            argument_metadata: Default::default(),
+                            span: parser.ast_span(combined),
+                        });
+                    }
+                    Expression::Call { function, args, type_arguments, argument_metadata, .. } => {
+                        // `obj.method(args) { lambda }` -> Call with lambda appended to args
+                        let mut new_args = args.clone();
+                        new_args.push(jv_ast::expression::Argument::Positional(lambda));
+                        return Some(Expression::Call {
+                            function: function.clone(),
+                            args: new_args,
+                            type_arguments: type_arguments.clone(),
+                            argument_metadata: argument_metadata.clone(),
+                            span: parser.ast_span(combined),
+                        });
+                    }
+                    _ => {
+                        // Not a valid context for trailing lambda
+                        return None;
+                    }
+                }
             }
 
             // Not an arrow lambda - don't consume as trailing lambda
@@ -980,12 +1028,28 @@ fn try_parse_arrow_lambda<'src, 'alloc>(
             parser.advance(); // consume ')'
         }
     } else {
-        // Single parameter without parentheses
-        if let Some(param) = parse_lambda_parameter(parser) {
-            parameters.push(param);
-        } else {
-            parser.rewind(checkpoint);
-            return None;
+        // Parameters without parentheses: can be multiple whitespace-separated identifiers
+        // e.g., { left right -> ... }
+        loop {
+            // Check if we hit the arrow, indicating end of parameters
+            if matches!(parser.current().kind, TokenKind::Arrow | TokenKind::FatArrow) {
+                break;
+            }
+            if parser.current().kind == TokenKind::Eof {
+                parser.rewind(checkpoint);
+                return None;
+            }
+            if let Some(param) = parse_lambda_parameter(parser) {
+                parameters.push(param);
+            } else {
+                // If we can't parse a parameter and we have none, this isn't a lambda
+                if parameters.is_empty() {
+                    parser.rewind(checkpoint);
+                    return None;
+                }
+                // Otherwise, we've hit something that's not a parameter - could be body
+                break;
+            }
         }
     }
 
@@ -996,11 +1060,42 @@ fn try_parse_arrow_lambda<'src, 'alloc>(
     }
     parser.advance(); // consume '->' or '=>'
 
-    // Parse body expression
-    let body = parse_expression(parser).unwrap_or_else(|| {
+    // Parse body as statements until closing brace
+    // Lambda body can contain multiple statements, with the last expression being the return value
+    let mut statements = Vec::new();
+    while parser.current().kind != TokenKind::RightBrace && parser.current().kind != TokenKind::Eof {
+        if let Some(stmt) = parse_statement(parser) {
+            statements.push(stmt);
+        } else {
+            break;
+        }
+    }
+
+    // Convert statements to body expression
+    let body = if statements.is_empty() {
         let span = parser.current().span;
         Expression::Identifier("_".into(), parser.ast_span(span))
-    });
+    } else if statements.len() == 1 {
+        // Single statement: extract as expression if possible
+        match statements.pop().unwrap() {
+            Statement::Expression { expr, .. } => expr,
+            Statement::Return { value: Some(expr), .. } => expr,
+            other => {
+                let span = parser.current().span;
+                Expression::Block {
+                    statements: vec![other],
+                    span: parser.ast_span(span),
+                }
+            }
+        }
+    } else {
+        // Multiple statements: wrap in block
+        let span = parser.current().span;
+        Expression::Block {
+            statements,
+            span: parser.ast_span(span),
+        }
+    };
 
     // Expect closing brace
     let end_span = if parser.current().kind == TokenKind::RightBrace {
@@ -1124,41 +1219,7 @@ fn parse_array_literal<'src, 'alloc>(
         }));
     }
     parser.rewind(checkpoint);
-
-    // Fall back to parsing as a general expression array
-    parse_general_array_literal(parser)
-}
-
-/// Parse a general array literal `[expr1 expr2 expr3]` with arbitrary expressions.
-fn parse_general_array_literal<'src, 'alloc>(
-    parser: &mut Parser<'src, 'alloc>,
-) -> Option<Expression> {
-    if parser.current().kind != TokenKind::LeftBracket {
-        return None;
-    }
-    let start = parser.advance().span;
-    let mut elements = Vec::new();
-    let mut end_span = start;
-
-    while parser.current().kind != TokenKind::RightBracket && parser.current().kind != TokenKind::Eof
-    {
-        if let Some(expr) = parse_expression(parser) {
-            elements.push(expr);
-        } else {
-            break;
-        }
-    }
-
-    if parser.current().kind == TokenKind::RightBracket {
-        end_span = parser.current().span;
-        parser.advance();
-    }
-
-    Some(Expression::Array {
-        elements,
-        delimiter: SequenceDelimiter::Whitespace,
-        span: parser.ast_span(start.merge(end_span)),
-    })
+    None
 }
 
 fn parse_json_value<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<JsonValue> {
@@ -1283,9 +1344,7 @@ fn parse_json_array<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<J
             };
             elements.push(value);
         } else {
-            // Not a JSON value - this is not a pure JSON array.
-            // Return None to trigger fallback to general array parsing.
-            return None;
+            parser.advance();
         }
 
         if parser.current().kind == TokenKind::Comma {
@@ -1301,9 +1360,6 @@ fn parse_json_array<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<J
     if parser.current().kind == TokenKind::RightBracket {
         end_span = parser.current().span;
         parser.advance();
-    } else {
-        // Missing closing bracket - not a valid JSON array
-        return None;
     }
 
     // Emit JV2101 diagnostic if commas were used in array literal

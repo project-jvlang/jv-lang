@@ -71,6 +71,20 @@ impl ConversionRulesEngine {
             (TypeKind::Primitive(from_prim), TypeKind::Boxed(to_prim)) if from_prim == to_prim => {
                 ConversionOutcome::Allowed(ConversionMetadata::new(ConversionKind::Boxing))
             }
+            // Widening + boxing: primitive X can convert to Boxed Y if X widens to Y
+            (TypeKind::Primitive(from_prim), TypeKind::Boxed(to_prim)) => {
+                if from_prim.widening_targets().contains(to_prim) {
+                    // Widening followed by boxing
+                    ConversionOutcome::Allowed(
+                        ConversionMetadata::new(ConversionKind::WideningPrimitive),
+                    )
+                } else {
+                    ConversionOutcome::Rejected(TypeError::incompatible_conversion(
+                        TypeKind::primitive(*from_prim).describe(),
+                        TypeKind::boxed(*to_prim).describe(),
+                    ))
+                }
+            }
             (TypeKind::Boxed(from_prim), TypeKind::Primitive(to_prim)) if from_prim == to_prim => {
                 ConversionOutcome::Allowed(
                     ConversionMetadata::new(ConversionKind::Unboxing)

@@ -56,6 +56,8 @@ impl ExtensionRegistry {
     }
 
     /// Looks up the type scheme for a receiver/method pair.
+    /// If there are multiple overloads, returns the first one.
+    /// For overload resolution, use `lookup_all` instead.
     pub fn lookup(&self, receiver: &str, method: &str) -> Option<&TypeScheme> {
         self.entries.get(receiver).and_then(|candidates| {
             candidates
@@ -63,6 +65,21 @@ impl ExtensionRegistry {
                 .find(|entry| entry.method == method)
                 .map(|entry| &entry.scheme)
         })
+    }
+
+    /// Looks up all overloads for a receiver/method pair.
+    /// Use this for proper overload resolution based on argument count.
+    pub fn lookup_all(&self, receiver: &str, method: &str) -> Vec<&TypeScheme> {
+        self.entries
+            .get(receiver)
+            .into_iter()
+            .flat_map(|candidates| {
+                candidates
+                    .iter()
+                    .filter(|entry| entry.method == method)
+                    .map(|entry| &entry.scheme)
+            })
+            .collect()
     }
 
     /// Returns all receivers that declare the given method.

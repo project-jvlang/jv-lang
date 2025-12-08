@@ -23,6 +23,11 @@ pub fn parse_type_annotation(annotation: &TypeAnnotation) -> Result<TypeKind, Ty
     match annotation {
         TypeAnnotation::Simple(name) => TypeFactory::from_annotation(name),
         TypeAnnotation::Generic { name, type_args } => {
+            // Handle Optional<T> specially - convert to TypeKind::Optional
+            if name == "Optional" && type_args.len() == 1 {
+                let inner_ty = parse_type_annotation(&type_args[0])?;
+                return Ok(TypeKind::optional(inner_ty));
+            }
             for arg in type_args {
                 // タプル型がネストしている場合に備え、各引数も解析しておく。
                 let _ = parse_type_annotation(arg)?;

@@ -151,22 +151,6 @@ impl BindingResolver {
                                 message: reassignment_message(&name),
                                 span: Some(span.clone()),
                             });
-                            // Still register as a failed attempt (or convert to assignment)
-                            // For now, skip registration to avoid double-counting
-                            return Statement::Assignment {
-                                target: Expression::Identifier(name, span.clone()),
-                                binding_pattern: None,
-                                value: initializer,
-                                span,
-                            };
-                        } else {
-                            // Already declared as mutable - this is a reassignment, not a new binding
-                            return Statement::Assignment {
-                                target: Expression::Identifier(name, span.clone()),
-                                binding_pattern: None,
-                                value: initializer,
-                                span,
-                            };
                         }
                     } else if self.is_self_reference(&name, &initializer) {
                         self.diagnostics.push(CheckError::ValidationError {

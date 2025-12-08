@@ -1,3 +1,4 @@
+use super::declarations::desugar_extension_function;
 use super::transform_expression;
 use super::type_system::convert_type_annotation;
 use super::utils::extract_java_type;
@@ -10,6 +11,58 @@ use jv_ast::{
 };
 use std::collections::HashMap;
 use tracing::debug;
+
+/// Parse a receiver type string like "Iterable<T>" into a TypeAnnotation.
+fn parse_receiver_type_string(receiver_str: &str) -> TypeAnnotation {
+    if let Some(bracket_start) = receiver_str.find('<') {
+        let base_name = receiver_str[..bracket_start].to_string();
+        let args_str = &receiver_str[bracket_start + 1..receiver_str.len() - 1];
+        let type_args = parse_type_args(args_str);
+        TypeAnnotation::Generic {
+            name: base_name,
+            type_args,
+        }
+    } else {
+        TypeAnnotation::Simple(receiver_str.to_string())
+    }
+}
+
+/// Parse comma-separated type arguments, handling nested generics.
+fn parse_type_args(args_str: &str) -> Vec<TypeAnnotation> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+
+    for ch in args_str.chars() {
+        match ch {
+            '<' => {
+                depth += 1;
+                current.push(ch);
+            }
+            '>' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    result.push(parse_receiver_type_string(trimmed));
+                }
+                current.clear();
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        result.push(parse_receiver_type_string(trimmed));
+    }
+
+    result
+}
 
 pub fn desugar_default_parameters(
     function_name: String,
@@ -704,8 +757,37 @@ pub fn desugar_top_level_function(
             span,
             type_parameters,
             generic_signature,
+            where_clause,
             ..
         } => {
+            // Check if this is an extension function (parser2 uses "Type<T>.methodName" format)
+            if let Some(dot_idx) = name.rfind('.') {
+                let receiver_str = &name[..dot_idx];
+                let method_name = &name[dot_idx + 1..];
+                if !receiver_str.is_empty() && !method_name.is_empty() {
+                    // This is an extension function from parser2
+                    let receiver_type = parse_receiver_type_string(receiver_str);
+                    let inner_function = Statement::FunctionDeclaration {
+                        name: method_name.to_string(),
+                        parameters,
+                        return_type,
+                        primitive_return,
+                        body,
+                        modifiers,
+                        span: span.clone(),
+                        type_parameters,
+                        generic_signature,
+                        where_clause,
+                    };
+                    return desugar_extension_function(
+                        receiver_type,
+                        Box::new(inner_function),
+                        span,
+                        context,
+                    );
+                }
+            }
+
             let mut should_infer_return = return_type.is_none();
             let param_count = parameters.len();
 

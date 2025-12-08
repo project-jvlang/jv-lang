@@ -356,7 +356,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             } => self.infer_binary_expression(op, left, right),
             Expression::Unary { op, operand, .. } => self.infer_unary_expression(op, operand),
             Expression::Call { function, args, .. } => {
-                let fn_ty = self.infer_expression(function);
+                // First, collect argument types
                 let mut argument_types = Vec::with_capacity(args.len());
                 for arg in args {
                     let ty = match arg {
@@ -365,6 +365,22 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
                     };
                     argument_types.push(ty);
                 }
+
+                // Try to resolve extension method with overload awareness
+                let fn_ty = match function.as_ref() {
+                    Expression::MemberAccess { object, property, span }
+                    | Expression::NullSafeMemberAccess { object, property, span } => {
+                        let receiver_ty = self.infer_expression(object);
+                        self.resolve_extension_call_with_arity(
+                            &receiver_ty,
+                            property,
+                            args.len(),
+                            span,
+                        )
+                        .unwrap_or_else(|| TypeKind::Unknown)
+                    }
+                    _ => self.infer_expression(function),
+                };
 
                 let result_ty = self.env.fresh_type_variable();
                 let expected_fn = TypeKind::function(argument_types, result_ty.clone());
@@ -628,6 +644,66 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             let (receiver, scheme) = candidates[0];
             self.enqueue_receiver_constraint(*id, receiver, property);
             return Some(self.env.instantiate(scheme));
+        }
+
+        None
+    }
+
+    /// Resolves extension method with overload awareness based on argument count.
+    fn resolve_extension_call_with_arity(
+        &mut self,
+        receiver_ty: &TypeKind,
+        property: &str,
+        arg_count: usize,
+        span: &Span,
+    ) -> Option<TypeKind> {
+        if let TypeKind::Optional(inner) = receiver_ty {
+            return self.resolve_extension_call_with_arity(inner, property, arg_count, span);
+        }
+
+        if let Some(receiver) = Self::receiver_name(receiver_ty) {
+            let schemes = self.extensions.lookup_all(receiver, property);
+            if schemes.is_empty() {
+                return None;
+            }
+
+            // Find the overload that matches the argument count
+            for scheme in &schemes {
+                let instantiated = self.env.instantiate(scheme);
+                if let TypeKind::Function(params, _) = &instantiated {
+                    if params.len() == arg_count {
+                        return Some(instantiated);
+                    }
+                }
+            }
+
+            // Fall back to first overload if no exact match
+            return Some(self.env.instantiate(schemes[0]));
+        }
+
+        // For type variables, get all candidates and resolve by arity
+        if let TypeKind::Variable(id) = receiver_ty {
+            let candidates = self.extensions.candidates_for_method(property);
+            if candidates.is_empty() {
+                return None;
+            }
+
+            // Find a candidate matching the argument count
+            for (receiver, scheme) in &candidates {
+                let instantiated = self.env.instantiate(scheme);
+                if let TypeKind::Function(params, _) = &instantiated {
+                    if params.len() == arg_count {
+                        self.enqueue_receiver_constraint(*id, receiver, property);
+                        return Some(instantiated);
+                    }
+                }
+            }
+
+            // Fall back to first candidate if no exact arity match
+            if let Some((receiver, scheme)) = candidates.first() {
+                self.enqueue_receiver_constraint(*id, receiver, property);
+                return Some(self.env.instantiate(scheme));
+            }
         }
 
         None

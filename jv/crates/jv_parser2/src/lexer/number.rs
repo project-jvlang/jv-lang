@@ -62,6 +62,11 @@ pub(crate) fn lex_number(lexer: &mut Lexer<'_>) -> Token {
         }
     }
 
+    // 型サフィックス: f/F (float), d/D (double), L (long)
+    if matches!(lexer.peek(), Some(b'f' | b'F' | b'd' | b'D' | b'L')) {
+        lexer.advance();
+    }
+
     // 単位サフィックス @ms, @km など
     if matches!(lexer.peek(), Some(b'@')) {
         lexer.advance();

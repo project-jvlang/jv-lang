@@ -199,6 +199,111 @@ val 室温: Double@[K] = 298.15
 }
 
 #[test]
+fn parses_multi_parameter_lambda_without_parens() {
+    let code = r#"fun demo() {
+    val result = items.fold(0) { acc value -> acc + value }
+}"#;
+
+    let source = Source::from_str(code);
+    let lexer = Lexer::new(source);
+    let arena = Arena::new();
+    let mut parser = Parser::new(lexer, &arena);
+    let result = parser.parse();
+
+    if !result.diagnostics.is_empty() {
+        for diag in &result.diagnostics {
+            eprintln!("Diagnostic: {} at {:?}", diag.message, diag.span);
+        }
+    }
+
+    let prog = result.ast.expect("should parse").to_owned();
+    assert_eq!(prog.statements.len(), 1, "should have one function statement");
+
+    // Extract the lambda from the fold call
+    match &prog.statements[0] {
+        Statement::FunctionDeclaration { body, .. } => {
+            // Find the lambda in the body
+            let body_str = format!("{:?}", body);
+            eprintln!("Body: {}", body_str);
+            // The lambda should have 2 parameters: acc and value
+            assert!(body_str.contains(r#"Lambda"#),
+                    "should contain a Lambda expression: {}", body_str);
+            // Verify both parameter names appear - if only one, lambda parsed incorrectly
+            assert!(body_str.contains(r#"name: "acc""#), "lambda should have 'acc' parameter");
+            assert!(body_str.contains(r#"name: "value""#), "lambda should have 'value' parameter");
+        }
+        other => panic!("expected FunctionDeclaration, got {:?}", other),
+    }
+}
+
+#[test]
+fn parses_reduce_style_lambda() {
+    // Test the exact pattern from stdlib: { left right -> ... }
+    let code = r#"fun demo() {
+    return this.reduce { left right ->
+        operation(
+            left
+            right
+        )
+    }
+}"#;
+
+    let source = Source::from_str(code);
+    let lexer = Lexer::new(source);
+    let arena = Arena::new();
+    let mut parser = Parser::new(lexer, &arena);
+    let result = parser.parse();
+
+    if !result.diagnostics.is_empty() {
+        for diag in &result.diagnostics {
+            eprintln!("Diagnostic: {} at {:?}", diag.message, diag.span);
+        }
+    }
+
+    let prog = result.ast.expect("should parse").to_owned();
+    let body_str = format!("{:?}", prog);
+    eprintln!("Parsed: {}", body_str);
+
+    // Should have both 'left' and 'right' as lambda parameters
+    assert!(body_str.contains(r#"name: "left""#), "lambda should have 'left' parameter: {}", body_str);
+    assert!(body_str.contains(r#"name: "right""#), "lambda should have 'right' parameter: {}", body_str);
+}
+
+#[test]
+fn parses_trailing_lambda_after_member_access() {
+    // Test: this.toStream().flatMap { value -> value }
+    // Should parse flatMap as a call with trailing lambda argument
+    let code = r#"fun demo() {
+    return this.toStream().flatMap { value -> value }
+}"#;
+
+    let source = Source::from_str(code);
+    let lexer = Lexer::new(source);
+    let arena = Arena::new();
+    let mut parser = Parser::new(lexer, &arena);
+    let result = parser.parse();
+
+    if !result.diagnostics.is_empty() {
+        for diag in &result.diagnostics {
+            eprintln!("Diagnostic: {} at {:?}", diag.message, diag.span);
+        }
+    }
+
+    let prog = result.ast.expect("should parse").to_owned();
+    let body_str = format!("{:?}", prog);
+    eprintln!("Parsed: {}", body_str);
+
+    // The flatMap should be parsed as a Call, not a MemberAccess
+    // It should have a Lambda argument with parameter "value"
+    assert!(body_str.contains(r#"name: "value""#), "lambda should have 'value' parameter: {}", body_str);
+
+    // The call should be to flatMap, not just a member access
+    // Check that there's a Call with function being MemberAccess to "flatMap"
+    assert!(body_str.contains(r#"property: "flatMap""#), "should have flatMap member access: {}", body_str);
+    assert!(body_str.contains("Lambda"), "should have a lambda as argument: {}", body_str);
+}
+
+#[test]
 fn parses_string_interpolation_with_member_access() {
     let code = r#"fun render(item) {
     return "${item.name} - ${status}"

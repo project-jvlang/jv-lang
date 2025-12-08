@@ -310,6 +310,16 @@ impl ConstraintSolver {
                     })
                 }
             }
+            // Auto-boxing: Primitive can unify with Boxed of same type
+            (TypeKind::Primitive(a), TypeKind::Boxed(b)) if a == b => {
+                // Prefer the boxed type for the unified result
+                Ok(TypeKind::Boxed(a))
+            }
+            // Auto-unboxing: Boxed can unify with Primitive of same type
+            (TypeKind::Boxed(a), TypeKind::Primitive(b)) if a == b => {
+                // Prefer the primitive type for the unified result
+                Ok(TypeKind::Primitive(a))
+            }
             (TypeKind::Reference(a), TypeKind::Reference(b)) => {
                 if a == b {
                     Ok(TypeKind::reference(a))

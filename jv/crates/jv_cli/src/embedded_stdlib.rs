@@ -919,7 +919,15 @@ impl<'a> MetadataCollector<'a> {
     fn visit_statement(&mut self, statement: &Statement) {
         match statement {
             Statement::FunctionDeclaration { name, .. } => {
-                self.metadata.functions.insert(name.clone());
+                // Check if this is an extension function (parser2 uses "Type.methodName" format)
+                if let Some(dot_idx) = name.find('.') {
+                    let method_name = &name[dot_idx + 1..];
+                    if !method_name.is_empty() {
+                        self.metadata.extension_methods.insert(method_name.to_string());
+                    }
+                } else {
+                    self.metadata.functions.insert(name.clone());
+                }
             }
             Statement::ExtensionFunction(extension) => {
                 if let Statement::FunctionDeclaration { name, .. } = extension.function.as_ref() {

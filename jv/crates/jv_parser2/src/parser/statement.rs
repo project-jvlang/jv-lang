@@ -122,10 +122,8 @@ fn parse_import<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<State
             }
             parser.advance();
         } else if token.kind == TokenKind::Multiply {
-            if !path.is_empty() {
-                path.push('.');
-            }
-            path.push('*');
+            // Don't add '.*' to path - the is_wildcard flag indicates it's a wildcard import
+            // The path should be just "jv.collections", not "jv.collections.*"
             is_wildcard = true;
             parser.advance();
             break;

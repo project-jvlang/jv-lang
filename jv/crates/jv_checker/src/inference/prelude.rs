@@ -36,6 +36,10 @@ fn scheme(vars: Vec<TypeId>, ty: TypeKind) -> TypeScheme {
     TypeScheme::new(vars, ty)
 }
 
+fn optional(inner: TypeKind) -> TypeKind {
+    TypeKind::optional(inner)
+}
+
 /// Install built-in symbols and extension functions into the provided environment.
 pub fn install_prelude(env: &mut TypeEnvironment) -> ExtensionRegistry {
     let mut registry = ExtensionRegistry::new();
@@ -107,11 +111,22 @@ fn register_stream_extensions(env: &mut TypeEnvironment, registry: &mut Extensio
         ),
     );
 
-    // sorted / sortedBy
+    // sorted() - no args, natural ordering
     registry.register(
         STREAM,
         "sorted",
         TypeScheme::monotype(function(Vec::new(), primitive(STREAM))),
+    );
+    // sorted(Comparator) - takes a Comparator<T> = (T, T) -> int
+    let sorted_cmp_t = env.fresh_type_id();
+    let comparator = function(
+        vec![type_var(sorted_cmp_t), type_var(sorted_cmp_t)],
+        primitive(INT),
+    );
+    registry.register(
+        STREAM,
+        "sorted",
+        scheme(vec![sorted_cmp_t], function(vec![comparator], primitive(STREAM))),
     );
     let sorted_by_t = env.fresh_type_id();
     let sorted_by_key = env.fresh_type_id();
@@ -145,7 +160,7 @@ fn register_stream_extensions(env: &mut TypeEnvironment, registry: &mut Extensio
         ),
     );
 
-    // reduce: (T, T) -> T
+    // reduce: (T, T) -> T returns Optional<T>
     let reduce_t = env.fresh_type_id();
     let reduce_op = function(
         vec![type_var(reduce_t), type_var(reduce_t)],
@@ -156,7 +171,7 @@ fn register_stream_extensions(env: &mut TypeEnvironment, registry: &mut Extensio
         "reduce",
         scheme(
             vec![reduce_t],
-            function(vec![reduce_op], type_var(reduce_t)),
+            function(vec![reduce_op], optional(type_var(reduce_t))),
         ),
     );
 
@@ -308,7 +323,7 @@ fn register_iterable_extensions(env: &mut TypeEnvironment, registry: &mut Extens
         "reduce",
         scheme(
             vec![iterable_reduce_t],
-            function(vec![iterable_reduce_op], type_var(iterable_reduce_t)),
+            function(vec![iterable_reduce_op], optional(type_var(iterable_reduce_t))),
         ),
     );
 

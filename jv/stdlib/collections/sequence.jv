@@ -125,17 +125,18 @@ fun Stream<Double>.sum(): Double {
 /**
  * Primitive-specialized terminal adapters for raw JDK streams.
  */
-fun <T> Stream<T>.sumIntFamily(): Int
-    where T : int, T : char, T : short {
-    return this
-        .mapToInt { candidate ->
-            when (candidate is Character) {
-                true -> candidate.toString().codePointAt(0)
-                else -> (candidate as Number).intValue()
-            }
-        }
-        .sum()
-}
+// TODO: Re-enable once parser2 when expression handling is fixed
+// fun <T> Stream<T>.sumIntFamily(): Int
+//     where T : int, T : char, T : short {
+//     return this
+//         .mapToInt { candidate ->
+//             when (candidate is Character) {
+//                 true -> candidate.toString().codePointAt(0)
+//                 else -> (candidate as Number).intValue()
+//             }
+//         }
+//         .sum()
+// }
 
 fun <T> Stream<T>.sumLongFamily(): Long
     where T : long {
@@ -188,6 +189,10 @@ fun <T, R> Iterable<T>.flatMapIterable(transform: (T) -> Iterable<R>): Stream<R>
 
 fun <T, R> Iterable<T>.flatMapStream(transform: (T) -> Stream<R>): Stream<R> {
     return this.toStream().flatMap { value -> transform(value) }
+}
+
+fun <T, R> Iterable<T>.flatMap(transform: (T) -> Iterable<R>): Stream<R> {
+    return this.flatMapIterable(transform)
 }
 
 fun <T : Comparable<T>> Iterable<T>.sorted(): Stream<T> {
@@ -243,25 +248,26 @@ fun Iterable<Double>.sum(): Double {
     return Sequence.sumDoubleFamily(Sequence.toStream(this))
 }
 
-fun <T> Iterable<T>.forEach(action: (T) -> Unit) {
+fun <T> Iterable<T>.forEach(action: (T) -> Unit): Unit {
     this.toStream().forEach { value -> action(value) }
 }
 
-fun <T, K> Iterable<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
-    val result = LinkedHashMap<K, List<T>>()
-    for (element in this) {
-        val key = keySelector(element)
-        val bucket = result.computeIfAbsent(key) { ArrayList<T>() }
-        bucket.add(element)
-    }
-    return result
-}
+// TODO: Re-enable once List.add and Map.computeIfAbsent are properly typed
+// fun <T, K> Iterable<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
+//     val result = LinkedHashMap<K, List<T>>()
+//     for (element in this) {
+//         val key = keySelector(element)
+//         val bucket = result.computeIfAbsent(key) { ArrayList<T>() }
+//         bucket.add(element)
+//     }
+//     return result
+// }
 
-fun <T, K, V> Iterable<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
-    val result = LinkedHashMap<K, V>()
-    for (element in this) {
-        val entry = transform(element)
-        result.put(entry.getKey(), entry.getValue())
-    }
-    return result
-}
+// fun <T, K, V> Iterable<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
+//     val result = LinkedHashMap<K, V>()
+//     for (element in this) {
+//         val entry = transform(element)
+//         result.put(entry.getKey(), entry.getValue())
+//     }
+//     return result
+// }
