@@ -683,14 +683,14 @@ include = ["src/**/*.jv"]
             emit_telemetry: false,
             parallel_inference: false,
             inference_workers: None,
-        constraint_batch: None,
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
-        logging_cli: Default::default(),
-        logging_env: Default::default(),
-    };
+            constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
+            logging_cli: Default::default(),
+            logging_env: Default::default(),
+        };
 
         let plan =
             pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)
@@ -782,14 +782,14 @@ include = ["src/**/*.jv"]
             emit_telemetry: false,
             parallel_inference: false,
             inference_workers: None,
-        constraint_batch: None,
-        apt_enabled: false,
-        apt_processors: None,
-        apt_processorpath: None,
-        apt_options: Vec::new(),
-        logging_cli: Default::default(),
-        logging_env: Default::default(),
-    };
+            constraint_batch: None,
+            apt_enabled: false,
+            apt_processors: None,
+            apt_processorpath: None,
+            apt_options: Vec::new(),
+            logging_cli: Default::default(),
+            logging_env: Default::default(),
+        };
 
         let plan =
             pipeline::BuildOptionsFactory::compose(project_root, settings, layout, overrides)

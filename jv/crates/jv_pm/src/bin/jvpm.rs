@@ -1174,7 +1174,14 @@ fn resolve_with_lock(
 ) -> Result<(ResolvedDependencies, Lockfile, PathBuf)> {
     // native モード: プロジェクトローカルの .jv/repository を使用
     let local_repository = ensure_local_repository(project_root)?;
-    resolve_with_lock_and_repository(manifest, project_root, options, repositories, mirrors, local_repository)
+    resolve_with_lock_and_repository(
+        manifest,
+        project_root,
+        options,
+        repositories,
+        mirrors,
+        local_repository,
+    )
 }
 
 fn resolve_with_lock_and_repository(

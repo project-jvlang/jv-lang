@@ -81,7 +81,9 @@ impl RepositoryManager {
     }
 
     /// カスタムローカルリポジトリパスを指定して初期化する（wrapper モード用）。
-    pub fn with_local_repository(local_repository: impl Into<PathBuf>) -> Result<Self, RepositoryError> {
+    pub fn with_local_repository(
+        local_repository: impl Into<PathBuf>,
+    ) -> Result<Self, RepositoryError> {
         Self::build(local_repository.into(), None)
     }
 

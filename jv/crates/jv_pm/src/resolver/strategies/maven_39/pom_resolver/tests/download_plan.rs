@@ -752,8 +752,9 @@ fn wrapper_download_plan_does_not_include_plugin_transitives_red() {
         .expect("runtime");
     let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
 
-    let base_closure = pom_resolver::resolve_union_per_root(&resolver, &coords, ClosureOptions::base())
-        .expect("base closure");
+    let base_closure =
+        pom_resolver::resolve_union_per_root(&resolver, &coords, ClosureOptions::base())
+            .expect("base closure");
     let plugin_roots: Vec<ArtifactCoordinates> = coords
         .iter()
         .filter(|c| c.group_id == "org.apache.maven.plugins")
@@ -784,7 +785,10 @@ fn wrapper_download_plan_does_not_include_plugin_transitives_red() {
         "baseline coordinates must be preserved even when plugins have extra compile deps: missing={missing:?}"
     );
     assert!(
-        plan_set.contains(&format!("{}:{}:{}", flexmark.group_id, flexmark.artifact_id, flexmark.version)),
+        plan_set.contains(&format!(
+            "{}:{}:{}",
+            flexmark.group_id, flexmark.artifact_id, flexmark.version
+        )),
         "plugin compile dependency should be present in download_plan"
     );
 }
@@ -1143,14 +1147,32 @@ fn base_closure_uses_nearest_version_wins_strategy() {
         &cache,
         &root,
         &[
-            (&lib_v1.group_id, &lib_v1.artifact_id, &lib_v1.version, None, false),
-            (&helper.group_id, &helper.artifact_id, &helper.version, None, false),
+            (
+                &lib_v1.group_id,
+                &lib_v1.artifact_id,
+                &lib_v1.version,
+                None,
+                false,
+            ),
+            (
+                &helper.group_id,
+                &helper.artifact_id,
+                &helper.version,
+                None,
+                false,
+            ),
         ],
     );
     store_pom(
         &cache,
         &helper,
-        &[(&lib_v2.group_id, &lib_v2.artifact_id, &lib_v2.version, None, false)],
+        &[(
+            &lib_v2.group_id,
+            &lib_v2.artifact_id,
+            &lib_v2.version,
+            None,
+            false,
+        )],
     );
     store_pom(&cache, &lib_v1, &[]);
     store_pom(&cache, &lib_v2, &[]);
@@ -1165,15 +1187,24 @@ fn base_closure_uses_nearest_version_wins_strategy() {
         .collect();
 
     assert!(
-        ids.contains(&format!("{}:{}:{}", root.group_id, root.artifact_id, root.version)),
+        ids.contains(&format!(
+            "{}:{}:{}",
+            root.group_id, root.artifact_id, root.version
+        )),
         "root should be present in closure"
     );
     assert!(
-        ids.contains(&format!("{}:{}:{}", lib_v1.group_id, lib_v1.artifact_id, lib_v1.version)),
+        ids.contains(&format!(
+            "{}:{}:{}",
+            lib_v1.group_id, lib_v1.artifact_id, lib_v1.version
+        )),
         "Nearest strategy should select lib:1.0.0 (depth 1)"
     );
     assert!(
-        !ids.contains(&format!("{}:{}:{}", lib_v2.group_id, lib_v2.artifact_id, lib_v2.version)),
+        !ids.contains(&format!(
+            "{}:{}:{}",
+            lib_v2.group_id, lib_v2.artifact_id, lib_v2.version
+        )),
         "Nearest strategy should NOT include lib:2.0.0 (depth 2, loses to lib:1.0.0)"
     );
 }
@@ -1256,7 +1287,11 @@ fn wrapper_closure_matches_commons_lang3_fixture_multiple_versions() {
         let mut by_ga: std::collections::HashMap<(String, String, Option<String>), String> =
             std::collections::HashMap::new();
         for c in entries {
-            let key = (c.group_id.clone(), c.artifact_id.clone(), c.classifier.clone());
+            let key = (
+                c.group_id.clone(),
+                c.artifact_id.clone(),
+                c.classifier.clone(),
+            );
             by_ga
                 .entry(key)
                 .and_modify(|existing| {
@@ -1517,8 +1552,7 @@ fn wrapper_closure_includes_provided_and_skips_test_dependencies_for_commons_lan
     store_pom(&cache, &provided, &[]);
     store_pom(&cache, &test_dep, &[]);
 
-    let closure =
-        resolve_plugin_closure(&resolver, &[root.clone()]).expect("wrapper closure");
+    let closure = resolve_plugin_closure(&resolver, &[root.clone()]).expect("wrapper closure");
     let ids: std::collections::HashSet<String> = closure
         .iter()
         .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
@@ -1931,22 +1965,27 @@ fn plugin_download_filters_to_baseline_versions_for_commons_ga() {
         .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
         .expect("closure");
     let versions: std::collections::HashMap<(String, String), std::collections::HashSet<String>> =
-        closure.iter().fold(
-            std::collections::HashMap::new(),
-            |mut acc, c| {
+        closure
+            .iter()
+            .fold(std::collections::HashMap::new(), |mut acc, c| {
                 acc.entry((c.group_id.clone(), c.artifact_id.clone()))
                     .or_default()
                     .insert(c.version.clone());
                 acc
-            },
-        );
+            });
 
     let lang_versions = versions
-        .get(&(lang_baseline.group_id.clone(), lang_baseline.artifact_id.clone()))
+        .get(&(
+            lang_baseline.group_id.clone(),
+            lang_baseline.artifact_id.clone(),
+        ))
         .cloned()
         .unwrap_or_default();
     let text_versions = versions
-        .get(&(text_baseline.group_id.clone(), text_baseline.artifact_id.clone()))
+        .get(&(
+            text_baseline.group_id.clone(),
+            text_baseline.artifact_id.clone(),
+        ))
         .cloned()
         .unwrap_or_default();
 
@@ -2181,7 +2220,10 @@ fn plugin_execution_full_deduplicates_versions_and_skips_provided() {
     store_pom(&cache, &provided_dep, &[]);
 
     let closure = resolver
-        .resolve_closure_with_options(&[plugin_root.clone()], ClosureOptions::plugin_execution_full())
+        .resolve_closure_with_options(
+            &[plugin_root.clone()],
+            ClosureOptions::plugin_execution_full(),
+        )
         .expect("execution closure");
 
     let ids: HashSet<String> = closure

@@ -364,7 +364,7 @@ impl JavaCodeGenerator {
             self.push_variance_scope(&effective_type_parameters);
 
             let result = (|| -> Result<String, CodeGenError> {
-            let normalized_return_type = Self::normalize_void_like(&return_type);
+                let normalized_return_type = Self::normalize_void_like(&return_type);
                 let mut builder = self.builder();
                 self.render_annotations(&mut builder, modifiers);
 
