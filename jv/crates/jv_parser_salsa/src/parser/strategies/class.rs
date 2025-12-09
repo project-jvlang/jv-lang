@@ -2,12 +2,6 @@ use crate::lexer::TokenKind;
 
 use super::{ParserContext, StatementStrategy, SyntaxKind};
 
-#[derive(Debug)]
-struct ParamInfo {
-    token_index: usize,
-    is_var: bool,
-}
-
 pub struct ClassStrategy;
 pub struct DataClassStrategy;
 
@@ -73,7 +67,7 @@ fn parse_class(ctx: &mut ParserContext, kind: SyntaxKind, is_data_class: bool) -
     }
 
     // コンストラクタパラメータ (簡易): ( [modifiers] pattern [: Type] [= default] {, ...} )
-    let params = parse_primary_constructor(ctx);
+    parse_primary_constructor(ctx);
 
     // 継承/実装 (簡易): : Base, Trait
     if ctx.peek_kind() == Some(TokenKind::Colon) {
@@ -95,24 +89,18 @@ fn parse_class(ctx: &mut ParserContext, kind: SyntaxKind, is_data_class: bool) -
 
     // メンバーはステートメント戦略を流用して解析する（フィールド/メソッド/ネストクラスをカバー）。
     if ctx.peek_kind() == Some(TokenKind::LeftBrace) {
-        parse_class_body(ctx, is_data_class, &params);
-    } else if is_data_class {
-        // data class でボディがなくてもパラメータ由来のメンバーを生成する
-        ctx.start_node(SyntaxKind::ClassBody);
-        emit_synthesized_members(ctx, &params);
-        ctx.finish_node();
+        parse_class_body(ctx, is_data_class);
+    } else {
+        // ボディなしの場合は何も生成しない
     }
     ctx.finish_node();
     true
 }
 
-fn parse_class_body(ctx: &mut ParserContext, is_data_class: bool, params: &[ParamInfo]) {
+fn parse_class_body(ctx: &mut ParserContext, _is_data_class: bool) {
     ctx.start_node(SyntaxKind::ClassBody);
     if ctx.peek_kind() == Some(TokenKind::LeftBrace) {
         ctx.bump(); // {
-        if is_data_class {
-            emit_synthesized_members(ctx, params);
-        }
         while !ctx.is_eof() && ctx.peek_kind() != Some(TokenKind::RightBrace) {
             parse_modifiers(ctx);
             let look = ctx.peek_kind();
@@ -159,7 +147,7 @@ fn parse_modifiers(ctx: &mut ParserContext) {
     }
 }
 
-fn parse_parameter_pattern(ctx: &mut ParserContext, params: &mut Vec<ParamInfo>, is_var: bool) {
+fn parse_parameter_pattern(ctx: &mut ParserContext) {
     if ctx.peek_kind() == Some(TokenKind::LeftParen) {
         // デストラクト
         ctx.start_node(SyntaxKind::DestructuringPattern);
@@ -187,34 +175,26 @@ fn parse_parameter_pattern(ctx: &mut ParserContext, params: &mut Vec<ParamInfo>,
         }
         ctx.finish_node();
     } else if ctx.peek_kind() == Some(TokenKind::Identifier) {
-        let idx = ctx.cursor;
         ctx.bump();
-        params.push(ParamInfo {
-            token_index: idx,
-            is_var,
-        });
     } else {
         ctx.error("コンストラクタパラメータ名が必要です");
         ctx.bump();
     }
 }
 
-fn parse_primary_constructor(ctx: &mut ParserContext) -> Vec<ParamInfo> {
-    let mut params = Vec::new();
+fn parse_primary_constructor(ctx: &mut ParserContext) {
     if ctx.peek_kind() == Some(TokenKind::LeftParen) {
         ctx.start_node(SyntaxKind::ClassParameterList);
         ctx.bump(); // (
         while ctx.peek_kind() != Some(TokenKind::RightParen) && !ctx.is_eof() {
             ctx.start_node(SyntaxKind::ClassParameter);
             parse_modifiers(ctx);
-            let mut is_var = false;
             if ctx.peek_kind() == Some(TokenKind::Val) {
                 ctx.bump();
             } else if ctx.peek_kind() == Some(TokenKind::Var) {
-                is_var = true;
                 ctx.bump();
             }
-            parse_parameter_pattern(ctx, &mut params, is_var);
+            parse_parameter_pattern(ctx);
             if ctx.peek_kind() == Some(TokenKind::Colon) {
                 ctx.bump();
                 ctx.bump_while(|k| {
@@ -239,24 +219,5 @@ fn parse_primary_constructor(ctx: &mut ParserContext) -> Vec<ParamInfo> {
             ctx.error("コンストラクタパラメータリストを `)` で閉じてください");
         }
         ctx.finish_node(); // ClassParameterList
-    }
-    params
-}
-
-fn emit_synthesized_members(ctx: &mut ParserContext, params: &[ParamInfo]) {
-    for param in params {
-        let decl_kind = if param.is_var {
-            SyntaxKind::VarDeclaration
-        } else {
-            SyntaxKind::ValDeclaration
-        };
-        ctx.start_node(decl_kind);
-        ctx.start_node(SyntaxKind::Identifier);
-        ctx.events.push(super::super::ParseEvent::Token {
-            kind: SyntaxKind::Identifier,
-            token_index: param.token_index,
-        });
-        ctx.finish_node(); // Identifier
-        ctx.finish_node(); // Val/Var
     }
 }
