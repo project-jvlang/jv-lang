@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::lexer::Lexer;
-use crate::parser::ParseResult;
+use crate::parser::{self, ParseOutput, ParseResult};
 
 #[salsa::input]
 pub struct FileInput {
@@ -15,12 +15,14 @@ pub struct FileInput {
 pub fn parse(db: &dyn ParserDatabase, file: FileInput) -> Arc<ParseResult> {
     let lexer = Lexer::new(file.text(db).as_ref());
     match lexer {
-        Ok(lexer) => Arc::new(ParseResult {
-            tokens: lexer.collect_owned_tokens(),
-            errors: Vec::new(),
-        }),
+        Ok(lexer) => Arc::new(parser::parse(lexer.collect_owned_tokens())),
         Err(err) => Arc::new(ParseResult {
             tokens: Vec::new(),
+            output: ParseOutput {
+                events: Vec::new(),
+                diagnostics: Vec::new(),
+                recovered: false,
+            },
             errors: vec![err.to_string()],
         }),
     }
