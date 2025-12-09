@@ -32,33 +32,7 @@ impl StatementStrategy for IfStrategy {
 }
 
 pub fn parse_block(ctx: &mut ParserContext) {
-    if ctx.peek_kind() == Some(TokenKind::LeftBrace) {
-        ctx.start_node(SyntaxKind::Block);
-        // 先頭の `{` を消費
-        ctx.bump();
-        let mut depth = 0usize;
-        while let Some(kind) = ctx.peek_kind() {
-            match kind {
-                TokenKind::LeftBrace => {
-                    depth += 1;
-                    ctx.bump();
-                }
-                TokenKind::RightBrace => {
-                    ctx.bump();
-                    if depth == 0 {
-                        break;
-                    }
-                    depth -= 1;
-                }
-                _ => {
-                    if !ctx.bump() {
-                        break;
-                    }
-                }
-            }
-        }
-        ctx.finish_node();
-    } else {
+    if !ctx.parse_block() {
         // 単文形式
         let _ = ctx.parse_expression();
     }

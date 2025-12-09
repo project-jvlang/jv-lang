@@ -40,7 +40,7 @@ impl ParserContext {
     pub fn parse(&mut self) -> ParseOutput {
         self.start_node(SyntaxKind::Root);
         self.start_node(SyntaxKind::StatementList);
-        self.parse_statement_list();
+        self.parse_statement_list(None);
         self.finish_node(); // StatementList
         self.finish_node(); // Root
         self.into_output()
@@ -56,8 +56,14 @@ impl ParserContext {
     }
 
     /// ステートメント列を解析する。
-    fn parse_statement_list(&mut self) {
+    /// ステートメント列を解析する。terminator が指定されている場合、そのトークンに遭遇した時点で終了する。
+    pub(crate) fn parse_statement_list(&mut self, terminator: Option<TokenKind>) {
         while !self.is_eof() {
+            if let Some(term) = terminator {
+                if self.peek_kind() == Some(term) {
+                    break;
+                }
+            }
             let before = self.cursor;
             if !self.parse_single_statement() {
                 if before == self.cursor {
@@ -75,6 +81,11 @@ impl ParserContext {
             Some(kind) => kind,
             None => return false,
         };
+
+        if lookahead == TokenKind::Semicolon {
+            self.bump();
+            return true;
+        }
 
         for strategy in strategies::registry() {
             if strategy.matches(self, lookahead) {
@@ -153,12 +164,13 @@ impl ParserContext {
     /// 診断を追加する。
     pub fn error(&mut self, message: impl Into<String>) {
         let span = self.current_span();
+        let message = message.into();
         self.events.push(ParseEvent::Error {
-            message: message.into(),
+            message: message.clone(),
             span,
         });
         self.diagnostics.push(ParserDiagnostic::new(
-            "parse-error",
+            message,
             DiagnosticSeverity::Error,
             span,
         ));
@@ -189,5 +201,23 @@ impl ParserContext {
     /// Pratt パーサーのエントリポイント。
     pub fn parse_expression(&mut self) -> bool {
         expression::parse_expression_bp(self, 0)
+    }
+
+    /// `{ ... }` ブロックを解析する。開始の `{` は呼び出し元で確認済みである前提。
+    pub fn parse_block(&mut self) -> bool {
+        if self.peek_kind() != Some(TokenKind::LeftBrace) {
+            return false;
+        }
+        self.start_node(SyntaxKind::Block);
+        self.bump(); // consume '{'
+        self.parse_statement_list(Some(TokenKind::RightBrace));
+        if self.peek_kind() == Some(TokenKind::RightBrace) {
+            self.bump();
+        } else {
+            self.error("ブロックが `}` で閉じられていません");
+            recover_statement(self);
+        }
+        self.finish_node();
+        true
     }
 }

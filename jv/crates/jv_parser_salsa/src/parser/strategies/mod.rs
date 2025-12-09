@@ -10,6 +10,7 @@ mod function;
 mod import;
 mod jump;
 mod package;
+mod unit;
 mod loops;
 mod resource;
 mod test;
@@ -24,6 +25,7 @@ pub use import::ImportStrategy;
 pub use jump::{BreakStrategy, ContinueStrategy, ReturnStrategy};
 pub use loops::{ForStrategy, WhileStrategy};
 pub use package::PackageStrategy;
+pub use unit::UnitTypeDefStrategy;
 pub use resource::{DeferStrategy, UseStrategy};
 pub use test::TestStrategy;
 pub use when::WhenStrategy;
@@ -57,6 +59,7 @@ pub fn registry() -> Vec<&'static dyn StatementStrategy> {
         &DeferStrategy,
         &SpawnStrategy,
         &AsyncStrategy,
+        &UnitTypeDefStrategy,
         &AssignmentStrategy,
         &ExpressionStrategy,
     ]

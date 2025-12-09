@@ -1,6 +1,6 @@
 use crate::lexer::TokenKind;
 
-use super::{ParserContext, SyntaxKind};
+use super::{recovery::recover_statement, OwnedToken, ParserContext, SyntaxKind};
 
 /// Pratt パーサーのコア実装。
 pub fn parse_expression_bp(ctx: &mut ParserContext, min_bp: u8) -> bool {
@@ -10,14 +10,17 @@ pub fn parse_expression_bp(ctx: &mut ParserContext, min_bp: u8) -> bool {
 
     ctx.start_node(SyntaxKind::Expression);
     let mut ok = parse_prefix(ctx);
+    if !ok {
+        recover_statement(ctx);
+    }
 
     loop {
-        let op = match ctx.peek_kind() {
-            Some(kind) => kind,
+        let op_tok = match ctx.peek(0) {
+            Some(tok) => tok.clone(),
             None => break,
         };
 
-        if let Some((l_bp, r_bp)) = infix_binding_power(op) {
+        if let Some((l_bp, r_bp)) = infix_binding_power(&op_tok) {
             if l_bp < min_bp {
                 break;
             }
@@ -26,7 +29,7 @@ pub fn parse_expression_bp(ctx: &mut ParserContext, min_bp: u8) -> bool {
             continue;
         }
 
-        if is_postfix(op) {
+        if is_postfix(&op_tok) {
             ok = parse_postfix(ctx) && ok;
             continue;
         }
@@ -61,13 +64,22 @@ fn parse_prefix(ctx: &mut ParserContext) -> bool {
             ctx.bump();
             parse_expression_bp(ctx, r_bp)
         }
-        _ => false,
+        _ => {
+            ctx.error("式が必要です");
+            ctx.bump(); // consume to avoid infinite loop
+            false
+        }
     }
 }
 
 fn parse_postfix(ctx: &mut ParserContext) -> bool {
-    match ctx.peek_kind() {
-        Some(TokenKind::LeftParen) => {
+    let tok = match ctx.peek(0) {
+        Some(t) => t.clone(),
+        None => return false,
+    };
+
+    match tok.kind {
+        TokenKind::LeftParen => {
             ctx.bump(); // (
             // 引数リスト
             while !ctx.is_eof() && ctx.peek_kind() != Some(TokenKind::RightParen) {
@@ -83,18 +95,39 @@ fn parse_postfix(ctx: &mut ParserContext) -> bool {
             }
             true
         }
-        Some(TokenKind::Dot) | Some(TokenKind::NullSafe) => {
-            ctx.bump(); // . or ?.
+        TokenKind::Dot => {
+            ctx.bump(); // .
             if ctx.peek_kind() == Some(TokenKind::Identifier) {
                 ctx.bump();
+            } else {
+                ctx.error("メンバ名が必要です");
             }
             true
         }
-        Some(TokenKind::LeftBracket) => {
+        TokenKind::NullSafe => {
+            ctx.bump(); // ?.
+            if ctx.peek_kind() == Some(TokenKind::LeftBracket) {
+                ctx.bump(); // [
+                let _ = parse_expression_bp(ctx, 0);
+                if ctx.peek_kind() == Some(TokenKind::RightBracket) {
+                    ctx.bump();
+                } else {
+                    ctx.error("インデックス式を `]` で閉じてください");
+                }
+            } else if ctx.peek_kind() == Some(TokenKind::Identifier) {
+                ctx.bump();
+            } else {
+                ctx.error("null 安全アクセスのターゲットが必要です");
+            }
+            true
+        }
+        TokenKind::LeftBracket => {
             ctx.bump();
             let _ = parse_expression_bp(ctx, 0);
             if ctx.peek_kind() == Some(TokenKind::RightBracket) {
                 ctx.bump();
+            } else {
+                ctx.error("インデックス式を `]` で閉じてください");
             }
             true
         }
@@ -123,10 +156,13 @@ fn is_prefix_operator(kind: TokenKind) -> bool {
     )
 }
 
-fn is_postfix(kind: TokenKind) -> bool {
+fn is_postfix(tok: &OwnedToken) -> bool {
     matches!(
-        kind,
-        TokenKind::LeftParen | TokenKind::Dot | TokenKind::NullSafe | TokenKind::LeftBracket
+        tok.kind,
+        TokenKind::LeftParen
+            | TokenKind::Dot
+            | TokenKind::NullSafe
+            | TokenKind::LeftBracket
     )
 }
 
@@ -137,13 +173,18 @@ fn prefix_binding_power(kind: TokenKind) -> (u8, u8) {
     }
 }
 
-fn infix_binding_power(op: TokenKind) -> Option<(u8, u8)> {
-    let power = match op {
+fn infix_binding_power(op: &OwnedToken) -> Option<(u8, u8)> {
+    let power = match op.kind {
         TokenKind::Or => (1, 2),
         TokenKind::And => (2, 3),
-        TokenKind::Equal | TokenKind::NotEqual => (3, 4),
+        TokenKind::Elvis => (3, 4),
+        TokenKind::Equal | TokenKind::NotEqual => (4, 5),
+        // NOTE: Rowan 版も is/as を専用 TokenKind にせず lexeme ベースで判定しているため、ここも同等の扱いにする。
+        // TODO: TokenKind に is/as を追加して lexeme 依存を排除する。
+        TokenKind::Identifier if op.lexeme == "is" => (4, 5),
+        TokenKind::Identifier if op.lexeme == "as" => (4, 5), // equality 相当の優先度
         TokenKind::Less | TokenKind::LessEqual | TokenKind::Greater | TokenKind::GreaterEqual => {
-            (4, 5)
+            (5, 6)
         }
         TokenKind::RangeExclusive | TokenKind::RangeInclusive => (5, 6),
         TokenKind::Plus | TokenKind::Minus => (6, 7),

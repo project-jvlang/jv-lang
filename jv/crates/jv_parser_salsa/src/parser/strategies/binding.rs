@@ -57,12 +57,7 @@ impl StatementStrategy for AssignmentStrategy {
 fn parse_binding(ctx: &mut ParserContext, kind: SyntaxKind) -> bool {
     ctx.start_node(kind);
     ctx.bump(); // val/var
-    if ctx.peek_kind() == Some(TokenKind::Identifier) {
-        ctx.start_node(SyntaxKind::Identifier);
-        ctx.bump();
-        ctx.finish_node();
-    }
-    // 型注釈をスキップ
+    parse_pattern(ctx);
     if ctx.peek_kind() == Some(TokenKind::Colon) {
         ctx.bump(); // :
         ctx.bump_while(|k| !matches!(k, TokenKind::Assign | TokenKind::Semicolon | TokenKind::Newline));
@@ -73,4 +68,37 @@ fn parse_binding(ctx: &mut ParserContext, kind: SyntaxKind) -> bool {
     }
     ctx.finish_node();
     true
+}
+
+fn parse_pattern(ctx: &mut ParserContext) {
+    if ctx.peek_kind() == Some(TokenKind::LeftParen) {
+        ctx.start_node(SyntaxKind::DestructuringPattern);
+        ctx.bump(); // (
+        while ctx.peek_kind() != Some(TokenKind::RightParen) && !ctx.is_eof() {
+            ctx.start_node(SyntaxKind::PatternElement);
+            if ctx.peek_kind() == Some(TokenKind::Identifier) || ctx.peek_kind() == Some(TokenKind::Underscore) {
+                ctx.bump();
+            } else {
+                ctx.error("パターン要素には識別子または _ が必要です");
+                ctx.bump();
+            }
+            ctx.finish_node();
+            if ctx.peek_kind() == Some(TokenKind::Comma) {
+                ctx.bump();
+                continue;
+            } else {
+                break;
+            }
+        }
+        if ctx.peek_kind() == Some(TokenKind::RightParen) {
+            ctx.bump();
+        } else {
+            ctx.error("デストラクトパターンを `)` で閉じてください");
+        }
+        ctx.finish_node();
+    } else if ctx.peek_kind() == Some(TokenKind::Identifier) {
+        ctx.start_node(SyntaxKind::Identifier);
+        ctx.bump();
+        ctx.finish_node();
+    }
 }
