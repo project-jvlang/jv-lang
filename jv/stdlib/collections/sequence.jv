@@ -124,19 +124,8 @@ fun Stream<Double>.sum(): Double {
 
 /**
  * Primitive-specialized terminal adapters for raw JDK streams.
+ * Note: sumIntFamily was removed - use type-specific Stream<T>.sum() instead
  */
-// TODO: Re-enable once parser2 when expression handling is fixed
-// fun <T> Stream<T>.sumIntFamily(): Int
-//     where T : int, T : char, T : short {
-//     return this
-//         .mapToInt { candidate ->
-//             when (candidate is Character) {
-//                 true -> candidate.toString().codePointAt(0)
-//                 else -> (candidate as Number).intValue()
-//             }
-//         }
-//         .sum()
-// }
 
 fun <T> Stream<T>.sumLongFamily(): Long
     where T : long {
@@ -225,27 +214,57 @@ fun <T> Iterable<T>.countElements(): Long {
 }
 
 fun Iterable<Byte>.sum(): Int {
-    return Sequence.sumIntFamily(Sequence.toStream(this))
+    val elements: List<Byte> = this.toList()
+    var total = 0
+    for (candidate in elements) {
+        total = total + candidate.intValue()
+    }
+    return total
 }
 
 fun Iterable<Short>.sum(): Int {
-    return Sequence.sumIntFamily(Sequence.toStream(this))
+    val elements: List<Short> = this.toList()
+    var total = 0
+    for (candidate in elements) {
+        total = total + candidate.intValue()
+    }
+    return total
 }
 
 fun Iterable<Int>.sum(): Int {
-    return Sequence.sumIntFamily(Sequence.toStream(this))
+    val elements: List<Int> = this.toList()
+    var total = 0
+    for (candidate in elements) {
+        total = total + candidate
+    }
+    return total
 }
 
 fun Iterable<Long>.sum(): Long {
-    return Sequence.sumLongFamily(Sequence.toStream(this))
+    val elements: List<Long> = this.toList()
+    var total = 0L
+    for (candidate in elements) {
+        total = total + candidate.longValue()
+    }
+    return total
 }
 
 fun Iterable<Float>.sum(): Float {
-    return Sequence.sumFloatFamily(Sequence.toStream(this))
+    val elements: List<Float> = this.toList()
+    var total = 0.0f
+    for (candidate in elements) {
+        total = total + candidate.floatValue()
+    }
+    return total
 }
 
 fun Iterable<Double>.sum(): Double {
-    return Sequence.sumDoubleFamily(Sequence.toStream(this))
+    val elements: List<Double> = this.toList()
+    var total = 0.0
+    for (candidate in elements) {
+        total = total + candidate.doubleValue()
+    }
+    return total
 }
 
 fun <T> Iterable<T>.forEach(action: (T) -> Unit): Unit {
