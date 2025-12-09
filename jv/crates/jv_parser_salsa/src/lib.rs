@@ -11,4 +11,6 @@ pub mod parser;
 pub mod pipeline;
 pub mod solver;
 
-pub use db::{CrateId, Database, FileId, ParserJar, SalsaDatabase, source_text};
+pub use db::{Database, FileInput, ParserDatabase, parse};
+pub use lexer::Span;
+pub use parser::{OwnedToken, ParseResult};

@@ -5,6 +5,7 @@ pub mod pipeline;
 pub mod plugins;
 
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use thiserror::Error;
 
 /// Token types for jv language
@@ -428,21 +429,24 @@ pub enum LayoutMode {
     Disabled,
 }
 
-pub struct Lexer {
-    input: String,
+pub struct Lexer<'a> {
+    input: Cow<'a, str>,
     layout_mode: LayoutMode,
 }
 
-impl Lexer {
-    pub fn new(input: String) -> Self {
+impl<'a> Lexer<'a> {
+    pub fn new(input: impl Into<Cow<'a, str>>) -> Self {
         Self {
-            input,
+            input: input.into(),
             layout_mode: LayoutMode::Enabled,
         }
     }
 
-    pub fn with_layout_mode(input: String, layout_mode: LayoutMode) -> Self {
-        Self { input, layout_mode }
+    pub fn with_layout_mode(input: impl Into<Cow<'a, str>>, layout_mode: LayoutMode) -> Self {
+        Self {
+            input: input.into(),
+            layout_mode,
+        }
     }
 
     pub fn tokenize(&mut self) -> Result<Vec<Token>, LexError> {
@@ -451,7 +455,7 @@ impl Lexer {
             PipelineStages, TokenPluginManager,
         };
 
-        let mut context = LexerContext::with_layout_mode(&self.input, self.layout_mode);
+        let mut context = LexerContext::with_layout_mode(self.input.as_ref(), self.layout_mode);
         let stages = PipelineStages::new(
             CharScanner::new(),
             Normalizer::new(),
