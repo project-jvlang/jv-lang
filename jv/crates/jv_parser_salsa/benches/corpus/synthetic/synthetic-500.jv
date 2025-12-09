@@ -1,0 +1,500 @@
+package bench.synthetic
+
+fun synthetic_0(): Int {
+    val base = 0
+    val next = base + 1
+    return next
+}
+
+fun synthetic_1(): Int {
+    val base = 1
+    val next = base + 2
+    return next
+}
+
+fun synthetic_2(): Int {
+    val base = 2
+    val next = base + 3
+    return next
+}
+
+fun synthetic_3(): Int {
+    val base = 3
+    val next = base + 1
+    return next
+}
+
+fun synthetic_4(): Int {
+    val base = 4
+    val next = base + 2
+    return next
+}
+
+fun synthetic_5(): Int {
+    val base = 5
+    val next = base + 3
+    return next
+}
+
+fun synthetic_6(): Int {
+    val base = 6
+    val next = base + 1
+    return next
+}
+
+fun synthetic_7(): Int {
+    val base = 7
+    val next = base + 2
+    return next
+}
+
+fun synthetic_8(): Int {
+    val base = 8
+    val next = base + 3
+    return next
+}
+
+fun synthetic_9(): Int {
+    val base = 9
+    val next = base + 1
+    return next
+}
+
+fun synthetic_10(): Int {
+    val base = 10
+    val next = base + 2
+    return next
+}
+
+fun synthetic_11(): Int {
+    val base = 11
+    val next = base + 3
+    return next
+}
+
+fun synthetic_12(): Int {
+    val base = 12
+    val next = base + 1
+    return next
+}
+
+fun synthetic_13(): Int {
+    val base = 13
+    val next = base + 2
+    return next
+}
+
+fun synthetic_14(): Int {
+    val base = 14
+    val next = base + 3
+    return next
+}
+
+fun synthetic_15(): Int {
+    val base = 15
+    val next = base + 1
+    return next
+}
+
+fun synthetic_16(): Int {
+    val base = 16
+    val next = base + 2
+    return next
+}
+
+fun synthetic_17(): Int {
+    val base = 17
+    val next = base + 3
+    return next
+}
+
+fun synthetic_18(): Int {
+    val base = 18
+    val next = base + 1
+    return next
+}
+
+fun synthetic_19(): Int {
+    val base = 19
+    val next = base + 2
+    return next
+}
+
+fun synthetic_20(): Int {
+    val base = 20
+    val next = base + 3
+    return next
+}
+
+fun synthetic_21(): Int {
+    val base = 21
+    val next = base + 1
+    return next
+}
+
+fun synthetic_22(): Int {
+    val base = 22
+    val next = base + 2
+    return next
+}
+
+fun synthetic_23(): Int {
+    val base = 23
+    val next = base + 3
+    return next
+}
+
+fun synthetic_24(): Int {
+    val base = 24
+    val next = base + 1
+    return next
+}
+
+fun synthetic_25(): Int {
+    val base = 25
+    val next = base + 2
+    return next
+}
+
+fun synthetic_26(): Int {
+    val base = 26
+    val next = base + 3
+    return next
+}
+
+fun synthetic_27(): Int {
+    val base = 27
+    val next = base + 1
+    return next
+}
+
+fun synthetic_28(): Int {
+    val base = 28
+    val next = base + 2
+    return next
+}
+
+fun synthetic_29(): Int {
+    val base = 29
+    val next = base + 3
+    return next
+}
+
+fun synthetic_30(): Int {
+    val base = 30
+    val next = base + 1
+    return next
+}
+
+fun synthetic_31(): Int {
+    val base = 31
+    val next = base + 2
+    return next
+}
+
+fun synthetic_32(): Int {
+    val base = 32
+    val next = base + 3
+    return next
+}
+
+fun synthetic_33(): Int {
+    val base = 33
+    val next = base + 1
+    return next
+}
+
+fun synthetic_34(): Int {
+    val base = 34
+    val next = base + 2
+    return next
+}
+
+fun synthetic_35(): Int {
+    val base = 35
+    val next = base + 3
+    return next
+}
+
+fun synthetic_36(): Int {
+    val base = 36
+    val next = base + 1
+    return next
+}
+
+fun synthetic_37(): Int {
+    val base = 37
+    val next = base + 2
+    return next
+}
+
+fun synthetic_38(): Int {
+    val base = 38
+    val next = base + 3
+    return next
+}
+
+fun synthetic_39(): Int {
+    val base = 39
+    val next = base + 1
+    return next
+}
+
+fun synthetic_40(): Int {
+    val base = 40
+    val next = base + 2
+    return next
+}
+
+fun synthetic_41(): Int {
+    val base = 41
+    val next = base + 3
+    return next
+}
+
+fun synthetic_42(): Int {
+    val base = 42
+    val next = base + 1
+    return next
+}
+
+fun synthetic_43(): Int {
+    val base = 43
+    val next = base + 2
+    return next
+}
+
+fun synthetic_44(): Int {
+    val base = 44
+    val next = base + 3
+    return next
+}
+
+fun synthetic_45(): Int {
+    val base = 45
+    val next = base + 1
+    return next
+}
+
+fun synthetic_46(): Int {
+    val base = 46
+    val next = base + 2
+    return next
+}
+
+fun synthetic_47(): Int {
+    val base = 47
+    val next = base + 3
+    return next
+}
+
+fun synthetic_48(): Int {
+    val base = 48
+    val next = base + 1
+    return next
+}
+
+fun synthetic_49(): Int {
+    val base = 49
+    val next = base + 2
+    return next
+}
+
+fun synthetic_50(): Int {
+    val base = 50
+    val next = base + 3
+    return next
+}
+
+fun synthetic_51(): Int {
+    val base = 51
+    val next = base + 1
+    return next
+}
+
+fun synthetic_52(): Int {
+    val base = 52
+    val next = base + 2
+    return next
+}
+
+fun synthetic_53(): Int {
+    val base = 53
+    val next = base + 3
+    return next
+}
+
+fun synthetic_54(): Int {
+    val base = 54
+    val next = base + 1
+    return next
+}
+
+fun synthetic_55(): Int {
+    val base = 55
+    val next = base + 2
+    return next
+}
+
+fun synthetic_56(): Int {
+    val base = 56
+    val next = base + 3
+    return next
+}
+
+fun synthetic_57(): Int {
+    val base = 57
+    val next = base + 1
+    return next
+}
+
+fun synthetic_58(): Int {
+    val base = 58
+    val next = base + 2
+    return next
+}
+
+fun synthetic_59(): Int {
+    val base = 59
+    val next = base + 3
+    return next
+}
+
+fun synthetic_60(): Int {
+    val base = 60
+    val next = base + 1
+    return next
+}
+
+fun synthetic_61(): Int {
+    val base = 61
+    val next = base + 2
+    return next
+}
+
+fun synthetic_62(): Int {
+    val base = 62
+    val next = base + 3
+    return next
+}
+
+fun synthetic_63(): Int {
+    val base = 63
+    val next = base + 1
+    return next
+}
+
+fun synthetic_64(): Int {
+    val base = 64
+    val next = base + 2
+    return next
+}
+
+fun synthetic_65(): Int {
+    val base = 65
+    val next = base + 3
+    return next
+}
+
+fun synthetic_66(): Int {
+    val base = 66
+    val next = base + 1
+    return next
+}
+
+fun synthetic_67(): Int {
+    val base = 67
+    val next = base + 2
+    return next
+}
+
+fun synthetic_68(): Int {
+    val base = 68
+    val next = base + 3
+    return next
+}
+
+fun synthetic_69(): Int {
+    val base = 69
+    val next = base + 1
+    return next
+}
+
+fun synthetic_70(): Int {
+    val base = 70
+    val next = base + 2
+    return next
+}
+
+fun synthetic_71(): Int {
+    val base = 71
+    val next = base + 3
+    return next
+}
+
+fun synthetic_72(): Int {
+    val base = 72
+    val next = base + 1
+    return next
+}
+
+fun synthetic_73(): Int {
+    val base = 73
+    val next = base + 2
+    return next
+}
+
+fun synthetic_74(): Int {
+    val base = 74
+    val next = base + 3
+    return next
+}
+
+fun synthetic_75(): Int {
+    val base = 75
+    val next = base + 1
+    return next
+}
+
+fun synthetic_76(): Int {
+    val base = 76
+    val next = base + 2
+    return next
+}
+
+fun synthetic_77(): Int {
+    val base = 77
+    val next = base + 3
+    return next
+}
+
+fun synthetic_78(): Int {
+    val base = 78
+    val next = base + 1
+    return next
+}
+
+fun synthetic_79(): Int {
+    val base = 79
+    val next = base + 2
+    return next
+}
+
+fun synthetic_80(): Int {
+    val base = 80
+    val next = base + 3
+    return next
+}
+
+fun synthetic_81(): Int {
+    val base = 81
+    val next = base + 1
+    return next
+}
+
+fun synthetic_82(): Int {
+    val base = 82
+    val next = base + 2
+    return next
+}
+

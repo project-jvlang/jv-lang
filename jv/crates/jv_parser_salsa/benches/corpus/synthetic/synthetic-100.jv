@@ -1,0 +1,100 @@
+package bench.synthetic
+
+fun synthetic_0(): Int {
+    val base = 0
+    val next = base + 1
+    return next
+}
+
+fun synthetic_1(): Int {
+    val base = 1
+    val next = base + 2
+    return next
+}
+
+fun synthetic_2(): Int {
+    val base = 2
+    val next = base + 3
+    return next
+}
+
+fun synthetic_3(): Int {
+    val base = 3
+    val next = base + 1
+    return next
+}
+
+fun synthetic_4(): Int {
+    val base = 4
+    val next = base + 2
+    return next
+}
+
+fun synthetic_5(): Int {
+    val base = 5
+    val next = base + 3
+    return next
+}
+
+fun synthetic_6(): Int {
+    val base = 6
+    val next = base + 1
+    return next
+}
+
+fun synthetic_7(): Int {
+    val base = 7
+    val next = base + 2
+    return next
+}
+
+fun synthetic_8(): Int {
+    val base = 8
+    val next = base + 3
+    return next
+}
+
+fun synthetic_9(): Int {
+    val base = 9
+    val next = base + 1
+    return next
+}
+
+fun synthetic_10(): Int {
+    val base = 10
+    val next = base + 2
+    return next
+}
+
+fun synthetic_11(): Int {
+    val base = 11
+    val next = base + 3
+    return next
+}
+
+fun synthetic_12(): Int {
+    val base = 12
+    val next = base + 1
+    return next
+}
+
+fun synthetic_13(): Int {
+    val base = 13
+    val next = base + 2
+    return next
+}
+
+fun synthetic_14(): Int {
+    val base = 14
+    val next = base + 3
+    return next
+}
+
+fun synthetic_15(): Int {
+    val base = 15
+    val next = base + 1
+    return next
+}
+
+// filler
+// filler
