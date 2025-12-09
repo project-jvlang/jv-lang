@@ -67,12 +67,16 @@ pub(crate) fn lex_number(lexer: &mut Lexer<'_>) -> Token {
         lexer.advance();
     }
 
-    // 単位サフィックス @ms, @km など
+    // 単位サフィックス @ms, @km など (括弧付き @[unit] はパーサーレベルで処理)
     if matches!(lexer.peek(), Some(b'@')) {
-        lexer.advance();
-        let unit = consume_digits(lexer, |b| b.is_ascii_alphabetic());
-        if unit == 0 {
-            return lexer.make_token(TokenKind::Invalid, start);
+        // Check if this is a bracketed unit suffix @[unit] - if so, leave it for parser
+        // peek2() returns (current, next), so check if next byte is '['
+        if !matches!(lexer.peek2(), Some((b'@', b'['))) {
+            lexer.advance();
+            let unit = consume_digits(lexer, |b| b.is_ascii_alphabetic());
+            if unit == 0 {
+                return lexer.make_token(TokenKind::Invalid, start);
+            }
         }
     }
 
