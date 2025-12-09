@@ -271,22 +271,24 @@ fun <T> Iterable<T>.forEach(action: (T) -> Unit): Unit {
     this.toStream().forEach { value -> action(value) }
 }
 
-// TODO: Re-enable once List.add and Map.computeIfAbsent are properly typed
-// fun <T, K> Iterable<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
-//     val result = LinkedHashMap<K, List<T>>()
-//     for (element in this) {
-//         val key = keySelector(element)
-//         val bucket = result.computeIfAbsent(key) { ArrayList<T>() }
-//         bucket.add(element)
-//     }
-//     return result
-// }
+fun <T, K> Iterable<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> {
+    val result = LinkedHashMap<K, List<T>>()
+    val elements: List<T> = this.toList()
+    for (element in elements) {
+        val key = keySelector(element)
+        val bucket = result.computeIfAbsent(key) { ArrayList<T>() }
+        bucket.add(element)
+    }
+    return result
+}
 
+// TODO: Re-enable once Map.Entry is properly typed
 // fun <T, K, V> Iterable<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V> {
 //     val result = LinkedHashMap<K, V>()
-//     for (element in this) {
+//     val elements: List<T> = this.toList()
+//     for (element in elements) {
 //         val entry = transform(element)
-//         result.put(entry.getKey(), entry.getValue())
+//         result.put(entry.getKey() entry.getValue())
 //     }
 //     return result
 // }

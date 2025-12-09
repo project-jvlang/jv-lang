@@ -1030,6 +1030,122 @@ fn parse_postfix<'src, 'alloc>(
             // Not an arrow lambda - don't consume as trailing lambda
             None
         }
+        TokenKind::Less => {
+            // Try to parse type arguments: `ArrayList<Int>()` or `HashMap<String, Int>()`
+            // Only applies when left is an identifier (type name for constructor call)
+            if let Expression::Identifier(type_name, id_span) = left {
+                let checkpoint = parser.checkpoint();
+                parser.advance(); // consume '<'
+
+                let mut type_args = Vec::new();
+                loop {
+                    if let Some(ty) = parse_type(parser) {
+                        type_args.push(ty);
+                    } else {
+                        // Failed to parse type - rewind and treat as comparison
+                        parser.rewind(checkpoint);
+                        return None;
+                    }
+
+                    if parser.consume_if(TokenKind::Comma) {
+                        continue;
+                    }
+                    if parser.consume_if(TokenKind::Greater) {
+                        break;
+                    }
+                    // No comma and no close bracket - failed
+                    parser.rewind(checkpoint);
+                    return None;
+                }
+
+                // After type args, we expect '(' for constructor call
+                if parser.current().kind == TokenKind::LeftParen {
+                    let open = parser.advance().span;
+                    let mut args = Vec::new();
+                    let mut last_span = open;
+                    let mut close_span = open;
+                    let mut has_comma = false;
+                    let mut first_comma_span: Option<crate::span::Span> = None;
+
+                    if !parser.consume_if(TokenKind::RightParen) {
+                        loop {
+                            let arg = parse_expression(parser)
+                                .unwrap_or_else(|| dummy_expr(parser, open));
+                            last_span = span_of_expr(parser, &arg);
+                            args.push(jv_ast::expression::Argument::Positional(arg));
+
+                            if parser.current().kind == TokenKind::Comma {
+                                if !has_comma {
+                                    first_comma_span = Some(parser.current().span);
+                                }
+                                has_comma = true;
+                                parser.advance();
+                                continue;
+                            }
+
+                            if parser.current().kind == TokenKind::RightParen {
+                                close_span = parser.current().span;
+                                parser.advance();
+                                break;
+                            }
+
+                            if parser.current().kind == TokenKind::Eof {
+                                break;
+                            }
+
+                            // Check for comma-less arguments
+                            let next = parser.current().kind;
+                            let could_be_expr = matches!(
+                                next,
+                                TokenKind::Identifier
+                                    | TokenKind::Number
+                                    | TokenKind::String
+                                    | TokenKind::Character
+                                    | TokenKind::LeftParen
+                                    | TokenKind::LeftBracket
+                                    | TokenKind::LeftBrace
+                                    | TokenKind::Minus
+                                    | TokenKind::Not
+                                    | TokenKind::TrueKw
+                                    | TokenKind::FalseKw
+                                    | TokenKind::NullKw
+                            );
+                            if !could_be_expr {
+                                break;
+                            }
+                        }
+                    }
+
+                    if has_comma {
+                        let diagnostic_span = first_comma_span.unwrap_or(open);
+                        parser.push_diagnostic(
+                            crate::diagnostics::Diagnostic::new(
+                                "JV2102: 関数呼び出しでカンマ区切りはサポートされません。\nJV2102: Function calls do not support comma separators.",
+                                diagnostic_span,
+                            ).with_kind(crate::diagnostics::DiagnosticKind::Warning)
+                        );
+                    }
+
+                    let id_internal_span = parser.span_from_ast(id_span);
+                    let combined = id_internal_span
+                        .merge(open)
+                        .merge(last_span)
+                        .merge(close_span);
+
+                    return Some(Expression::Call {
+                        function: Box::new(Expression::Identifier(type_name.clone(), id_span.clone())),
+                        args,
+                        type_arguments: type_args,
+                        argument_metadata: Default::default(),
+                        span: parser.ast_span(combined),
+                    });
+                }
+
+                // Not followed by '(' - rewind and treat as comparison
+                parser.rewind(checkpoint);
+            }
+            None
+        }
         TokenKind::At => {
             // Unit literal syntax: `value @ unit` or `value@[unit]`
             let at_span = parser.advance().span; // consume @
