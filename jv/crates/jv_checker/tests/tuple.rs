@@ -2,12 +2,12 @@
 #![allow(non_snake_case)]
 
 use jv_ast::TypeAnnotation;
+use jv_ast::{Expression, Modifiers, Statement, ValBindingOrigin};
 use jv_checker::{
     PrimitiveType, TypeChecker, TypeInferenceService, TypeKind, inference::type_parser,
 };
 use jv_ir::{TupleRecordStrategy, TupleUsageKind};
 use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
-use jv_ast::{Expression, Statement, Modifiers, ValBindingOrigin};
 
 fn 構文解析(ソース: &str) -> jv_ast::Program {
     let program = Parser2Pipeline::default()

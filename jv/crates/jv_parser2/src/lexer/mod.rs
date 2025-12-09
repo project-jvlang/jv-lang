@@ -119,7 +119,10 @@ impl<'src> Lexer<'src> {
         // 空白やコメントはスキップして、意味のあるトークンのみ記録
         if !matches!(
             token.kind,
-            TokenKind::Whitespace | TokenKind::Newline | TokenKind::LineComment | TokenKind::BlockComment
+            TokenKind::Whitespace
+                | TokenKind::Newline
+                | TokenKind::LineComment
+                | TokenKind::BlockComment
         ) {
             self.last_token_kind = token.kind;
         }
@@ -223,11 +226,22 @@ impl<'src> Lexer<'src> {
 
     /// レキサー状態を取得する（チェックポイント用）。
     pub(crate) fn state(&self) -> (usize, Token, Mode, TokenKind) {
-        (self.source.offset(), self.current, self.mode, self.last_token_kind)
+        (
+            self.source.offset(),
+            self.current,
+            self.mode,
+            self.last_token_kind,
+        )
     }
 
     /// レキサー状態を復元する。
-    pub(crate) fn set_state(&mut self, offset: usize, current: Token, mode: Mode, last_token_kind: TokenKind) {
+    pub(crate) fn set_state(
+        &mut self,
+        offset: usize,
+        current: Token,
+        mode: Mode,
+        last_token_kind: TokenKind,
+    ) {
         self.set_offset(offset);
         self.current = current;
         self.mode = mode;

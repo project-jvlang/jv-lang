@@ -5,12 +5,12 @@ pub mod diagnostics;
 pub mod imports;
 pub mod inference;
 pub mod java;
+mod normalize;
 pub mod null_safety;
 pub mod pattern;
 pub mod regex;
 pub mod telemetry;
 pub mod tuple_planner;
-mod normalize;
 
 pub use inference::{
     InferenceEngine, InferenceError, InferenceResult, NullabilityAnalyzer, PrimitiveType,
@@ -18,8 +18,8 @@ pub use inference::{
 };
 pub use java::{JavaBoxingTable, JavaNullabilityPolicy, JavaPrimitive};
 pub use jv_inference::ParallelInferenceConfig;
-pub use regex::RegexAnalysis;
 pub use normalize::normalize_implicit_assignments;
+pub use regex::RegexAnalysis;
 
 use crate::imports::ResolvedImport;
 use crate::tuple_planner::TuplePlanner;

@@ -267,7 +267,11 @@ impl JavaCodeGenerator {
                 expr_str.push(')');
                 Ok(expr_str)
             }
-            IrExpression::TupleLiteral { elements, span, java_type } => {
+            IrExpression::TupleLiteral {
+                elements,
+                span,
+                java_type,
+            } => {
                 // Handle empty tuple (unit type) - represents void/nothing
                 if elements.is_empty() {
                     // Check if this is actually a unit type (Void or Unit-like)

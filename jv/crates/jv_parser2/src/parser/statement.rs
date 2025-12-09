@@ -8,6 +8,7 @@ use super::{
 };
 use crate::{diagnostics::Diagnostic, token::TokenKind};
 use jv_ast::binding_pattern::BindingPatternKind;
+use jv_ast::expression::{Parameter, ParameterModifiers};
 use jv_ast::statement::{
     ForInStatement, LoopBinding, LoopStrategy, NumericRangeLoop, Program, Statement, TestDataset,
     TestDatasetRow, TestDeclaration, TestParameter, UnitConversionBlock, UnitConversionKind,
@@ -15,7 +16,6 @@ use jv_ast::statement::{
 };
 use jv_ast::types::UnitSymbol;
 use jv_ast::types::{BinaryOp, Literal, Modifiers};
-use jv_ast::expression::{Parameter, ParameterModifiers};
 use jv_ast::{Expression, Span as AstSpan};
 
 /// プログラム全体をパースする。
@@ -113,7 +113,9 @@ fn parse_import<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<State
     loop {
         let token = parser.current();
         // Accept identifiers and keywords as import path parts (but not 'as')
-        if token.kind == TokenKind::Identifier || (token.kind.is_keyword() && token.kind != TokenKind::As) {
+        if token.kind == TokenKind::Identifier
+            || (token.kind.is_keyword() && token.kind != TokenKind::As)
+        {
             if let Some(text) = parser.lexeme(token.span) {
                 if !path.is_empty() {
                     path.push('.');
@@ -150,8 +152,7 @@ fn parse_import<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<State
         let token = parser.current();
         if token.kind == TokenKind::Identifier {
             let alias_span = token.span;
-            let alias_text = parser.lexeme(alias_span)
-                .map(|s| s.to_string());
+            let alias_text = parser.lexeme(alias_span).map(|s| s.to_string());
             parser.advance();
             alias_text
         } else {
@@ -171,7 +172,9 @@ fn parse_import<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<State
     })
 }
 
-pub(crate) fn parse_statement<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Statement> {
+pub(crate) fn parse_statement<'src, 'alloc>(
+    parser: &mut Parser<'src, 'alloc>,
+) -> Option<Statement> {
     match parser.current().kind {
         // Skip newlines and semicolons - they are not statements
         TokenKind::Newline | TokenKind::Semicolon => {
@@ -806,8 +809,7 @@ fn parse_assignment_statement<'src, 'alloc>(
 
     let fallback_span = span_of_expr(parser, &target);
     let value = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, fallback_span));
-    let span = parser
-        .ast_span(span_of_expr(parser, &target).merge(span_of_expr(parser, &value)));
+    let span = parser.ast_span(span_of_expr(parser, &target).merge(span_of_expr(parser, &value)));
 
     Some(Statement::Assignment {
         target,
@@ -842,7 +844,9 @@ fn parse_test<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Stateme
     let mut parameters = Vec::new();
     if parser.consume_if(TokenKind::LeftParen) {
         loop {
-            if parser.current().kind == TokenKind::RightParen || parser.current().kind == TokenKind::Eof {
+            if parser.current().kind == TokenKind::RightParen
+                || parser.current().kind == TokenKind::Eof
+            {
                 let _ = parser.consume_if(TokenKind::RightParen);
                 break;
             }
@@ -861,7 +865,10 @@ fn parse_test<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Stateme
             };
             let param_span = parser.ast_span(name_span);
             parameters.push(TestParameter {
-                pattern: BindingPatternKind::Identifier { name, span: param_span.clone() },
+                pattern: BindingPatternKind::Identifier {
+                    name,
+                    span: param_span.clone(),
+                },
                 type_annotation,
                 span: param_span,
             });
@@ -918,7 +925,9 @@ fn parse_dataset_row<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> TestDat
     let mut last_span = row_start;
 
     loop {
-        if parser.current().kind == TokenKind::RightBracket || parser.current().kind == TokenKind::Eof {
+        if parser.current().kind == TokenKind::RightBracket
+            || parser.current().kind == TokenKind::Eof
+        {
             if parser.current().kind == TokenKind::RightBracket {
                 last_span = parser.current().span;
                 parser.advance();
@@ -1071,8 +1080,8 @@ fn dummy_expr<'src, 'alloc>(parser: &Parser<'src, 'alloc>, span: crate::span::Sp
 #[cfg(test)]
 mod statement_tests {
     use super::*;
-    use crate::{allocator::Arena, lexer::Lexer, source::Source};
     use crate::parser::Parser;
+    use crate::{allocator::Arena, lexer::Lexer, source::Source};
 
     fn parse_source(input: &str) -> Vec<Statement> {
         let source = Source::from_str(input);
@@ -1085,12 +1094,19 @@ mod statement_tests {
 
     #[test]
     fn parses_function_with_tuple_return_type() {
-        let stmts = parse_source(r#"fun produce(): (Int String) {
+        let stmts = parse_source(
+            r#"fun produce(): (Int String) {
     (1 "ok")
-}"#);
+}"#,
+        );
         assert_eq!(stmts.len(), 1);
         match &stmts[0] {
-            Statement::FunctionDeclaration { name, return_type, body, .. } => {
+            Statement::FunctionDeclaration {
+                name,
+                return_type,
+                body,
+                ..
+            } => {
                 assert_eq!(name, "produce");
                 assert!(return_type.is_some(), "return type should be present");
                 let ret = return_type.as_ref().unwrap();
@@ -1140,10 +1156,14 @@ fn parse_unit_type_definition<'src, 'alloc>(
 
     // Parse base type in parentheses: (Double)
     if !parser.consume_if(TokenKind::LeftParen) {
-        parser.push_diagnostic(Diagnostic::new("expected '(' after category name", start_span));
+        parser.push_diagnostic(Diagnostic::new(
+            "expected '(' after category name",
+            start_span,
+        ));
         return None;
     }
-    let base_type = parse_type(parser).unwrap_or_else(|| jv_ast::types::TypeAnnotation::Simple("Object".into()));
+    let base_type = parse_type(parser)
+        .unwrap_or_else(|| jv_ast::types::TypeAnnotation::Simple("Object".into()));
     let _ = parser.consume_if(TokenKind::RightParen);
 
     // Parse unit symbol: m, m!, m? etc.
@@ -1162,7 +1182,8 @@ fn parse_unit_type_definition<'src, 'alloc>(
     // Parse body: { ... }
     let mut members = Vec::new();
     if parser.consume_if(TokenKind::LeftBrace) {
-        while parser.current().kind != TokenKind::RightBrace && parser.current().kind != TokenKind::Eof
+        while parser.current().kind != TokenKind::RightBrace
+            && parser.current().kind != TokenKind::Eof
         {
             if let Some(member) = parse_unit_type_member(parser) {
                 members.push(member);

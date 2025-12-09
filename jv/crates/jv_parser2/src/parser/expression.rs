@@ -1,14 +1,16 @@
 //! Pratt 構文解析による式パーサー（簡易版）。
 
+use super::CollectedComment;
+use super::types::parse_type;
 use super::{Parser, statement::parse_statement};
 use crate::token::TokenKind;
-use jv_ast::json::{JsonEntry, JsonLiteral, JsonValue};
-use jv_ast::expression::{BinaryMetadata, Parameter, StringPart, TupleContextFlags, TupleFieldMeta, LabeledSpan};
-use jv_ast::types::{BinaryOp, Literal, RegexLiteral, Span as AstSpan, UnaryOp, UnitSymbol};
 use jv_ast::expression::UnitSpacingStyle;
+use jv_ast::expression::{
+    BinaryMetadata, LabeledSpan, Parameter, StringPart, TupleContextFlags, TupleFieldMeta,
+};
+use jv_ast::json::{JsonEntry, JsonLiteral, JsonValue};
+use jv_ast::types::{BinaryOp, Literal, RegexLiteral, Span as AstSpan, UnaryOp, UnitSymbol};
 use jv_ast::{Expression, Pattern, Statement, WhenArm};
-use super::types::parse_type;
-use super::CollectedComment;
 
 /// Check if a token kind can start an expression
 fn is_expression_start(kind: TokenKind) -> bool {
@@ -112,10 +114,18 @@ fn extract_string_content<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> St
     // Find start index (skip opening quote or closing brace)
     let start = match token.kind {
         TokenKind::StringStart => {
-            if bytes.first() == Some(&b'"') { 1 } else { 0 }
+            if bytes.first() == Some(&b'"') {
+                1
+            } else {
+                0
+            }
         }
         TokenKind::StringMid | TokenKind::StringEnd => {
-            if bytes.first() == Some(&b'}') { 1 } else { 0 }
+            if bytes.first() == Some(&b'}') {
+                1
+            } else {
+                0
+            }
         }
         _ => 0,
     };
@@ -362,7 +372,7 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
                 .unwrap_or_else(|| "'?'".to_string());
             // Extract the character from 'x' format
             let ch = if text.len() >= 3 && text.starts_with('\'') && text.ends_with('\'') {
-                let inner = &text[1..text.len()-1];
+                let inner = &text[1..text.len() - 1];
                 // Handle escape sequences
                 if inner.starts_with('\\') && inner.len() >= 2 {
                     match inner.chars().nth(1) {
@@ -393,7 +403,7 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
                 .unwrap_or_else(|| "//".to_string());
             // Extract pattern from /pattern/ format
             let pattern = if raw.len() >= 2 && raw.starts_with('/') && raw.ends_with('/') {
-                raw[1..raw.len()-1].to_string()
+                raw[1..raw.len() - 1].to_string()
             } else {
                 raw.clone()
             };
@@ -407,9 +417,7 @@ fn parse_prefix<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expre
                 template_segments: Vec::new(),
             }))
         }
-        TokenKind::StringStart => {
-            parse_string_interpolation(parser)
-        }
+        TokenKind::StringStart => parse_string_interpolation(parser),
         TokenKind::TrueKw => {
             parser.advance();
             Some(Expression::Literal(
@@ -632,7 +640,8 @@ fn parse_when_expression<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Exp
 
             if token.kind == TokenKind::Else {
                 parser.advance();
-                let _ = parser.consume_if(TokenKind::FatArrow) || parser.consume_if(TokenKind::Arrow);
+                let _ =
+                    parser.consume_if(TokenKind::FatArrow) || parser.consume_if(TokenKind::Arrow);
                 let body =
                     parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, token.span));
                 else_arm = Some(Box::new(body));
@@ -716,8 +725,7 @@ fn parse_when_arm<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Whe
     let body = parse_expression(parser).unwrap_or_else(|| dummy_expr(parser, fallback_span));
 
     let pattern_span = pattern_span(parser, &pattern);
-    let arm_span = parser
-        .ast_span(pattern_span.merge(span_of_expr(parser, &body)));
+    let arm_span = parser.ast_span(pattern_span.merge(span_of_expr(parser, &body)));
     Some(WhenArm {
         pattern,
         guard,
@@ -750,7 +758,10 @@ fn parse_when_pattern<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option
 
                     // Create a Guard pattern with `identifier is Type` as the condition
                     let condition = Expression::Binary {
-                        left: Box::new(Expression::Identifier(name.clone(), parser.ast_span(token.span))),
+                        left: Box::new(Expression::Identifier(
+                            name.clone(),
+                            parser.ast_span(token.span),
+                        )),
                         op: BinaryOp::Is,
                         right: Box::new(Expression::Identifier(ty, parser.ast_span(type_span))),
                         span: parser.ast_span(token.span.merge(type_span)),
@@ -823,10 +834,7 @@ fn parse_when_pattern<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option
         }
         TokenKind::NullKw => {
             parser.advance();
-            Some(Pattern::Literal(
-                Literal::Null,
-                parser.ast_span(token.span),
-            ))
+            Some(Pattern::Literal(Literal::Null, parser.ast_span(token.span)))
         }
         _ => None,
     }
@@ -834,12 +842,12 @@ fn parse_when_pattern<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option
 
 fn pattern_span(parser: &Parser<'_, '_>, pattern: &Pattern) -> crate::span::Span {
     match pattern {
-        Pattern::Literal(_, span)
-        | Pattern::Identifier(_, span)
-        | Pattern::Wildcard(span) => parser.span_from_ast(span),
-        Pattern::Constructor { span, .. } | Pattern::Range { span, .. } | Pattern::Guard { span, .. } => {
+        Pattern::Literal(_, span) | Pattern::Identifier(_, span) | Pattern::Wildcard(span) => {
             parser.span_from_ast(span)
         }
+        Pattern::Constructor { span, .. }
+        | Pattern::Range { span, .. }
+        | Pattern::Guard { span, .. } => parser.span_from_ast(span),
     }
 }
 
@@ -1008,7 +1016,13 @@ fn parse_postfix<'src, 'alloc>(
                             span: parser.ast_span(combined),
                         });
                     }
-                    Expression::Call { function, args, type_arguments, argument_metadata, .. } => {
+                    Expression::Call {
+                        function,
+                        args,
+                        type_arguments,
+                        argument_metadata,
+                        ..
+                    } => {
                         // `obj.method(args) { lambda }` -> Call with lambda appended to args
                         let mut new_args = args.clone();
                         new_args.push(jv_ast::expression::Argument::Positional(lambda));
@@ -1133,7 +1147,10 @@ fn parse_postfix<'src, 'alloc>(
                         .merge(close_span);
 
                     return Some(Expression::Call {
-                        function: Box::new(Expression::Identifier(type_name.clone(), id_span.clone())),
+                        function: Box::new(Expression::Identifier(
+                            type_name.clone(),
+                            id_span.clone(),
+                        )),
                         args,
                         type_arguments: type_args,
                         argument_metadata: Default::default(),
@@ -1195,13 +1212,12 @@ fn parse_postfix<'src, 'alloc>(
     }
 }
 
-fn parse_block_expression<'src, 'alloc>(
-    parser: &mut Parser<'src, 'alloc>,
-) -> Option<Expression> {
+fn parse_block_expression<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expression> {
     let open_span = parser.advance().span;
     let mut statements = Vec::new();
 
-    while parser.current().kind != TokenKind::RightBrace && parser.current().kind != TokenKind::Eof {
+    while parser.current().kind != TokenKind::RightBrace && parser.current().kind != TokenKind::Eof
+    {
         match parse_statement(parser) {
             Some(stmt) => statements.push(stmt),
             None => {
@@ -1222,9 +1238,7 @@ fn parse_block_expression<'src, 'alloc>(
 
 /// Attempt to parse arrow lambda syntax: `{ params -> body }` or `{ (params) -> body }`
 /// Returns None if the content does not follow arrow lambda pattern.
-fn try_parse_arrow_lambda<'src, 'alloc>(
-    parser: &mut Parser<'src, 'alloc>,
-) -> Option<Expression> {
+fn try_parse_arrow_lambda<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expression> {
     let checkpoint = parser.checkpoint();
     let open_span = parser.advance().span; // consume '{'
 
@@ -1275,7 +1289,9 @@ fn try_parse_arrow_lambda<'src, 'alloc>(
 
     if parser.current().kind == TokenKind::LeftParen {
         parser.advance(); // consume '('
-        while parser.current().kind != TokenKind::RightParen && parser.current().kind != TokenKind::Eof {
+        while parser.current().kind != TokenKind::RightParen
+            && parser.current().kind != TokenKind::Eof
+        {
             if let Some(param) = parse_lambda_parameter(parser) {
                 parameters.push(param);
             } else {
@@ -1295,7 +1311,10 @@ fn try_parse_arrow_lambda<'src, 'alloc>(
         // e.g., { left right -> ... }
         loop {
             // Check if we hit the arrow, indicating end of parameters
-            if matches!(parser.current().kind, TokenKind::Arrow | TokenKind::FatArrow) {
+            if matches!(
+                parser.current().kind,
+                TokenKind::Arrow | TokenKind::FatArrow
+            ) {
                 break;
             }
             if parser.current().kind == TokenKind::Eof {
@@ -1317,7 +1336,10 @@ fn try_parse_arrow_lambda<'src, 'alloc>(
     }
 
     // Expect arrow token
-    if !matches!(parser.current().kind, TokenKind::Arrow | TokenKind::FatArrow) {
+    if !matches!(
+        parser.current().kind,
+        TokenKind::Arrow | TokenKind::FatArrow
+    ) {
         parser.rewind(checkpoint);
         return None;
     }
@@ -1326,7 +1348,8 @@ fn try_parse_arrow_lambda<'src, 'alloc>(
     // Parse body as statements until closing brace
     // Lambda body can contain multiple statements, with the last expression being the return value
     let mut statements = Vec::new();
-    while parser.current().kind != TokenKind::RightBrace && parser.current().kind != TokenKind::Eof {
+    while parser.current().kind != TokenKind::RightBrace && parser.current().kind != TokenKind::Eof
+    {
         if let Some(stmt) = parse_statement(parser) {
             statements.push(stmt);
         } else {
@@ -1348,7 +1371,9 @@ fn try_parse_arrow_lambda<'src, 'alloc>(
         // Single statement: extract as expression if possible
         match statements.pop().unwrap() {
             Statement::Expression { expr, .. } => expr,
-            Statement::Return { value: Some(expr), .. } => expr,
+            Statement::Return {
+                value: Some(expr), ..
+            } => expr,
             other => {
                 let span = parser.current().span;
                 Expression::Block {
@@ -1382,14 +1407,13 @@ fn try_parse_arrow_lambda<'src, 'alloc>(
 }
 
 /// Parse a single lambda parameter: `name` or `name: Type`
-fn parse_lambda_parameter<'src, 'alloc>(
-    parser: &mut Parser<'src, 'alloc>,
-) -> Option<Parameter> {
+fn parse_lambda_parameter<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Parameter> {
     let token = parser.current();
     let name = match token.kind {
-        TokenKind::Identifier => {
-            parser.lexeme(token.span).map(|s| s.to_string()).unwrap_or_default()
-        }
+        TokenKind::Identifier => parser
+            .lexeme(token.span)
+            .map(|s| s.to_string())
+            .unwrap_or_default(),
         TokenKind::Underscore => "_".to_string(),
         _ => return None,
     };
@@ -1413,9 +1437,7 @@ fn parse_lambda_parameter<'src, 'alloc>(
     })
 }
 
-fn parse_json_or_block<'src, 'alloc>(
-    parser: &mut Parser<'src, 'alloc>,
-) -> Option<Expression> {
+fn parse_json_or_block<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expression> {
     // Try parsing as arrow lambda: `{ param -> expr }` or `{ (params) -> expr }`
     // Must be checked first to handle `{ ident -> ... }` which could look like JSON key.
     if let Some(lambda) = try_parse_arrow_lambda(parser) {
@@ -1447,7 +1469,7 @@ fn parse_json_or_block<'src, 'alloc>(
                 | TokenKind::LeftBracket // Block starting with array literal
                 | TokenKind::LeftBrace   // Nested block
                 | TokenKind::Minus       // Block starting with negation
-                | TokenKind::Not         // Block starting with !
+                | TokenKind::Not // Block starting with !
         )
     ) {
         return parse_block_expression(parser);
@@ -1456,7 +1478,12 @@ fn parse_json_or_block<'src, 'alloc>(
     let checkpoint = parser.checkpoint();
     if let Some(json) = parse_json_value(parser) {
         let span = match &json {
-            JsonValue::Object { span, .. } | JsonValue::Array { span, .. } | JsonValue::String { span, .. } | JsonValue::Number { span, .. } | JsonValue::Boolean { span, .. } | JsonValue::Null { span, .. } => span.clone(),
+            JsonValue::Object { span, .. }
+            | JsonValue::Array { span, .. }
+            | JsonValue::String { span, .. }
+            | JsonValue::Number { span, .. }
+            | JsonValue::Boolean { span, .. }
+            | JsonValue::Null { span, .. } => span.clone(),
         };
         return Some(Expression::JsonLiteral(JsonLiteral {
             value: json,
@@ -1470,12 +1497,15 @@ fn parse_json_or_block<'src, 'alloc>(
     parse_block_expression(parser)
 }
 
-fn parse_array_literal<'src, 'alloc>(
-    parser: &mut Parser<'src, 'alloc>,
-) -> Option<Expression> {
+fn parse_array_literal<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expression> {
     let checkpoint = parser.checkpoint();
     // First try to parse as JSON array (for pure JSON data literals)
-    if let Some(JsonValue::Array { elements, delimiter, span }) = parse_json_array(parser) {
+    if let Some(JsonValue::Array {
+        elements,
+        delimiter,
+        span,
+    }) = parse_json_array(parser)
+    {
         return Some(Expression::JsonLiteral(JsonLiteral {
             value: JsonValue::Array {
                 elements,
@@ -1495,9 +1525,7 @@ fn parse_array_literal<'src, 'alloc>(
 }
 
 /// Parse array literal containing arbitrary expressions: [expr1 expr2 expr3]
-fn parse_expression_array<'src, 'alloc>(
-    parser: &mut Parser<'src, 'alloc>,
-) -> Option<Expression> {
+fn parse_expression_array<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<Expression> {
     if parser.current().kind != TokenKind::LeftBracket {
         return None;
     }
@@ -1508,7 +1536,9 @@ fn parse_expression_array<'src, 'alloc>(
     let mut has_comma = false;
     let mut first_comma_span: Option<crate::span::Span> = None;
 
-    while parser.current().kind != TokenKind::RightBracket && parser.current().kind != TokenKind::Eof {
+    while parser.current().kind != TokenKind::RightBracket
+        && parser.current().kind != TokenKind::Eof
+    {
         if let Some(expr) = parse_expression(parser) {
             end_span = parser.span_from_ast(expr.span());
             elements.push(expr);
@@ -1657,7 +1687,8 @@ fn parse_json_array<'src, 'alloc>(parser: &mut Parser<'src, 'alloc>) -> Option<J
     let mut has_comma = false;
     let mut first_comma_span: Option<crate::span::Span> = None;
 
-    while parser.current().kind != TokenKind::RightBracket && parser.current().kind != TokenKind::Eof
+    while parser.current().kind != TokenKind::RightBracket
+        && parser.current().kind != TokenKind::Eof
     {
         if let Some(value) = parse_json_value(parser) {
             end_span = match &value {
@@ -1761,8 +1792,10 @@ fn extract_label_from_comment(text: &str, is_line_comment: bool) -> Option<Strin
         text.trim_start_matches('/').trim()
     } else {
         // `/* label */` or `/*label*/`
-        text.trim_start_matches('/').trim_start_matches('*')
-            .trim_end_matches('/').trim_end_matches('*')
+        text.trim_start_matches('/')
+            .trim_start_matches('*')
+            .trim_end_matches('/')
+            .trim_end_matches('*')
             .trim()
     };
 

@@ -972,5 +972,4 @@ mod tests {
             other => panic!("unexpected annotation: {:?}", other),
         }
     }
-
 }

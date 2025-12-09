@@ -923,7 +923,9 @@ impl<'a> MetadataCollector<'a> {
                 if let Some(dot_idx) = name.find('.') {
                     let method_name = &name[dot_idx + 1..];
                     if !method_name.is_empty() {
-                        self.metadata.extension_methods.insert(method_name.to_string());
+                        self.metadata
+                            .extension_methods
+                            .insert(method_name.to_string());
                     }
                 } else {
                     self.metadata.functions.insert(name.clone());

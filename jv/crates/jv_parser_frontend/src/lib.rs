@@ -18,7 +18,7 @@ pub use tokens::{
     InvalidImplicitParamReason, JsonCommentTrivia, JsonCommentTriviaKind, JsonConfidence,
     LabeledSpan, LayoutCommaMetadata, LayoutSequenceKind, LegacyLoopKeyword, LexError,
     NumberGroupingKind, NumberLiteralMetadata, SourceCommentKind, SourceCommentTrivia,
-    StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata, Token,
-    TokenDiagnostic, TokenMetadata, TokenTrivia, TokenType, UnderscoreInfoMetadata,
+    StringDelimiterKind, StringInterpolationSegment, StringLiteralMetadata, Token, TokenDiagnostic,
+    TokenMetadata, TokenTrivia, TokenType, UnderscoreInfoMetadata,
 };
 pub use views::{FrontendDiagnostics, FrontendOutput, ProgramView};

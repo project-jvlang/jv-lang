@@ -1,6 +1,6 @@
+use jv_ast::{Expression, Modifiers, Statement, ValBindingOrigin};
 use jv_checker::{CheckError, TypeChecker};
 use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
-use jv_ast::{Expression, Statement, Modifiers, ValBindingOrigin};
 
 fn parse_program(source: &str) -> jv_ast::Program {
     let program = Parser2Pipeline::default()

@@ -6,8 +6,8 @@
 
 use crate::inference::type_factory::TypeFactory;
 use crate::inference::types::{TypeError, TypeKind};
-use jv_ast::{Statement, TypeAnnotation};
 use jv_ast::types::{TupleTypeDescriptor, TupleTypeElement};
+use jv_ast::{Statement, TypeAnnotation};
 use jv_parser_frontend::{Parser2Pipeline, ParserPipeline};
 
 /// 型注釈を `TypeKind` に変換する。
@@ -194,16 +194,12 @@ fn lower_tuple_element(tuple_source: &str, segment: &str) -> Result<TypeAnnotati
     let pipeline = Parser2Pipeline::default();
 
     let output = pipeline.parse(&wrapper).map_err(|error| {
-        format!(
-            "要素 `{segment}` の解析に失敗しました (注釈 `{tuple_source}`): {error}"
-        )
+        format!("要素 `{segment}` の解析に失敗しました (注釈 `{tuple_source}`): {error}")
     })?;
 
     let program = output.into_program();
     let stmt = program.statements.into_iter().next().ok_or_else(|| {
-        format!(
-            "要素 `{segment}` を型として解釈できませんでした (注釈 `{tuple_source}`)"
-        )
+        format!("要素 `{segment}` を型として解釈できませんでした (注釈 `{tuple_source}`)")
     })?;
 
     match stmt {

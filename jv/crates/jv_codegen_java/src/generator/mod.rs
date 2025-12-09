@@ -178,9 +178,7 @@ impl JavaCodeGenerator {
         let has_entry_method = script_methods.iter().any(Self::is_entry_point_method);
         let needs_wrapper = !script_statements.is_empty() || !has_entry_method;
 
-        if !script_statements.is_empty()
-            || !script_methods.is_empty()
-            || !hoisted_fields.is_empty()
+        if !script_statements.is_empty() || !script_methods.is_empty() || !hoisted_fields.is_empty()
         {
             let script_class = self.config.script_main_class.clone();
             let qualified_script_class = if let Some(pkg) = &program.package {

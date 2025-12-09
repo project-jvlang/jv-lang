@@ -368,8 +368,16 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
                 // Try to resolve extension method with overload awareness
                 let fn_ty = match function.as_ref() {
-                    Expression::MemberAccess { object, property, span }
-                    | Expression::NullSafeMemberAccess { object, property, span } => {
+                    Expression::MemberAccess {
+                        object,
+                        property,
+                        span,
+                    }
+                    | Expression::NullSafeMemberAccess {
+                        object,
+                        property,
+                        span,
+                    } => {
                         let receiver_ty = self.infer_expression(object);
                         self.resolve_extension_call_with_arity(
                             &receiver_ty,

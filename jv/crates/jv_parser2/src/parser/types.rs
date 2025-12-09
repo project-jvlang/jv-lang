@@ -179,9 +179,16 @@ fn type_annotation_to_string(ty: &TypeAnnotation) -> String {
             let args: Vec<String> = type_args.iter().map(type_annotation_to_string).collect();
             format!("{}<{}>", name, args.join(", "))
         }
-        TypeAnnotation::Function { params, return_type } => {
+        TypeAnnotation::Function {
+            params,
+            return_type,
+        } => {
             let param_strs: Vec<String> = params.iter().map(type_annotation_to_string).collect();
-            format!("({}) -> {}", param_strs.join(", "), type_annotation_to_string(return_type))
+            format!(
+                "({}) -> {}",
+                param_strs.join(", "),
+                type_annotation_to_string(return_type)
+            )
         }
         TypeAnnotation::Unit { base, unit, .. } => {
             format!("{}@{}", type_annotation_to_string(base), unit.name)

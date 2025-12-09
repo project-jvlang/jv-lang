@@ -126,7 +126,10 @@ fn register_stream_extensions(env: &mut TypeEnvironment, registry: &mut Extensio
     registry.register(
         STREAM,
         "sorted",
-        scheme(vec![sorted_cmp_t], function(vec![comparator], primitive(STREAM))),
+        scheme(
+            vec![sorted_cmp_t],
+            function(vec![comparator], primitive(STREAM)),
+        ),
     );
     let sorted_by_t = env.fresh_type_id();
     let sorted_by_key = env.fresh_type_id();
@@ -323,7 +326,10 @@ fn register_iterable_extensions(env: &mut TypeEnvironment, registry: &mut Extens
         "reduce",
         scheme(
             vec![iterable_reduce_t],
-            function(vec![iterable_reduce_op], optional(type_var(iterable_reduce_t))),
+            function(
+                vec![iterable_reduce_op],
+                optional(type_var(iterable_reduce_t)),
+            ),
         ),
     );
 
