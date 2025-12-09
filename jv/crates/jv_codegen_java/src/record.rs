@@ -82,10 +82,16 @@ fn build_components(plan: &TupleRecordPlan) -> Vec<TupleRecordComponent> {
         };
 
         let mut aliases = aliases_from_meta(&meta, &name, &fallback_name);
-        if !aliases.contains(&fallback_name) {
+        // For Specific records, add positional accessor (_1, _2, etc.) if name differs
+        // This allows accessing record components by position as well as by name
+        if plan.strategy == TupleRecordStrategy::Specific
+            && name != fallback_name
+            && !aliases.contains(&fallback_name)
+        {
             aliases.push(fallback_name.clone());
         }
-        aliases.retain(|alias| !alias.is_empty());
+        // Only include aliases that differ from the component name
+        aliases.retain(|alias| !alias.is_empty() && alias != &name);
 
         let hint = plan
             .type_hints
@@ -143,19 +149,16 @@ fn primary_label(meta: &TupleFieldMeta) -> Option<String> {
 fn aliases_from_meta(meta: &TupleFieldMeta, chosen: &str, fallback: &str) -> Vec<String> {
     let mut aliases = HashSet::new();
 
-    if let Some(label) = primary_label(meta) {
-        if label != chosen {
-            aliases.insert(label);
-        }
-    }
-
-    if let Some(hint) = meta.identifier_hint.as_ref() {
-        let trimmed = hint.trim();
+    // Only use explicit primary_label from the metadata, not the computed version
+    // that falls back to identifier_hint (identifier_hint shouldn't generate accessors)
+    if let Some(label) = meta.primary_label.as_ref() {
+        let trimmed = label.trim();
         if !trimmed.is_empty() && trimmed != chosen {
             aliases.insert(trimmed.to_string());
         }
     }
 
+    // Only secondary_labels explicitly listed should become aliases
     for candidate in &meta.secondary_labels {
         let trimmed = candidate.name.trim();
         if !trimmed.is_empty() && trimmed != chosen && trimmed != fallback {

@@ -12,4 +12,7 @@ public final class GeneratedMain {
     }
 }
 
-public record Divmod_Result(int quotient, int remainder) {}
+public record Divmod_Result(int quotient, int remainder) {
+    public int _1() { return this.quotient(); }
+    public int _2() { return this.remainder(); }
+}

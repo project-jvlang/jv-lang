@@ -174,15 +174,12 @@ impl JavaCodeGenerator {
             }
         }
         script_statements = retained_statements;
-        let mut hoisted_variable_fields =
-            Self::hoist_script_variable_fields(&mut script_statements);
 
         let has_entry_method = script_methods.iter().any(Self::is_entry_point_method);
         let needs_wrapper = !script_statements.is_empty() || !has_entry_method;
 
         if !script_statements.is_empty()
             || !script_methods.is_empty()
-            || !hoisted_variable_fields.is_empty()
             || !hoisted_fields.is_empty()
         {
             let script_class = self.config.script_main_class.clone();
@@ -1856,6 +1853,7 @@ impl JavaCodeGenerator {
                 kind: kind.clone(),
                 comment_span: comment_span.clone(),
             }),
+            // Only hoist VariableDeclaration if initializer is RegexPattern (compile once)
             IrStatement::VariableDeclaration {
                 name,
                 java_type,
@@ -1863,87 +1861,21 @@ impl JavaCodeGenerator {
                 is_final,
                 modifiers,
                 span,
-            } => {
+            } if matches!(initializer, Some(IrExpression::RegexPattern { .. })) => {
                 let mut field_modifiers = modifiers.clone();
                 field_modifiers.is_static = true;
                 field_modifiers.is_final = *is_final;
-                return Some(IrStatement::FieldDeclaration {
+                Some(IrStatement::FieldDeclaration {
                     name: name.clone(),
                     java_type: java_type.clone(),
                     initializer: initializer.clone(),
                     modifiers: field_modifiers,
                     span: span.clone(),
-                });
+                })
             }
+            // Other VariableDeclarations stay as local variables in main()
             IrStatement::FieldDeclaration { .. } => Some(statement.clone()),
             _ => None,
-        }
-    }
-
-    fn hoist_script_variable_fields(statements: &mut Vec<IrStatement>) -> Vec<IrStatement> {
-        let mut hoisted = Vec::new();
-        let mut retained = Vec::new();
-
-        for statement in statements.drain(..) {
-            match statement {
-                IrStatement::VariableDeclaration { .. } => {
-                    hoisted.push(Self::variable_declaration_to_field(statement));
-                }
-                IrStatement::Commented {
-                    statement: inner,
-                    comment,
-                    kind,
-                    comment_span,
-                } => {
-                    if matches!(inner.as_ref(), IrStatement::VariableDeclaration { .. }) {
-                        let field = Self::variable_declaration_to_field(*inner);
-                        hoisted.push(IrStatement::Commented {
-                            statement: Box::new(field),
-                            comment,
-                            kind,
-                            comment_span,
-                        });
-                    } else {
-                        retained.push(IrStatement::Commented {
-                            statement: inner,
-                            comment,
-                            kind,
-                            comment_span,
-                        });
-                    }
-                }
-                other => retained.push(other),
-            }
-        }
-
-        *statements = retained;
-        hoisted
-    }
-
-    fn variable_declaration_to_field(statement: IrStatement) -> IrStatement {
-        match statement {
-            IrStatement::VariableDeclaration {
-                name,
-                java_type,
-                initializer,
-                is_final,
-                mut modifiers,
-                span,
-            } => {
-                if matches!(modifiers.visibility, IrVisibility::Package) {
-                    modifiers.visibility = IrVisibility::Private;
-                }
-                modifiers.is_static = true;
-                modifiers.is_final = is_final;
-                IrStatement::FieldDeclaration {
-                    name,
-                    java_type,
-                    initializer,
-                    modifiers,
-                    span,
-                }
-            }
-            other => other,
         }
     }
 
