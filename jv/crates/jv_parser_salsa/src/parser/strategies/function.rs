@@ -1,6 +1,6 @@
 use crate::lexer::TokenKind;
 
-use super::{control::parse_block, ParserContext, StatementStrategy, SyntaxKind};
+use super::{ParserContext, StatementStrategy, SyntaxKind, control::parse_block};
 
 pub struct FunctionStrategy;
 
@@ -23,7 +23,8 @@ impl StatementStrategy for FunctionStrategy {
         }
         parse_params(ctx);
         // 戻り値型注釈をスキップ
-        if ctx.peek_kind() == Some(TokenKind::Arrow) || ctx.peek_kind() == Some(TokenKind::FatArrow) {
+        if ctx.peek_kind() == Some(TokenKind::Arrow) || ctx.peek_kind() == Some(TokenKind::FatArrow)
+        {
             ctx.bump();
         }
         // ボディ

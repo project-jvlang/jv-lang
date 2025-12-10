@@ -1,6 +1,7 @@
 use crate::lexer::TokenKind;
+use crate::parser::recovery::recover_statement;
 
-use super::{control::parse_block, ParserContext, StatementStrategy, SyntaxKind};
+use super::{ParserContext, StatementStrategy, SyntaxKind, control::parse_block};
 
 pub struct ForStrategy;
 pub struct WhileStrategy;
@@ -39,11 +40,9 @@ impl StatementStrategy for WhileStrategy {
     }
 
     fn parse(&self, ctx: &mut ParserContext) -> bool {
-        ctx.start_node(SyntaxKind::WhileStatement);
-        ctx.bump(); // while/do
-        let _ = ctx.parse_expression();
-        parse_block(ctx);
-        ctx.finish_node();
+        let message = "E_LOOP_001: `while`/`do-while` loops have been removed from the language / `while`/`do-while` ループはサポートされていません。\n`for (item in ...)` ループへ書き換えてください。/ Replace legacy loops with `for (item in ...)`. (--explain E_LOOP_001)";
+        ctx.error(message);
+        recover_statement(ctx);
         true
     }
 }

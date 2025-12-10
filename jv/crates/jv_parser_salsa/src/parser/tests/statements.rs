@@ -1,7 +1,7 @@
 use crate::{
-    lexer::{TokenDiagnostic, TokenKind, TokenMetadata, TokenTrivia},
-    parser::{parse, ParseEvent, OwnedToken, SyntaxKind},
     Span,
+    lexer::{TokenDiagnostic, TokenKind, TokenMetadata, TokenTrivia},
+    parser::{OwnedToken, ParseEvent, SyntaxKind, parse},
 };
 
 fn tok(kind: TokenKind, lexeme: &str) -> OwnedToken {
@@ -41,19 +41,21 @@ fn parses_basic_statements() {
         result.errors
     );
     assert!(
-        result
-            .output
-            .events
-            .iter()
-            .any(|e| matches!(e, ParseEvent::StartNode { kind: SyntaxKind::PackageDeclaration })),
+        result.output.events.iter().any(|e| matches!(
+            e,
+            ParseEvent::StartNode {
+                kind: SyntaxKind::PackageDeclaration
+            }
+        )),
         "package node should be emitted"
     );
     assert!(
-        result
-            .output
-            .events
-            .iter()
-            .any(|e| matches!(e, ParseEvent::StartNode { kind: SyntaxKind::ValDeclaration })),
+        result.output.events.iter().any(|e| matches!(
+            e,
+            ParseEvent::StartNode {
+                kind: SyntaxKind::ValDeclaration
+            }
+        )),
         "val declaration should be parsed"
     );
 }
@@ -86,4 +88,30 @@ fn parses_function_and_class() {
         .collect();
     assert!(kinds.contains(&SyntaxKind::FunctionDeclaration));
     assert!(kinds.contains(&SyntaxKind::ClassDeclaration));
+}
+
+#[test]
+fn reports_error_for_if_expression() {
+    let tokens = vec![
+        tok(TokenKind::If, "if"),
+        tok(TokenKind::BooleanTrue, "true"),
+        tok(TokenKind::LeftBrace, "{"),
+        tok(TokenKind::RightBrace, "}"),
+        tok(TokenKind::Eof, ""),
+    ];
+
+    let result = parse(tokens);
+    assert!(
+        result
+            .output
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("JV3103")),
+        "expected JV3103 diagnostic, got {:?}",
+        result.output.diagnostics
+    );
+    assert!(
+        result.output.recovered,
+        "parser should mark recovered on unsupported if"
+    );
 }

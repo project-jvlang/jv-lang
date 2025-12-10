@@ -9,11 +9,11 @@ mod control;
 mod function;
 mod import;
 mod jump;
-mod package;
-mod unit;
 mod loops;
+mod package;
 mod resource;
 mod test;
+mod unit;
 mod when;
 
 pub use binding::{AssignmentStrategy, ValStrategy, VarStrategy};
@@ -25,9 +25,9 @@ pub use import::ImportStrategy;
 pub use jump::{BreakStrategy, ContinueStrategy, ReturnStrategy};
 pub use loops::{ForStrategy, WhileStrategy};
 pub use package::PackageStrategy;
-pub use unit::UnitTypeDefStrategy;
 pub use resource::{DeferStrategy, UseStrategy};
 pub use test::TestStrategy;
+pub use unit::UnitTypeDefStrategy;
 pub use when::WhenStrategy;
 
 /// ステートメント戦略トレイト。

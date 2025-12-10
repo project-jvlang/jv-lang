@@ -1,10 +1,8 @@
 use crate::lexer::TokenKind;
 
 use super::{
-    expression,
-    recovery::recover_statement,
-    strategies,
     DiagnosticSeverity, OwnedToken, ParseEvent, ParseOutput, ParserDiagnostic, SyntaxKind,
+    expression, recovery::recover_statement, strategies,
 };
 
 /// パーサ内部状態を保持するコンテキスト。

@@ -1,6 +1,6 @@
 use crate::lexer::TokenKind;
 
-use super::{control::parse_block, ParserContext, StatementStrategy, SyntaxKind};
+use super::{ParserContext, StatementStrategy, SyntaxKind, control::parse_block};
 
 pub struct WhenStrategy;
 
@@ -42,7 +42,10 @@ fn parse_branch(ctx: &mut ParserContext) {
     } else {
         // 旧パーサー同様、`->` に到達するまで式としてパターンを読む。
         while !ctx.is_eof()
-            && !matches!(ctx.peek_kind(), Some(TokenKind::Arrow) | Some(TokenKind::FatArrow))
+            && !matches!(
+                ctx.peek_kind(),
+                Some(TokenKind::Arrow) | Some(TokenKind::FatArrow)
+            )
         {
             let progressed = ctx.parse_expression();
             if !progressed {

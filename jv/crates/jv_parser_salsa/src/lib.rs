@@ -5,12 +5,14 @@
 
 pub mod constraints;
 pub mod db;
+pub mod hir;
 pub mod lexer;
 pub mod lower;
 pub mod parser;
 pub mod pipeline;
 pub mod solver;
 
-pub use db::{Database, FileInput, ParserDatabase, parse};
+pub use db::{Database, FileInput, ParserDatabase, lower_to_hir, parse};
+pub use hir::HirFile;
 pub use lexer::Span;
 pub use parser::{OwnedToken, ParseResult};

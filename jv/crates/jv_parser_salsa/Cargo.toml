@@ -15,6 +15,10 @@ jv_parser_frontend = { path = "../jv_parser_frontend" }
 jv_parser_preprocess = { path = "../jv_parser_preprocess" }
 jv_parser_semantics = { path = "../jv_parser_semantics" }
 jv_ast = { path = "../jv_ast" }
+jv_type_inference_java = { path = "../jv_type_inference_java" }
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+[dev-dependencies]
+jv_parser_rowan = { path = "../jv_parser_rowan" }

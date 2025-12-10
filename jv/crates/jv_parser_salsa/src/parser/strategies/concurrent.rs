@@ -1,6 +1,6 @@
 use crate::lexer::TokenKind;
 
-use super::{control::parse_block, ParserContext, StatementStrategy, SyntaxKind};
+use super::{ParserContext, StatementStrategy, SyntaxKind, control::parse_block};
 
 pub struct SpawnStrategy;
 pub struct AsyncStrategy;

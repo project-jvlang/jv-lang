@@ -1,6 +1,6 @@
 use crate::lexer::TokenKind;
 
-use super::{recovery::recover_statement, OwnedToken, ParserContext, SyntaxKind};
+use super::{OwnedToken, ParserContext, SyntaxKind, recovery::recover_statement};
 
 /// Pratt パーサーのコア実装。
 pub fn parse_expression_bp(ctx: &mut ParserContext, min_bp: u8) -> bool {
@@ -159,10 +159,7 @@ fn is_prefix_operator(kind: TokenKind) -> bool {
 fn is_postfix(tok: &OwnedToken) -> bool {
     matches!(
         tok.kind,
-        TokenKind::LeftParen
-            | TokenKind::Dot
-            | TokenKind::NullSafe
-            | TokenKind::LeftBracket
+        TokenKind::LeftParen | TokenKind::Dot | TokenKind::NullSafe | TokenKind::LeftBracket
     )
 }
 

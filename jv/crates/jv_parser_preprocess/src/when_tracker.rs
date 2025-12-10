@@ -145,7 +145,7 @@ mod tests {
     #[test]
     fn integrates_with_lexer_output() {
         let source = "when (candidate is Character) { true -> 0 }";
-        let mut lexer = jv_lexer::Lexer::new(source.into());
+        let mut lexer = jv_lexer::Lexer::new(source);
         let tokens = lexer.tokenize().expect("lexing succeeds");
 
         let mut tracker = PendingWhenTracker::new();
@@ -182,7 +182,7 @@ fun demo(candidate: Any, stream: Stream<Any>): Int {
 }
 "#;
 
-        let mut lexer = jv_lexer::Lexer::new(source.into());
+        let mut lexer = jv_lexer::Lexer::new(source);
         let tokens = lexer.tokenize().expect("lexing succeeds");
         let processed = preprocess_tokens(tokens);
 

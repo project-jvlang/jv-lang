@@ -60,7 +60,12 @@ fn parse_binding(ctx: &mut ParserContext, kind: SyntaxKind) -> bool {
     parse_pattern(ctx);
     if ctx.peek_kind() == Some(TokenKind::Colon) {
         ctx.bump(); // :
-        ctx.bump_while(|k| !matches!(k, TokenKind::Assign | TokenKind::Semicolon | TokenKind::Newline));
+        ctx.bump_while(|k| {
+            !matches!(
+                k,
+                TokenKind::Assign | TokenKind::Semicolon | TokenKind::Newline
+            )
+        });
     }
     if ctx.peek_kind() == Some(TokenKind::Assign) {
         ctx.bump();
@@ -76,7 +81,9 @@ fn parse_pattern(ctx: &mut ParserContext) {
         ctx.bump(); // (
         while ctx.peek_kind() != Some(TokenKind::RightParen) && !ctx.is_eof() {
             ctx.start_node(SyntaxKind::PatternElement);
-            if ctx.peek_kind() == Some(TokenKind::Identifier) || ctx.peek_kind() == Some(TokenKind::Underscore) {
+            if ctx.peek_kind() == Some(TokenKind::Identifier)
+                || ctx.peek_kind() == Some(TokenKind::Underscore)
+            {
                 ctx.bump();
             } else {
                 ctx.error("パターン要素には識別子または _ が必要です");

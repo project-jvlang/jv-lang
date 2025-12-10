@@ -1,7 +1,7 @@
 use crate::{
-    lexer::{TokenDiagnostic, TokenKind, TokenMetadata, TokenTrivia},
-    parser::{cst::CstBuilder, OwnedToken, SyntaxKind},
     Span,
+    lexer::{TokenDiagnostic, TokenKind, TokenMetadata, TokenTrivia},
+    parser::{OwnedToken, SyntaxKind, cst::CstBuilder},
 };
 
 fn tok(kind: TokenKind, lexeme: &str) -> OwnedToken {

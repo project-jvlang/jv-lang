@@ -133,8 +133,18 @@ fn parse_class_body(ctx: &mut ParserContext, _is_data_class: bool) {
 
 fn parse_modifiers(ctx: &mut ParserContext) {
     const MODS: &[&str] = &[
-        "public", "private", "protected", "internal", "open", "sealed", "abstract", "final",
-        "override", "static", "mut", "ref",
+        "public",
+        "private",
+        "protected",
+        "internal",
+        "open",
+        "sealed",
+        "abstract",
+        "final",
+        "override",
+        "static",
+        "mut",
+        "ref",
     ];
     while let Some(tok) = ctx.current() {
         if tok.kind == TokenKind::Identifier && MODS.iter().any(|m| tok.lexeme == *m) {
@@ -154,7 +164,9 @@ fn parse_parameter_pattern(ctx: &mut ParserContext) {
         ctx.bump();
         while ctx.peek_kind() != Some(TokenKind::RightParen) && !ctx.is_eof() {
             ctx.start_node(SyntaxKind::PatternElement);
-            if ctx.peek_kind() == Some(TokenKind::Identifier) || ctx.peek_kind() == Some(TokenKind::Underscore) {
+            if ctx.peek_kind() == Some(TokenKind::Identifier)
+                || ctx.peek_kind() == Some(TokenKind::Underscore)
+            {
                 ctx.bump();
             } else {
                 ctx.error("パターン要素には識別子または _ が必要です");
@@ -198,7 +210,13 @@ fn parse_primary_constructor(ctx: &mut ParserContext) {
             if ctx.peek_kind() == Some(TokenKind::Colon) {
                 ctx.bump();
                 ctx.bump_while(|k| {
-                    !matches!(k, TokenKind::Comma | TokenKind::RightParen | TokenKind::LeftBrace | TokenKind::Assign)
+                    !matches!(
+                        k,
+                        TokenKind::Comma
+                            | TokenKind::RightParen
+                            | TokenKind::LeftBrace
+                            | TokenKind::Assign
+                    )
                 });
             }
             if ctx.peek_kind() == Some(TokenKind::Assign) {

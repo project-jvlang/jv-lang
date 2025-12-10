@@ -1,6 +1,7 @@
 use crate::lexer::TokenKind;
+use crate::parser::recovery::recover_statement;
 
-use super::{ParserContext, StatementStrategy, SyntaxKind};
+use super::{ParserContext, StatementStrategy};
 
 pub struct IfStrategy;
 
@@ -14,19 +15,9 @@ impl StatementStrategy for IfStrategy {
     }
 
     fn parse(&self, ctx: &mut ParserContext) -> bool {
-        ctx.start_node(SyntaxKind::IfStatement);
-        ctx.bump(); // if
-        let _ = ctx.parse_expression();
-        parse_block(ctx);
-        if ctx.peek_kind() == Some(TokenKind::Else) {
-            ctx.bump();
-            if ctx.peek_kind() == Some(TokenKind::If) {
-                let _ = self.parse(ctx);
-            } else {
-                parse_block(ctx);
-            }
-        }
-        ctx.finish_node();
+        let message = "JV3103: `if` expressions are not supported / `if` 式はサポートされていません。\n条件分岐は `when` 式を使用してください。Quick Fix: when.convert.if. / Use a `when` expression for branching. Quick Fix: when.convert.if. (--explain JV3103)";
+        ctx.error(message);
+        recover_statement(ctx);
         true
     }
 }

@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
+use crate::hir::HirFile;
 use crate::lexer::Lexer;
+use crate::lower;
 use crate::parser::{self, ParseOutput, ParseResult};
 
 #[salsa::input]
@@ -9,6 +11,18 @@ pub struct FileInput {
     pub path: Arc<str>,
     #[return_ref]
     pub text: Arc<str>,
+}
+
+#[salsa::tracked]
+pub fn lower_to_hir(db: &dyn ParserDatabase, file: FileInput) -> Arc<HirFile> {
+    let parse_result = parse(db, file);
+    let source = file.text(db);
+    let lowering = lower::lower(source.as_ref(), &parse_result);
+    Arc::new(HirFile::new(
+        lowering.statements,
+        lowering.diagnostics,
+        lowering.token_spans,
+    ))
 }
 
 #[salsa::tracked]
