@@ -12,7 +12,8 @@ pub mod parser;
 pub mod pipeline;
 pub mod solver;
 
-pub use db::{Database, FileInput, ParserDatabase, lower_to_hir, parse};
+pub use db::{Database, FileInput, ParserDatabase, lower_to_hir, parse, solve_types};
 pub use hir::HirFile;
 pub use lexer::Span;
 pub use parser::{OwnedToken, ParseResult};
+pub use solver::TypeSolution;

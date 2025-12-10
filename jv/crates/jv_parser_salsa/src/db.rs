@@ -8,6 +8,7 @@ use crate::hir::HirFile;
 use crate::lexer::Lexer;
 use crate::lower;
 use crate::parser::{self, ParseOutput, ParseResult};
+use crate::solver::{Solver, TypeSolution};
 
 #[salsa::input]
 pub struct FileInput {
@@ -114,6 +115,28 @@ pub fn constraint_graph(db: &dyn ParserDatabase, file: FileInput) -> Arc<Constra
     }
 
     Arc::new(graph)
+}
+
+#[salsa::tracked]
+pub fn solve_types(db: &dyn ParserDatabase, file: FileInput) -> Arc<TypeSolution> {
+    let graph = constraint_graph(db, file);
+    let mut solver = Solver::new((*graph).clone());
+    let result = solver.run_to_fixpoint(64);
+    let (constraints, diagnostics) = match result {
+        Ok(c) => (c, Vec::new()),
+        Err(msg) => (Vec::new(), vec![msg]),
+    };
+    // ソーステキストに基づく簡易フィンガープリントを付与し、キャッシュ境界を検証しやすくする。
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    file.text(db).hash(&mut hasher);
+    let fingerprint = hasher.finish();
+    Arc::new(TypeSolution {
+        substitutions: Default::default(),
+        constraints,
+        diagnostics,
+        fingerprint,
+    })
 }
 
 #[salsa::tracked]

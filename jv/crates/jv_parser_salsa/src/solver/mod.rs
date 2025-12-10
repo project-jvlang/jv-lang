@@ -3,6 +3,8 @@
 //! Collecting → Propagating → Checking → Done の状態遷移を持ち、詳細ロジックは後続で拡張する。
 
 use crate::constraints::{Constraint, ConstraintGraph, ConstraintGraphEdge};
+pub mod solution;
+pub use solution::TypeSolution;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SolverState {
@@ -106,56 +108,4 @@ impl Solver {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::constraints::{ConstraintGraphEdge, ConstraintGraphNode, TypeRef};
-    use jv_ast::types::TypeAnnotation;
-
-    fn graph_with_single_constraint() -> ConstraintGraph {
-        let mut g = ConstraintGraph::default();
-        let a =
-            g.0.add_node(ConstraintGraphNode::Type(TypeAnnotation::Simple(
-                "A".into(),
-            )));
-        let b =
-            g.0.add_node(ConstraintGraphNode::Type(TypeAnnotation::Simple(
-                "B".into(),
-            )));
-        let c = Constraint::Equal(
-            TypeRef::Annotation(TypeAnnotation::Simple("A".into())),
-            TypeRef::Annotation(TypeAnnotation::Simple("B".into())),
-        );
-        g.0.add_edge(a, b, ConstraintGraphEdge::Constraint(c));
-        g
-    }
-
-    #[test]
-    fn solver_transitions_through_states() {
-        let graph = graph_with_single_constraint();
-        let mut solver = Solver::new(graph);
-        assert_eq!(solver.state(), &SolverState::Collecting);
-        solver.step().unwrap();
-        assert_eq!(solver.state(), &SolverState::Propagating);
-        solver.step().unwrap();
-        assert_eq!(solver.state(), &SolverState::Checking);
-        solver.step().unwrap();
-        assert_eq!(solver.state(), &SolverState::Done);
-    }
-
-    #[test]
-    fn solver_collects_constraints_on_solve() {
-        let graph = graph_with_single_constraint();
-        let mut solver = Solver::new(graph);
-        let constraints = solver.solve().unwrap();
-        assert_eq!(constraints.len(), 1);
-    }
-
-    #[test]
-    fn run_to_fixpoint_converges_with_limit() {
-        let graph = graph_with_single_constraint();
-        let mut solver = Solver::new(graph);
-        let constraints = solver.run_to_fixpoint(10).unwrap();
-        assert_eq!(constraints.len(), 1);
-        assert_eq!(solver.state(), &SolverState::Done);
-    }
-}
+mod tests;
