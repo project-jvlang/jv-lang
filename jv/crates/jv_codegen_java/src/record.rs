@@ -141,29 +141,31 @@ fn primary_label(meta: &TupleFieldMeta) -> Option<String> {
 }
 
 fn aliases_from_meta(meta: &TupleFieldMeta, chosen: &str, fallback: &str) -> Vec<String> {
-    let mut aliases = HashSet::new();
+    let mut aliases = Vec::new();
 
-    if let Some(label) = primary_label(meta) {
-        if label != chosen {
-            aliases.insert(label);
+    let mut push_alias = |candidate: &str| {
+        let trimmed = candidate.trim();
+        if trimmed.is_empty() || trimmed == chosen || trimmed == fallback {
+            return;
         }
+        if !aliases.iter().any(|existing| existing == trimmed) {
+            aliases.push(trimmed.to_string());
+        }
+    };
+
+    if let Some(label) = meta.primary_label.as_ref() {
+        push_alias(label);
     }
 
     if let Some(hint) = meta.identifier_hint.as_ref() {
-        let trimmed = hint.trim();
-        if !trimmed.is_empty() && trimmed != chosen {
-            aliases.insert(trimmed.to_string());
-        }
+        push_alias(hint);
     }
 
     for candidate in &meta.secondary_labels {
-        let trimmed = candidate.name.trim();
-        if !trimmed.is_empty() && trimmed != chosen && trimmed != fallback {
-            aliases.insert(trimmed.to_string());
-        }
+        push_alias(&candidate.name);
     }
 
-    aliases.into_iter().collect()
+    aliases
 }
 
 fn java_type_from_hint(hint: &str) -> String {

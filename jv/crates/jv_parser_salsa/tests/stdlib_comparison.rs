@@ -8,7 +8,10 @@ use std::path::PathBuf;
 #[test]
 fn salsa_matches_rowan_on_stdlib_corpus() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let corpus_list = manifest_dir.join("benches").join("corpus").join("stdlib.txt");
+    let corpus_list = manifest_dir
+        .join("benches")
+        .join("corpus")
+        .join("stdlib.txt");
     let entries: Vec<_> = fs::read_to_string(&corpus_list)
         .expect("can read corpus list")
         .lines()
@@ -33,9 +36,8 @@ fn salsa_matches_rowan_on_stdlib_corpus() {
 
         match (salsa_output, rowan_output) {
             (Ok(salsa_output), Ok(rowan_output)) => {
-                let s_diags = normalize_diagnostics(
-                    salsa_output.artifacts.diagnostics().final_diagnostics(),
-                );
+                let s_diags =
+                    normalize_diagnostics(salsa_output.artifacts.diagnostics().final_diagnostics());
                 let r_diags = normalize_diagnostics(rowan_output.diagnostics().final_diagnostics());
                 assert_eq!(
                     s_diags.len(),
@@ -74,7 +76,9 @@ fn salsa_matches_rowan_on_stdlib_corpus() {
                 if std::mem::discriminant(&se) != std::mem::discriminant(&re) {
                     eprintln!(
                         "Skipping file with differing error kinds {:?}: salsa={:?}, rowan={:?}",
-                        path, se.span(), re.span()
+                        path,
+                        se.span(),
+                        re.span()
                     );
                 }
             }
