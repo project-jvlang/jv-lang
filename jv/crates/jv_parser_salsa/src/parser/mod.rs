@@ -50,6 +50,7 @@ pub enum SyntaxKind {
     SpawnStatement,
     AsyncStatement,
     TestDeclaration,
+    LogBlockExpression,
     Block,
     UnitTypeDefinition,
     UnitCategory,

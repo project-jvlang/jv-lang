@@ -17,10 +17,23 @@ impl StatementStrategy for TestStrategy {
     fn parse(&self, ctx: &mut ParserContext) -> bool {
         ctx.start_node(SyntaxKind::TestDeclaration);
         ctx.bump(); // test
-        if ctx.peek_kind() == Some(TokenKind::Identifier) {
-            ctx.start_node(SyntaxKind::Identifier);
+        if matches!(
+            ctx.peek_kind(),
+            Some(TokenKind::Identifier | TokenKind::String)
+        ) {
             ctx.bump();
-            ctx.finish_node();
+        }
+        if matches!(
+            ctx.current(),
+            Some(tok) if tok.lexeme.eq_ignore_ascii_case("dataset")
+        ) {
+            ctx.bump(); // dataset
+            if matches!(
+                ctx.peek_kind(),
+                Some(TokenKind::Identifier | TokenKind::String)
+            ) {
+                ctx.bump();
+            }
         }
         parse_block(ctx);
         ctx.finish_node();

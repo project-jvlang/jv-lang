@@ -2,12 +2,16 @@ use super::context::{LoweringContext, LoweringDiagnostic, LoweringResult};
 use super::expressions::{lower_expression, slice_until};
 use super::params::parse_parameters;
 use super::types::lower_type_annotation;
+use crate::dsl::concurrent::ensure_concurrency_body;
+use crate::dsl::resource::{ensure_defer_body, ensure_use_resource};
+use crate::dsl::test as dsl_test;
 use crate::parser::cst::{CstBuilder, CstElement, CstNode};
 use crate::parser::{ParseEvent, ParseResult, SyntaxKind};
 use jv_ast::BindingPatternKind;
 use jv_ast::expression::{Expression, WhenArm};
 use jv_ast::statement::{
-    ConcurrencyConstruct, Property, ResourceManagement, Statement, ValBindingOrigin,
+    ConcurrencyConstruct, Property, ResourceManagement, Statement, TestDataset, TestSampleMetadata,
+    ValBindingOrigin,
 };
 use jv_ast::types::{Modifiers, Pattern, WhereClause};
 
@@ -168,6 +172,13 @@ fn lower_node(ctx: &mut LoweringContext<'_>, node: &CstNode, out: &mut Vec<State
         SyntaxKind::AssignmentStatement => {
             if let Some(stmt) = lower_assignment(ctx, node) {
                 out.push(stmt);
+            }
+        }
+        SyntaxKind::LogBlockExpression => {
+            let tokens = collect_tokens(node);
+            if let Some(expr) = lower_expression(ctx, &tokens) {
+                let span = expr.span().clone();
+                out.push(Statement::Expression { expr, span });
             }
         }
         SyntaxKind::TestDeclaration => {
@@ -759,22 +770,53 @@ fn lower_for(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Statement>
 }
 
 fn lower_test(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Statement> {
-    let name = collect_identifiers(node)
-        .get(0)
+    let tokens = collect_tokens(node);
+    let keyword = tokens
+        .first()
         .cloned()
-        .unwrap_or_default();
-    let body = find_child(node, SyntaxKind::Block)
+        .unwrap_or_else(|| crate::parser::OwnedToken {
+            kind: crate::lexer::TokenKind::Invalid,
+            span: crate::lexer::Span { start: 0, end: 0 },
+            lexeme: "test".into(),
+            leading_trivia: Default::default(),
+            metadata: Vec::new(),
+            diagnostic: None,
+        });
+    let name = dsl_test::extract_test_name(&tokens, ctx.source());
+    dsl_test::ensure_test_name(ctx, &keyword, &name);
+    let block_node = find_child(node, SyntaxKind::Block);
+    let has_body_tokens = block_node
+        .map(|b| {
+            collect_tokens(b).into_iter().any(|t| {
+                !matches!(
+                    t.kind,
+                    crate::lexer::TokenKind::LeftBrace
+                        | crate::lexer::TokenKind::RightBrace
+                        | crate::lexer::TokenKind::Newline
+                )
+            })
+        })
+        .unwrap_or(false);
+    dsl_test::ensure_test_body(ctx, &keyword, has_body_tokens);
+    let body = block_node
         .map(|block| lower_block_expr(ctx, block))
         .unwrap_or_else(|| Expression::Block {
             statements: Vec::new(),
             span: span_for_node(ctx, node),
         });
+    let dataset = dsl_test::extract_dataset(&tokens, ctx.source()).map(|name| {
+        TestDataset::Sample(TestSampleMetadata {
+            source: name,
+            arguments: Vec::new(),
+            span: span_for_node(ctx, node),
+        })
+    });
     let span = span_for_node(ctx, node);
     Some(Statement::TestDeclaration(
         jv_ast::statement::TestDeclaration {
-            display_name: name.clone(),
-            normalized: Some(name),
-            dataset: None,
+            display_name: name.clone().unwrap_or_default(),
+            normalized: name,
+            dataset,
             parameters: Vec::new(),
             annotations: Vec::new(),
             body,
@@ -785,37 +827,100 @@ fn lower_test(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Statement
 
 fn lower_use(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Statement> {
     let tokens = collect_tokens(node);
-    let after_use = tokens
+    let keyword = tokens
         .iter()
-        .skip_while(|tok| tok.lexeme != "use")
-        .skip(1)
+        .find(|tok| tok.lexeme == "use")
         .cloned()
-        .collect::<Vec<_>>();
+        .unwrap_or_else(|| {
+            tokens
+                .first()
+                .cloned()
+                .unwrap_or_else(|| crate::parser::OwnedToken {
+                    kind: crate::lexer::TokenKind::Invalid,
+                    span: crate::lexer::Span { start: 0, end: 0 },
+                    lexeme: "use".into(),
+                    leading_trivia: Default::default(),
+                    metadata: Vec::new(),
+                    diagnostic: None,
+                })
+        });
+    let brace_pos = tokens
+        .iter()
+        .position(|tok| tok.kind == crate::lexer::TokenKind::LeftBrace)
+        .unwrap_or(tokens.len());
+    let use_pos = tokens
+        .iter()
+        .position(|tok| tok.lexeme == "use")
+        .unwrap_or(0);
+    let after_use: Vec<_> = if brace_pos > use_pos + 1 {
+        tokens[use_pos + 1..brace_pos].to_vec()
+    } else {
+        Vec::new()
+    };
+    let has_resource = !after_use.is_empty();
+    ensure_use_resource(ctx, &keyword, has_resource);
+
     let resource = lower_expression(ctx, &after_use).unwrap_or_else(|| {
         Expression::Literal(jv_ast::types::Literal::Null, span_for_node(ctx, node))
     });
-    Some(Statement::ResourceManagement(ResourceManagement::Use {
-        resource: Box::new(resource.clone()),
-        body: Box::new(Expression::Block {
+    let body = find_child(node, SyntaxKind::Block)
+        .map(|block| lower_block_expr(ctx, block))
+        .unwrap_or_else(|| Expression::Block {
             statements: Vec::new(),
             span: span_for_node(ctx, node),
-        }),
+        });
+    Some(Statement::ResourceManagement(ResourceManagement::Use {
+        resource: Box::new(resource.clone()),
+        body: Box::new(body),
         span: span_for_node(ctx, node),
     }))
 }
 
 fn lower_defer(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Statement> {
     let tokens = collect_tokens(node);
-    let after_defer = tokens
+    let keyword = tokens
         .iter()
-        .skip_while(|tok| tok.lexeme != "defer")
-        .skip(1)
+        .find(|tok| tok.lexeme == "defer")
         .cloned()
-        .collect::<Vec<_>>();
-    let body = lower_expression(ctx, &after_defer).unwrap_or_else(|| Expression::Block {
-        statements: Vec::new(),
-        span: span_for_node(ctx, node),
-    });
+        .unwrap_or_else(|| {
+            tokens
+                .first()
+                .cloned()
+                .unwrap_or_else(|| crate::parser::OwnedToken {
+                    kind: crate::lexer::TokenKind::Invalid,
+                    span: crate::lexer::Span { start: 0, end: 0 },
+                    lexeme: "defer".into(),
+                    leading_trivia: Default::default(),
+                    metadata: Vec::new(),
+                    diagnostic: None,
+                })
+        });
+    let brace_pos = tokens
+        .iter()
+        .position(|tok| tok.kind == crate::lexer::TokenKind::LeftBrace)
+        .unwrap_or(tokens.len());
+    let defer_pos = tokens
+        .iter()
+        .position(|tok| tok.lexeme == "defer")
+        .unwrap_or(0);
+    let after_defer: Vec<_> = if brace_pos > defer_pos + 1 {
+        tokens[defer_pos + 1..brace_pos].to_vec()
+    } else {
+        Vec::new()
+    };
+    let has_body_tokens = !after_defer.is_empty()
+        || find_child(node, SyntaxKind::Block)
+            .map(|b| !collect_tokens(b).is_empty())
+            .unwrap_or(false);
+    ensure_defer_body(ctx, &keyword, has_body_tokens);
+
+    let body = find_child(node, SyntaxKind::Block)
+        .map(|block| lower_block_expr(ctx, block))
+        .or_else(|| lower_expression(ctx, &after_defer))
+        .unwrap_or_else(|| Expression::Block {
+            statements: Vec::new(),
+            span: span_for_node(ctx, node),
+        });
     Some(Statement::ResourceManagement(ResourceManagement::Defer {
         body: Box::new(body),
         span: span_for_node(ctx, node),
@@ -826,10 +931,20 @@ fn lower_concurrency(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<St
     let kind = node.kind.clone();
     let tokens = collect_tokens(node);
     let body_tokens = tokens.iter().skip(1).cloned().collect::<Vec<_>>();
-    let body = lower_expression(ctx, &body_tokens).unwrap_or_else(|| Expression::Block {
-        statements: Vec::new(),
-        span: span_for_node(ctx, node),
-    });
+    let has_body = !body_tokens.is_empty()
+        || find_child(node, SyntaxKind::Block)
+            .map(|b| !collect_tokens(b).is_empty())
+            .unwrap_or(false);
+    if let Some(keyword) = tokens.first() {
+        ensure_concurrency_body(ctx, keyword, has_body);
+    }
+    let body = find_child(node, SyntaxKind::Block)
+        .map(|block| lower_block_expr(ctx, block))
+        .or_else(|| lower_expression(ctx, &body_tokens))
+        .unwrap_or_else(|| Expression::Block {
+            statements: Vec::new(),
+            span: span_for_node(ctx, node),
+        });
     let span = span_for_node(ctx, node);
     let construct = if kind == SyntaxKind::SpawnStatement {
         ConcurrencyConstruct::Spawn {

@@ -1,4 +1,5 @@
 use super::context::{LoweringContext, LoweringDiagnostic};
+use crate::dsl::log::lower_log_block;
 use crate::lexer::TokenKind;
 use crate::parser::OwnedToken;
 use jv_ast::expression::{Argument, CallArgumentMetadata, Expression};
@@ -9,8 +10,16 @@ pub fn lower_expression(
     ctx: &mut LoweringContext<'_>,
     tokens: &[OwnedToken],
 ) -> Option<Expression> {
+    lower_expression_with_depth(ctx, tokens, 0)
+}
+
+fn lower_expression_with_depth(
+    ctx: &mut LoweringContext<'_>,
+    tokens: &[OwnedToken],
+    depth: usize,
+) -> Option<Expression> {
     let mut cursor = Cursor::new(tokens);
-    parse_expression_bp(ctx, &mut cursor, 0)
+    parse_expression_bp(ctx, &mut cursor, 0, depth)
 }
 
 /// 指定した区切りトークンまでのスライスを返す（最初の出現位置基準）。
@@ -52,6 +61,18 @@ impl<'a> Cursor<'a> {
         tok
     }
 
+    fn remaining(&self) -> &'a [OwnedToken] {
+        if self.pos >= self.tokens.len() {
+            &[]
+        } else {
+            &self.tokens[self.pos..]
+        }
+    }
+
+    fn skip_to_end(&mut self) {
+        self.pos = self.tokens.len();
+    }
+
     fn is_eof(&self) -> bool {
         self.pos >= self.tokens.len()
     }
@@ -61,8 +82,9 @@ fn parse_expression_bp(
     ctx: &mut LoweringContext<'_>,
     cursor: &mut Cursor<'_>,
     min_bp: u8,
+    depth: usize,
 ) -> Option<Expression> {
-    let mut lhs = parse_prefix(ctx, cursor)?;
+    let mut lhs = parse_prefix(ctx, cursor, depth)?;
 
     loop {
         let op_tok = match cursor.peek() {
@@ -80,7 +102,7 @@ fn parse_expression_bp(
         }
 
         cursor.bump(); // operator
-        let rhs = match parse_expression_bp(ctx, cursor, r_bp) {
+        let rhs = match parse_expression_bp(ctx, cursor, r_bp, depth) {
             Some(expr) => expr,
             None => {
                 ctx.push_diagnostic(LoweringDiagnostic::error(
@@ -107,9 +129,25 @@ fn parse_expression_bp(
     Some(lhs)
 }
 
-fn parse_prefix(ctx: &mut LoweringContext<'_>, cursor: &mut Cursor<'_>) -> Option<Expression> {
+fn parse_prefix(
+    ctx: &mut LoweringContext<'_>,
+    cursor: &mut Cursor<'_>,
+    depth: usize,
+) -> Option<Expression> {
     let tok = cursor.bump()?;
     match tok.kind {
+        TokenKind::Log
+        | TokenKind::Trace
+        | TokenKind::Debug
+        | TokenKind::Info
+        | TokenKind::Warn
+        | TokenKind::Error => {
+            let mut collected = vec![tok.clone()];
+            collected.extend_from_slice(cursor.remaining());
+            let expr = lower_log_block(ctx, &collected, depth);
+            cursor.skip_to_end();
+            expr
+        }
         TokenKind::Number => Some(Expression::Literal(
             Literal::Number(tok.lexeme.clone()),
             ctx.span_for_token(tok),
@@ -145,7 +183,7 @@ fn parse_prefix(ctx: &mut LoweringContext<'_>, cursor: &mut Cursor<'_>) -> Optio
                 TokenKind::Not => UnaryOp::Not,
                 _ => UnaryOp::Plus,
             };
-            let operand = parse_expression_bp(ctx, cursor, 9)
+            let operand = parse_expression_bp(ctx, cursor, 9, depth)
                 .unwrap_or_else(|| Expression::Literal(Literal::Null, ctx.span_for_token(tok)));
             let span = ctx.span_for_token(tok).merge(operand.span());
             Some(Expression::Unary {
@@ -162,7 +200,7 @@ fn parse_prefix(ctx: &mut LoweringContext<'_>, cursor: &mut Cursor<'_>) -> Optio
             Some(Expression::Literal(Literal::Null, ctx.span_for_token(tok)))
         }
         TokenKind::LeftParen => {
-            let inner = parse_expression_bp(ctx, cursor, 0);
+            let inner = parse_expression_bp(ctx, cursor, 0, depth);
             // consume ')'
             if cursor.peek_kind() == Some(TokenKind::RightParen) {
                 cursor.bump();
@@ -185,13 +223,14 @@ fn parse_prefix(ctx: &mut LoweringContext<'_>, cursor: &mut Cursor<'_>) -> Optio
             None
         }
     }
-    .map(|expr| parse_postfix(ctx, cursor, expr))
+    .map(|expr| parse_postfix(ctx, cursor, expr, depth))
 }
 
 fn parse_postfix(
     ctx: &mut LoweringContext<'_>,
     cursor: &mut Cursor<'_>,
     mut expr: Expression,
+    depth: usize,
 ) -> Expression {
     loop {
         match cursor.peek_kind() {
@@ -200,7 +239,7 @@ fn parse_postfix(
                 let mut args = Vec::new();
                 let mut used_commas = false;
                 while !cursor.is_eof() && cursor.peek_kind() != Some(TokenKind::RightParen) {
-                    if let Some(arg) = parse_expression_bp(ctx, cursor, 0) {
+                    if let Some(arg) = parse_expression_bp(ctx, cursor, 0, depth) {
                         args.push(Argument::Positional(arg));
                     }
                     if cursor.peek_kind() == Some(TokenKind::Comma) {
@@ -253,7 +292,7 @@ fn parse_postfix(
             }
             Some(TokenKind::LeftBracket) => {
                 cursor.bump();
-                let index = parse_expression_bp(ctx, cursor, 0)
+                let index = parse_expression_bp(ctx, cursor, 0, depth)
                     .unwrap_or_else(|| Expression::Literal(Literal::Null, expr.span().clone()));
                 if cursor.peek_kind() == Some(TokenKind::RightBracket) {
                     cursor.bump();

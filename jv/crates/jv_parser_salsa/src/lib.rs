@@ -6,6 +6,7 @@
 pub mod constraints;
 pub mod db;
 pub mod diagnostics;
+pub mod dsl;
 pub mod hir;
 pub mod lexer;
 pub mod lower;

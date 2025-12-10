@@ -9,6 +9,7 @@ mod control;
 mod function;
 mod import;
 mod jump;
+mod log;
 mod loops;
 mod package;
 mod resource;
@@ -23,6 +24,7 @@ pub use control::IfStrategy;
 pub use function::FunctionStrategy;
 pub use import::ImportStrategy;
 pub use jump::{BreakStrategy, ContinueStrategy, ReturnStrategy};
+pub use log::LogStrategy;
 pub use loops::{ForStrategy, WhileStrategy};
 pub use package::PackageStrategy;
 pub use resource::{DeferStrategy, UseStrategy};
@@ -55,6 +57,7 @@ pub fn registry() -> Vec<&'static dyn StatementStrategy> {
         &ReturnStrategy,
         &BreakStrategy,
         &ContinueStrategy,
+        &LogStrategy,
         &UseStrategy,
         &DeferStrategy,
         &SpawnStrategy,

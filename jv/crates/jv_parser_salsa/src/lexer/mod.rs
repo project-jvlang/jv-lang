@@ -95,7 +95,7 @@ fn build_zero_copy_tokens<'src>(
             .unwrap_or_else(|| line_slice.len());
 
         let start = line_start.saturating_add(byte_in_line);
-        let end = start.saturating_add(raw.lexeme.len());
+        let end = start.saturating_add(token_length_in_source(raw));
 
         let span = Span {
             start: start as u32,
@@ -127,6 +127,36 @@ fn line_start_offsets(source: &str) -> Vec<usize> {
         }
     }
     offsets
+}
+
+fn token_length_in_source(raw: &jv_lexer::Token) -> usize {
+    if let Some(length) = raw.metadata.iter().find_map(|meta| match meta {
+        jv_lexer::TokenMetadata::NumberLiteral(info) => Some(info.original_lexeme.len()),
+        jv_lexer::TokenMetadata::RegexLiteral { raw, .. } => Some(raw.len()),
+        jv_lexer::TokenMetadata::StringLiteral(info) => {
+            let delimiter_len: usize = match info.delimiter {
+                jv_lexer::StringDelimiterKind::DoubleQuote
+                | jv_lexer::StringDelimiterKind::SingleQuote => 1,
+                jv_lexer::StringDelimiterKind::TripleQuote
+                | jv_lexer::StringDelimiterKind::BacktickBlock => 3,
+            };
+            Some(
+                raw.lexeme
+                    .len()
+                    .saturating_add(delimiter_len.saturating_mul(2)),
+            )
+        }
+        _ => None,
+    }) {
+        return length;
+    }
+
+    match raw.token_type {
+        jv_lexer::TokenType::String(_)
+        | jv_lexer::TokenType::Character(_)
+        | jv_lexer::TokenType::RegexLiteral(_) => raw.lexeme.len().saturating_add(2),
+        _ => raw.lexeme.len(),
+    }
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 //! AST から HIR へのローワリング層。
 
-mod context;
-mod expressions;
+pub(crate) mod context;
+pub(crate) mod expressions;
 mod literals;
 mod params;
 mod statements;
