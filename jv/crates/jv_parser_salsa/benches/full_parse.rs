@@ -1,0 +1,50 @@
+use crate::harness::{PipelineKind, bench_state};
+use criterion::{Criterion, black_box};
+
+pub fn bench_full_parse(c: &mut Criterion) {
+    let mut group = c.benchmark_group("full_parse");
+    let (harness, corpus) = bench_state();
+
+    let stdlib = corpus.stdlib().to_vec();
+    group.bench_function("salsa_fast/stdlib", |b| {
+        b.iter(|| {
+            for entry in &stdlib {
+                harness
+                    .run(PipelineKind::SalsaFast, black_box(entry.source.as_str()))
+                    .expect("salsa fast parse succeeds");
+            }
+        });
+    });
+
+    group.bench_function("salsa_full/stdlib", |b| {
+        b.iter(|| {
+            for entry in &stdlib {
+                harness
+                    .run(PipelineKind::SalsaFull, black_box(entry.source.as_str()))
+                    .expect("salsa full parse succeeds");
+            }
+        });
+    });
+
+    if let Some(syn100) = corpus.synthetic_by_lines(100).cloned() {
+        group.bench_function("rowan/synthetic_100", |b| {
+            b.iter(|| {
+                harness
+                    .run(PipelineKind::Rowan, black_box(syn100.source.as_str()))
+                    .expect("rowan parse succeeds");
+            });
+        });
+    }
+
+    if let Some(syn2000) = corpus.synthetic_by_lines(2000).cloned() {
+        group.bench_function("salsa_full/synthetic_2000", |b| {
+            b.iter(|| {
+                harness
+                    .run(PipelineKind::SalsaFull, black_box(syn2000.source.as_str()))
+                    .expect("salsa full parse succeeds");
+            });
+        });
+    }
+
+    group.finish();
+}
