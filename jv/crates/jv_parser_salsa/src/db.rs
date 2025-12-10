@@ -1,5 +1,9 @@
 use std::sync::Arc;
 
+use crate::constraints::{
+    Constraint, ConstraintGraph, ConstraintGraphEdge, ConstraintGraphNode, TypeRef,
+    collect_constraints,
+};
 use crate::hir::HirFile;
 use crate::lexer::Lexer;
 use crate::lower;
@@ -23,6 +27,93 @@ pub fn lower_to_hir(db: &dyn ParserDatabase, file: FileInput) -> Arc<HirFile> {
         lowering.diagnostics,
         lowering.token_spans,
     ))
+}
+
+#[salsa::tracked]
+pub fn constraints_of(db: &dyn ParserDatabase, file: FileInput) -> Arc<Vec<Constraint>> {
+    collect_constraints(db, file)
+}
+
+#[salsa::tracked]
+pub fn constraint_graph(db: &dyn ParserDatabase, file: FileInput) -> Arc<ConstraintGraph> {
+    let constraints = constraints_of(db, file);
+    let mut graph = ConstraintGraph::default();
+
+    let mut node_map: Vec<(TypeRef, petgraph::prelude::NodeIndex)> = Vec::new();
+    let mut get_or_insert = |tr: &TypeRef, g: &mut ConstraintGraph| {
+        if let Some((_, idx)) = node_map.iter().find(|(k, _)| k == tr) {
+            *idx
+        } else {
+            let idx = match tr {
+                TypeRef::Annotation(ty) => g.0.add_node(ConstraintGraphNode::Type(ty.clone())),
+                TypeRef::TypeVar(id) => g.0.add_node(ConstraintGraphNode::TypeVar(*id)),
+            };
+            node_map.push((tr.clone(), idx));
+            idx
+        }
+    };
+
+    for constraint in constraints.iter() {
+        match constraint {
+            Constraint::Equal(a, b) => {
+                let a_idx = get_or_insert(a, &mut graph);
+                let b_idx = get_or_insert(b, &mut graph);
+                graph.0.add_edge(
+                    a_idx,
+                    b_idx,
+                    ConstraintGraphEdge::Constraint(constraint.clone()),
+                );
+                graph.0.add_edge(
+                    b_idx,
+                    a_idx,
+                    ConstraintGraphEdge::Constraint(constraint.clone()),
+                );
+            }
+            Constraint::Subtype { sub, sup } => {
+                let sub_idx = get_or_insert(sub, &mut graph);
+                let sup_idx = get_or_insert(sup, &mut graph);
+                graph.0.add_edge(
+                    sub_idx,
+                    sup_idx,
+                    ConstraintGraphEdge::Constraint(constraint.clone()),
+                );
+            }
+            Constraint::HasField {
+                target, field_type, ..
+            } => {
+                let t_idx = get_or_insert(target, &mut graph);
+                let f_idx = get_or_insert(field_type, &mut graph);
+                graph.0.add_edge(
+                    t_idx,
+                    f_idx,
+                    ConstraintGraphEdge::Constraint(constraint.clone()),
+                );
+            }
+            Constraint::Callable {
+                function,
+                args,
+                ret,
+            } => {
+                let fn_idx = get_or_insert(function, &mut graph);
+                let ret_idx = get_or_insert(ret, &mut graph);
+                for arg in args {
+                    let arg_idx = get_or_insert(arg, &mut graph);
+                    graph.0.add_edge(
+                        fn_idx,
+                        arg_idx,
+                        ConstraintGraphEdge::Constraint(constraint.clone()),
+                    );
+                }
+                graph.0.add_edge(
+                    fn_idx,
+                    ret_idx,
+                    ConstraintGraphEdge::Constraint(constraint.clone()),
+                );
+            }
+        }
+    }
+
+    Arc::new(graph)
 }
 
 #[salsa::tracked]
