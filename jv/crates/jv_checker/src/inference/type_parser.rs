@@ -45,7 +45,13 @@ pub fn parse_type_annotation(annotation: &TypeAnnotation) -> Result<TypeKind, Ty
             let ret_ty = parse_type_annotation(return_type)?;
             Ok(TypeKind::function(param_types, ret_ty))
         }
-        TypeAnnotation::Unit { base, .. } => parse_type_annotation(base),
+        TypeAnnotation::Unit { base, .. } => {
+            let mut kind = parse_type_annotation(base)?;
+            if let TypeKind::Boxed(primitive) = kind {
+                kind = TypeKind::primitive(primitive);
+            }
+            Ok(kind)
+        }
         _ => Ok(TypeKind::Unknown),
     }
 }
