@@ -27,3 +27,10 @@
 ## ディレクトリ構成
 
 - `benches/` 以下にベンチマーク実装を追加する。Criterion ベースのベンチを推奨。
+
+## パイプラインモード別計測
+
+- `SalsaPipeline::execute_with_options` に `ParseOptions` を渡し、`generate_cst` / `generate_trivia_map` のオンオフを切り替えて比較する。
+- CST/TriviaMap 無効: `ParseOptions::default()`（高速パス）
+- CST/TriviaMap 有効: `ParseOptions { generate_cst: true, generate_trivia_map: true }`
+- いずれのモードでもコーパスは `benches/corpus` を利用し、ウォーム/コールド条件を揃えること。

@@ -9,6 +9,7 @@ use crate::lexer::Lexer;
 use crate::lower;
 use crate::parser::{self, ParseOutput, ParseResult};
 use crate::solver::{Solver, TypeSolution};
+use jv_parser_preprocess::PreprocessDiagnostic;
 
 #[salsa::input]
 pub struct FileInput {
@@ -16,6 +17,41 @@ pub struct FileInput {
     pub path: Arc<str>,
     #[return_ref]
     pub text: Arc<str>,
+}
+
+/// 前処理結果をキャッシュするための出力。
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreprocessOutput {
+    pub tokens: Vec<jv_lexer::Token>,
+    pub diagnostics: Vec<PreprocessDiagnostic>,
+    pub halted_stage: Option<&'static str>,
+}
+
+impl Eq for PreprocessOutput {}
+
+#[salsa::tracked]
+pub fn preprocess(db: &dyn ParserDatabase, file: FileInput) -> Arc<PreprocessOutput> {
+    let lexed = jv_lexer::Lexer::new(file.text(db).as_ref()).tokenize();
+    match lexed {
+        Ok(tokens) => {
+            let result = jv_parser_preprocess::run(tokens);
+            let (tokens, diagnostics, halted_stage) = result.into_parts();
+            Arc::new(PreprocessOutput {
+                tokens,
+                diagnostics,
+                halted_stage,
+            })
+        }
+        Err(err) => Arc::new(PreprocessOutput {
+            tokens: Vec::new(),
+            diagnostics: vec![PreprocessDiagnostic::new(
+                "stage-0-lexer",
+                err.to_string(),
+                None,
+            )],
+            halted_stage: Some("stage-0-lexer"),
+        }),
+    }
 }
 
 #[salsa::tracked]
