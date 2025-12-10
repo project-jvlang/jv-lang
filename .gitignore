@@ -131,7 +131,6 @@ gradle-app.setting
 .jj/
 .project-todolist/
 .serena/
-.spec-workflow/
 .codex/
 toolchains/*
 
