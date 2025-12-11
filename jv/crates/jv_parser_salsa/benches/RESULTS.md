@@ -41,6 +41,7 @@
 
 - 傾向: Fast の傾きは ~6.1 MiB/1k 行（10k/20k 領域）まで改善。Full は ~8.6–9.1 MiB/1k 行、Rowan は ~4.3–4.6 MiB/1k 行。40k 行で Fast がやや頭打ちに見えるのは測定揺らぎの可能性。
 - 条件: Salsa は cacheless（CacheMode::Ephemeral）、Fast は trim_trivia_and_metadata=true。Rowan は同プロセス単体実行。
+- 伸び方評価: いずれも指数・対数的増加は見られず、概ね線形（Rowan はサブリニア寄り）にスケール。40k 行での頭打ちは揺らぎ/OS リクレームの可能性が高い。
 
 ### 8.5 LSP
 | シナリオ | Salsa Fast p95 (ms) | Salsa Full p95 (ms) | Rowan p95 (ms) | 目標 |
