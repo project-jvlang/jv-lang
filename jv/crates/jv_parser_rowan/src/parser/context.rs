@@ -464,7 +464,7 @@ impl<'tokens> ParserContext<'tokens> {
                 TokenKind::ValKw | TokenKind::VarKw => true,
                 TokenKind::Identifier => {
                     let token = &self.tokens[index];
-                    matches!(token.lexeme.as_str(), "mut" | "ref")
+                    matches!(token.lexeme.as_ref(), "mut" | "ref")
                 }
                 _ => false,
             };

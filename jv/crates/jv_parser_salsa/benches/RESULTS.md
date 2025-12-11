@@ -24,9 +24,9 @@
 | 変更なし再パース (rowan unchanged_reparse) | 154.93 ms | n/a | 50% 以上短縮 |
 
 ### 8.4 メモリ
-| シナリオ | Salsa Fast RSS Δ(KiB) | Salsa Full RSS Δ(KiB) | 目標 |
-| --- | --- | --- | --- |
-| synthetic-2000 | 13,852 KiB | 7,680 KiB | Rowan 比 70% 以下（Rowan=384 KiB → 基準 269 KiB） |
+| シナリオ | Salsa Fast RSS Δ(KiB) | Salsa Full RSS Δ(KiB) | Rowan RSS Δ(KiB) | 目標 |
+| --- | --- | --- | --- | --- |
+| synthetic-2000 (cacheless) | 13,124 KiB | 18,240 KiB | 9,676 KiB | Rowan 比 70% 以下（基準: Rowan 実測値×0.7=6,773 KiB） |
 
 ### 8.5 LSP
 | シナリオ | Salsa Fast p95 (ms) | Salsa Full p95 (ms) | Rowan p95 (ms) | 目標 |
@@ -39,20 +39,41 @@
 | --- | --- | --- | --- |
 | フルパース性能 | stdlib/synthetic で目標達成 | Salsa 全項目が Rowan より高速（回帰解消） | _ok_ |
 | インクリメンタル速度 | 50% 以上短縮 | 71.5 ms（salsa_full）/40.8 ns（salsa_fast） vs Rowan 154.9 ms（unchanged）で約46%短縮 | _at risk_ |
-| メモリ | Rowan 比 70% 以下 | 13,852 / 7,680 KiB（Rowan=384 KiB → 基準269 KiB未満必要、未達） | _ng_ |
+| メモリ | Rowan 比 70% 以下 | synthetic-2000 (cacheless): fast 13,124 / full 18,240 KiB（Rowan=9,676 KiB → 基準 6,773 KiB 未満必要、未達） | _ng_ |
 | LSP 応答 | p95 200ms 以下 | completion/diagnostics とも 200ms 未満（計測値） | _ok_ |
 
 ## 推奨事項
 - RSS などメモリ指標を実測し、表を更新すること（heaptrack 等でピーク取得）。
 - フルパース回帰（stdlib/synthetic_100）を確認し、原因調査・最適化を行うこと。
 - インクリメンタルのベースライン（Rowan/前回値）を取得し、短縮率を算出すること。
+- メモリ削減施策を実装し、`rss_probe` で再測定して基準 70% を再評価すること。
 
 ## メモリ回帰の原因と対応
-- 基準測定: `cargo run -p jv_parser_salsa --example rss_probe --release`（synthetic-2000）。Rowan の実測 RSS 増分は 384 KiB（旧記録 512 KiB は仮値だった）。これを基準に 70% 目標を 269 KiB に更新。
-- 改善済み: `OwnedToken` の `lexeme` を `Arc<str>` 化し、パース後のトークン列・イベント列・診断を即座に `mem::take` で解放。Salsa Fast 14,320→13,852 KiB、Salsa Full 7,936→7,680 KiB と 3〜4% 削減。
-- 依然のボトルネック: salsa DB がプリプロセス/パース/ローワリングのキャッシュを保持し続けるため、2000 行規模でトークン列・イベント列・HIR が DB 内に常駐する。さらに `LegacyToken` への文字列コピー（String 再ヒープ化）も残存し、Rowan の stateless パイプラインとの差が大きい。
-- 次アクション案: (1) パイプライン終了時に salsa runtime のキャッシュを明示的に掃除する（DB を都度再生成 or GC/Sweep 呼び出し）; (2) `LegacyToken` も `Arc<str>` 共有 or ソーススライス参照にし、String への再ヒープ化を回避; (3) `ParseOptions` に応じて不要な CST/Trivia/トークンを早期破棄するモードを設け、メモリ常駐量を最小化する。
+- 測定方法を更新: `cargo run -p jv_parser_salsa --release --example rss_probe -- --pipeline <pipeline> --corpus crates/jv_parser_salsa/benches/corpus/synthetic/synthetic-2000.jv`。1 パイプライン/1 プロセスで計測するため、Rowan の差分過小評価を解消。
+- 改善済み: `OwnedToken` の `lexeme` を `Arc<str>` 化し、パース後のトークン列・イベント列・診断を `mem::take` で即解放。Salsa Fast 14,320→14,064 KiB、Salsa Full 7,936→7,680 KiB と数 % 改善。
+- 依然のボトルネック: (1) Salsa DB がプリプロセス/パース/ローワリング結果を保持し続ける（パイプラインごとにキャッシュが累積）; (2) `LegacyToken` 変換で `lexeme_string()` を都度 `String` 再確保して二重保持; (3) Fast モードでも `TokenTrivia`/`metadata` を丸ごと保持するため、Rowan の stateless パイプラインより常駐コストが大きい。
+- 次アクション案: (1) パーサー終了時に salsa runtime を sweep する or `Database` を再生成する API を追加し、ベンチ/CLI ではキャッシュを持ち越さない; (2) `LegacyToken` を `Arc<str>` 共有 or スライス参照にし、`owned_tokens_to_legacy` を 1 回に統合してコピーを排除; (3) `ParseOptions` でトリビア/メタデータを落とす軽量モードを導入し、Fast パスのフットプリントを抑える。
 
 ## Rowan 比で低性能だった項目と原因考察（修正後の現状）
 - フルパース: ベンチを対称化（Rowan stdlib/synthetic_2000 追加、各イテレーションで PipelineSwitcher を新規生成）し、過去の回帰扱いは解消。現状 Salsa が優位で No-Go 要因なし。
-- メモリ: ベンチを毎回新規パイプラインで実行し、Rowan も計測。ただし Salsa の RSS 増分（fast 18,220 KiB / full 5,888 KiB）が Rowan 384 KiB を大幅に超過し、70% 基準も未達。原因は DB + lexeme ヒープ化 + CST/Trivia 保持の構造的コスト。改善が必要。
+- メモリ: 新しい RSS 測定では synthetic-2000 時点で Rowan 9,904 KiB に対し Salsa Fast 14,064 / Full 18,800 KiB と 70% 基準未達。上記ボトルネックが主因。改善が必要。
+
+## 追加測定: 大規模合成データでの RSS スケーリング
+`cargo run -p jv_parser_salsa --release --example rss_probe -- --pipeline <pipeline> --generate-functions N --cache-mode cacheless` で 1 プロセス・1 パイプラインずつ計測（約 6 行/関数、Salsa Fast は trim_trivia_and_metadata=true）。
+
+| 行数（関数数） | Salsa Fast RSS Δ(KiB) | Salsa Full RSS Δ(KiB) | Rowan RSS Δ(KiB) |
+| --- | --- | --- | --- |
+| 2,000（333 関数相当） | 13,124 | 18,240 | 9,676 |
+| 9,998（1,666 関数相当） | 61,196 | 86,800 | 43,400 |
+| 20,000（3,333 関数相当） | 121,188 | 171,372 | 83,164 |
+| 39,998（6,666 関数相当） | 102,056 | 202,376 | 91,988 |
+
+- 傾向: Fast の傾きは ~6.1 MiB/1k 行（10k/20k 領域）まで改善。Full は ~8.6–9.1 MiB/1k 行、Rowan は ~4.3–4.6 MiB/1k 行。40k 行で Fast がやや頭打ちに見えるのは測定揺らぎの可能性。
+- 条件: Salsa は cacheless（CacheMode::Ephemeral）、Fast は trim_trivia_and_metadata=true。Rowan は同プロセス単体実行。
+
+## メモリ削減タスク
+[x] 1. SalsaPipeline に「キャッシュなし」モードを追加する（Database 再生成 or `salsa_runtime_mut().sweep(SweepStrategy::discard_everything())` をパイプライン終了時に呼べる API を実装し、ベンチ/CLI から切り替え可能にする）。→ `CacheMode::Ephemeral` と `SalsaPipeline::with_cache_mode/new_cacheless`、`rss_probe --cache-mode` で切替可能。
+[x] 2. `LegacyToken` の `lexeme` を `Arc<str>` 共有（またはスライス再構成）に変更し、`owned_tokens_to_legacy` の再確保をなくす。セマンティクス/成果物で同一ベクタを使い回す実装に統一し、RSS を再測定する。→ `jv_lexer::Token.lexeme` を `Arc<str>` 化し、パイプライン変換で再確保を排除。RSS 再測定は未。
+[x] 3. Fast 用軽量モードを `ParseOptions` に追加し、トリビア/metadata のコピーをスキップして `OwnedToken` を最小構成にする（必要ならトリビアを後付けできるデフォルト値で埋める）。→ `trim_trivia_and_metadata` を追加し、Salsa Fast / `rss_probe --pipeline salsa_fast` で有効化。
+[x] 4. 上記 1〜3 を適用後、`rss_probe` で synthetic-2000/10k/20k/40k を再計測し、8.4 およびスケーリング表を更新する。→ cacheless + Fast 軽量モードで再測定済み。
+[x] 5. ベンチ改善: 新しい `rss_probe` をベンチから呼び出すか、各パイプラインを別プロセスで測定するように変更し、Rowan の基準値を取り直して RESULTS.md を更新する。→ `JV_BENCH_USE_RSS_PROBE=1` で Criterion メモリベンチが rss_probe を別プロセス実行し、cacheless/プロセス分離で測定可能。

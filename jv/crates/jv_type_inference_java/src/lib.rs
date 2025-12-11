@@ -256,7 +256,7 @@ fn tokens_to_text(tokens: &[Token]) -> String {
         for _ in 0..trivia.spaces {
             text.push(' ');
         }
-        text.push_str(token.lexeme.as_str());
+        text.push_str(token.lexeme.as_ref());
     }
     text
 }
@@ -547,7 +547,7 @@ impl<'a> TypeAnnotationParser<'a> {
             (text, span_from_token(ident))
         } else if self.peek_is(|kind| matches!(kind, TokenType::Invalid(_))) {
             let invalid = self.advance().expect("invalid token should be present");
-            (invalid.lexeme.clone(), span_from_token(invalid))
+            (invalid.lexeme.to_string(), span_from_token(invalid))
         } else {
             return Err(ParseError::new(
                 "単位注釈の識別子が取得できませんでした",
@@ -558,7 +558,7 @@ impl<'a> TypeAnnotationParser<'a> {
 
         if self.peek_is(|kind| matches!(kind, TokenType::Not)) {
             let bang = self.advance().unwrap();
-            name.push_str(bang.lexeme.as_str());
+            name.push_str(bang.lexeme.as_ref());
             let bang_span = span_from_token(bang);
             span = merge_spans(&span, &bang_span);
             has_default_marker = true;
@@ -574,7 +574,7 @@ impl<'a> TypeAnnotationParser<'a> {
 
     fn parse_bracket_symbol(&mut self) -> Result<UnitSymbol, ParseError> {
         let open = self.expect(|kind| matches!(kind, TokenType::LeftBracket), "`[`")?;
-        let mut text = open.lexeme.clone();
+        let mut text = open.lexeme.to_string();
         let mut span = span_from_token(open);
         let mut has_default_marker = false;
 
@@ -582,7 +582,7 @@ impl<'a> TypeAnnotationParser<'a> {
             let token = self.advance().ok_or_else(|| {
                 ParseError::new("単位注釈の括弧が閉じていません", Some(span.clone()))
             })?;
-            text.push_str(token.lexeme.as_str());
+            text.push_str(token.lexeme.as_ref());
             let token_span = span_from_token(token);
             span = merge_spans(&span, &token_span);
             match token.token_type {

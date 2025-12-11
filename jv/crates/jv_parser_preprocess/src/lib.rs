@@ -95,7 +95,7 @@ fn interpolation_literal_value(token: &Token) -> String {
             }
             _ => None,
         })
-        .unwrap_or_else(|| token.lexeme.clone())
+        .unwrap_or_else(|| token.lexeme.to_string())
 }
 
 fn default_pipeline() -> ProcessingPipeline {

@@ -4,6 +4,7 @@ use jv_lexer::{
     ExplicitSeparatorLocation, JsonConfidence, LayoutCommaMetadata, LayoutSequenceKind, Token,
     TokenMetadata, TokenTrivia, TokenType,
 };
+use std::sync::Arc;
 
 /// 既存の単一ステージ実装をパイプライン互換でラップする。
 pub struct LegacyPreprocessStage;
@@ -561,7 +562,7 @@ fn has_layout_trivia(trivia: &TokenTrivia) -> bool {
 fn make_layout_comma_token(reference: &Token) -> Token {
     Token {
         token_type: TokenType::LayoutComma,
-        lexeme: ",".to_string(),
+        lexeme: Arc::from(","),
         line: reference.line,
         column: reference.column,
         leading_trivia: TokenTrivia::default(),

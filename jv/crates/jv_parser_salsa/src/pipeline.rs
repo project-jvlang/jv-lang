@@ -13,11 +13,28 @@ use jv_parser_frontend::{ParseError, ParserPipeline, PipelineArtifacts};
 use jv_parser_preprocess::PreprocessDiagnostic;
 use std::sync::Arc;
 
-/// パースオプション。CST/TriviaMap 生成の有無を切り替える。
+/// パースオプション。CST/TriviaMap 生成の有無やトークン軽量化を切り替える。
 #[derive(Debug, Clone, Copy)]
 pub struct ParseOptions {
     pub generate_cst: bool,
     pub generate_trivia_map: bool,
+    /// Fast 用: トリビア/metadata を捨てて OwnedToken を最小構成にする。
+    pub trim_trivia_and_metadata: bool,
+}
+
+/// Salsa パイプラインのキャッシュモード。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheMode {
+    /// クエリ結果をパイプライン間で共有する。
+    Shared,
+    /// 実行ごとに新しい DB を作成しキャッシュを持ち越さない。
+    Ephemeral,
+}
+
+impl Default for CacheMode {
+    fn default() -> Self {
+        CacheMode::Shared
+    }
 }
 
 impl Default for ParseOptions {
@@ -25,6 +42,7 @@ impl Default for ParseOptions {
         Self {
             generate_cst: false,
             generate_trivia_map: false,
+            trim_trivia_and_metadata: false,
         }
     }
 }
@@ -48,6 +66,7 @@ impl SalsaPipelineOutput {
 /// Salsa ベースのパーサーパイプライン。
 pub struct SalsaPipeline {
     db: Database,
+    cache_mode: CacheMode,
 }
 
 impl Default for SalsaPipeline {
@@ -59,9 +78,20 @@ impl Default for SalsaPipeline {
 impl SalsaPipeline {
     /// 新しいパイプラインを生成する。
     pub fn new() -> Self {
+        Self::with_cache_mode(CacheMode::Shared)
+    }
+
+    /// キャッシュモードを指定してパイプラインを生成する。
+    pub fn with_cache_mode(cache_mode: CacheMode) -> Self {
         Self {
             db: Database::new(),
+            cache_mode,
         }
+    }
+
+    /// キャッシュなし（実行ごとに DB 再生成）モードのパイプライン。
+    pub fn new_cacheless() -> Self {
+        Self::with_cache_mode(CacheMode::Ephemeral)
     }
 
     /// パーサーパイプラインを実行し、必要に応じて CST/TriviaMap を生成する。
@@ -70,14 +100,25 @@ impl SalsaPipeline {
         source: &str,
         options: ParseOptions,
     ) -> Result<SalsaPipelineOutput, ParseError> {
-        let file = FileInput::new(
-            &self.db,
-            Arc::from("<memory>"),
-            Arc::from(source.to_string()),
-        );
+        match self.cache_mode {
+            CacheMode::Shared => self.execute_with_db(&self.db, source, options),
+            CacheMode::Ephemeral => {
+                let db = Database::new();
+                self.execute_with_db(&db, source, options)
+            }
+        }
+    }
+
+    fn execute_with_db(
+        &self,
+        db: &Database,
+        source: &str,
+        options: ParseOptions,
+    ) -> Result<SalsaPipelineOutput, ParseError> {
+        let file = FileInput::new(db, Arc::from("<memory>"), Arc::from(source.to_string()));
 
         // 1. 前処理
-        let preprocess_output = preprocess(&self.db, file);
+        let preprocess_output = preprocess(db, file);
         let preprocess_owned =
             Arc::try_unwrap(preprocess_output).unwrap_or_else(|arc| (*arc).clone());
         let PreprocessOutput {
@@ -92,7 +133,12 @@ impl SalsaPipeline {
 
         // 2. パース
         let line_index = LineIndex::new(source);
-        let mut parse_result = parser::parse(build_owned_tokens(pre_tokens, &line_index, source));
+        let mut parse_result = parser::parse(build_owned_tokens(
+            pre_tokens,
+            &line_index,
+            source,
+            options.trim_trivia_and_metadata,
+        ));
         let legacy_tokens = owned_tokens_to_legacy(&parse_result.tokens, &line_index);
 
         let parser_error = parse_result
@@ -164,7 +210,6 @@ impl SalsaPipeline {
         );
 
         // 8. 成果物構築
-        let legacy_tokens = owned_tokens_to_legacy(&parse_result.tokens, &line_index);
         let parser_diagnostics = parse_result.output.diagnostics.clone();
         let lowering_diagnostics = lowering.diagnostics.clone();
         let recovered = parse_result.output.recovered;
@@ -211,17 +256,23 @@ fn build_owned_tokens(
     tokens: Vec<LegacyToken>,
     index: &LineIndex,
     source: &str,
+    trim_trivia_and_metadata: bool,
 ) -> Vec<crate::parser::OwnedToken> {
     tokens
         .into_iter()
         .map(|tok| {
             let span = span_from_legacy_token(&tok, index, source);
+            let (leading_trivia, metadata) = if trim_trivia_and_metadata {
+                (crate::lexer::TokenTrivia::default(), Vec::new())
+            } else {
+                (tok.leading_trivia, tok.metadata)
+            };
             crate::parser::OwnedToken {
                 kind: crate::lexer::kind_from_token_type(&tok.token_type),
                 span,
-                lexeme: Arc::from(tok.lexeme),
-                leading_trivia: tok.leading_trivia,
-                metadata: tok.metadata,
+                lexeme: tok.lexeme,
+                leading_trivia,
+                metadata,
                 diagnostic: tok.diagnostic,
             }
         })
@@ -345,6 +396,7 @@ mod tests {
                 ParseOptions {
                     generate_cst: true,
                     generate_trivia_map: true,
+                    trim_trivia_and_metadata: false,
                 },
             )
             .expect("パイプライン実行に成功する");

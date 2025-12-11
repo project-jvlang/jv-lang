@@ -262,7 +262,7 @@ impl UnitTypeDefinitionStrategy {
         let directive = ctx
             .peek_significant_token_n(1)
             .filter(|token| TokenKind::from_token(token) == TokenKind::Identifier)
-            .map(|token| token.lexeme.as_str());
+            .map(|token| token.lexeme.as_ref());
 
         let node_kind = match directive {
             Some("ReverseConversion") => SyntaxKind::UnitReverseConversionBlock,
@@ -285,7 +285,7 @@ impl UnitTypeDefinitionStrategy {
         };
 
         if let Some(token) = ident_token {
-            let name = token.lexeme.as_str();
+            let name = token.lexeme.as_ref();
             if name != "Conversion" && name != "ReverseConversion" {
                 ctx.report_error(
                     DIAGNOSTIC_JV_UNIT_004_UNKNOWN_DIRECTIVE,

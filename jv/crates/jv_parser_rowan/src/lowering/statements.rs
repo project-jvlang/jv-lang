@@ -1290,7 +1290,7 @@ fn qualified_name_segments(
                 TokenType::Identifier(value) => Some(value.clone()),
                 _ => None,
             })
-            .or_else(|| tokens.first().map(|token| token.lexeme.clone()))?;
+            .or_else(|| tokens.first().map(|token| token.lexeme.to_string()))?;
         segments.push(text);
     }
 
@@ -1338,7 +1338,7 @@ fn missing_child_diagnostic(
 fn join_tokens(tokens: &[&Token]) -> String {
     tokens
         .iter()
-        .map(|token| token.lexeme.as_str())
+        .map(|token| token.lexeme.as_ref())
         .collect::<String>()
 }
 
@@ -2080,7 +2080,7 @@ mod expression_parser {
 
             if slice.len() >= 3
                 && TokenKind::from_token(slice[0]) == TokenKind::Unknown
-                && slice[0].lexeme == "$"
+                && slice[0].lexeme.as_ref() == "$"
                 && TokenKind::from_token(slice[1]) == TokenKind::LeftBrace
             {
                 let mut depth = 1usize;
@@ -2306,7 +2306,7 @@ mod expression_parser {
                             TokenType::String(value) | TokenType::StringInterpolation(value) => {
                                 value.clone()
                             }
-                            _ => token.lexeme.clone(),
+                            _ => token.lexeme.to_string(),
                         };
                         Expression::Literal(Literal::String(value), span.clone())
                     };
@@ -5202,7 +5202,7 @@ mod expression_parser {
         let Some(segments) = segments else {
             let value = match &token.token_type {
                 TokenType::StringInterpolation(value) | TokenType::String(value) => value.clone(),
-                _ => token.lexeme.clone(),
+                _ => token.lexeme.to_string(),
             };
             return Ok((Expression::Literal(Literal::String(value), span), 0));
         };
@@ -5321,7 +5321,7 @@ mod expression_parser {
         token: &Token,
         _metadata: Option<&StringLiteralMetadata>,
     ) -> String {
-        token.lexeme.clone()
+        token.lexeme.to_string()
     }
 
     fn detect_regex_command_segments(
@@ -5573,7 +5573,7 @@ mod expression_parser {
             TokenType::Identifier(value)
             | TokenType::String(value)
             | TokenType::StringInterpolation(value) => value.clone(),
-            _ => token.lexeme.clone(),
+            _ => token.lexeme.to_string(),
         });
 
         let mut seen = Vec::new();
@@ -5643,7 +5643,7 @@ mod expression_parser {
         let raw = raw_lexeme_from_metadata(token, metadata);
         let normalized = match &token.token_type {
             TokenType::String(value) | TokenType::StringInterpolation(value) => value.clone(),
-            _ => token.lexeme.clone(),
+            _ => token.lexeme.to_string(),
         };
 
         let interpolation_segments = token.metadata.iter().find_map(|meta| match meta {

@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::when_tracker::{PendingWhenTracker, WhenTrackerEvent};
 use jv_lexer::{
@@ -430,7 +431,7 @@ fn has_layout_trivia(trivia: &TokenTrivia) -> bool {
 fn make_layout_comma_token(reference: &Token) -> Token {
     Token {
         token_type: TokenType::LayoutComma,
-        lexeme: ",".to_string(),
+        lexeme: Arc::from(","),
         line: reference.line,
         column: reference.column,
         leading_trivia: TokenTrivia::default(),

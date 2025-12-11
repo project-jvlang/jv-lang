@@ -2725,7 +2725,7 @@ fun main(): Unit {
         .artifacts()
         .tokens()
         .iter()
-        .map(|token| token.lexeme.as_str())
+        .map(|token| token.lexeme.as_ref())
         .collect();
     assert!(
         lexemes.iter().any(|lexeme| *lexeme == "as"),

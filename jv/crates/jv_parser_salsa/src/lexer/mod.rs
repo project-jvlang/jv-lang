@@ -10,8 +10,8 @@ pub mod trivia;
 
 pub use compat::{kind_from_token_type, token_type_from_kind};
 pub use span::Span;
-pub use token::{Token, TokenDiagnostic, TokenKind, TokenMetadata, TokenTrivia};
 use std::sync::Arc;
+pub use token::{Token, TokenDiagnostic, TokenKind, TokenMetadata, TokenTrivia};
 
 pub type LexError = jv_lexer::LexError;
 

@@ -1,7 +1,7 @@
 use criterion::Criterion;
 use jv_parser_frontend::{ParseError, ParserPipeline};
 use jv_parser_rowan::frontend::RowanPipeline;
-use jv_parser_salsa::pipeline::{ParseOptions, SalsaPipeline};
+use jv_parser_salsa::pipeline::{CacheMode, ParseOptions, SalsaPipeline};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -23,8 +23,12 @@ pub struct PipelineSwitcher {
 
 impl PipelineSwitcher {
     pub fn new() -> Self {
+        Self::with_cache_mode(CacheMode::Shared)
+    }
+
+    pub fn with_cache_mode(cache_mode: CacheMode) -> Self {
         Self {
-            salsa: SalsaPipeline::new(),
+            salsa: SalsaPipeline::with_cache_mode(cache_mode),
             rowan: RowanPipeline::new(),
         }
     }
@@ -34,7 +38,13 @@ impl PipelineSwitcher {
         match kind {
             PipelineKind::SalsaFast => self
                 .salsa
-                .execute_with_options(source, ParseOptions::default())
+                .execute_with_options(
+                    source,
+                    ParseOptions {
+                        trim_trivia_and_metadata: true,
+                        ..ParseOptions::default()
+                    },
+                )
                 .map(|out| out.artifacts.diagnostics.final_diagnostics().len()),
             PipelineKind::SalsaFull => self
                 .salsa
@@ -43,6 +53,7 @@ impl PipelineSwitcher {
                     ParseOptions {
                         generate_cst: true,
                         generate_trivia_map: true,
+                        trim_trivia_and_metadata: false,
                     },
                 )
                 .map(|out| out.artifacts.diagnostics.final_diagnostics().len()),

@@ -30,6 +30,7 @@ fn salsa_matches_rowan_on_stdlib_corpus() {
             ParseOptions {
                 generate_cst: true,
                 generate_trivia_map: true,
+                trim_trivia_and_metadata: false,
             },
         );
         let rowan_output = rowan.execute(&source);

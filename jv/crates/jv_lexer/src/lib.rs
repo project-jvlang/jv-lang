@@ -6,6 +6,7 @@ pub mod plugins;
 
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// Token types for jv language
@@ -396,7 +397,7 @@ pub enum TokenDiagnostic {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Token {
     pub token_type: TokenType,
-    pub lexeme: String,
+    pub lexeme: Arc<str>,
     pub line: usize,
     pub column: usize,
     pub leading_trivia: TokenTrivia,

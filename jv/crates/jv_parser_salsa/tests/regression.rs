@@ -10,6 +10,7 @@ fn parses_simple_program_without_errors() {
             ParseOptions {
                 generate_cst: true,
                 generate_trivia_map: true,
+                trim_trivia_and_metadata: false,
             },
         )
         .expect("pipeline should succeed");

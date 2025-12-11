@@ -89,7 +89,7 @@ fn convert_tokens(ctx: &LoweringContext<'_>, tokens: &[OwnedToken]) -> Vec<jv_le
             let span = ctx.span_for_token(tok);
             jv_lexer::Token {
                 token_type: token_type_from_kind(tok.kind),
-                lexeme: tok.lexeme_string(),
+                lexeme: tok.lexeme.clone(),
                 line: span.start_line,
                 column: span.start_column,
                 leading_trivia: tok.leading_trivia.clone(),

@@ -102,7 +102,7 @@ impl ParseBuilder {
     pub fn push_token(&mut self, token: &Token) -> TokenKind {
         let kind = TokenKind::from_token(token);
         self.builder
-            .token(kind.to_syntax().into(), token.lexeme.as_str());
+            .token(kind.to_syntax().into(), token.lexeme.as_ref());
         kind
     }
 

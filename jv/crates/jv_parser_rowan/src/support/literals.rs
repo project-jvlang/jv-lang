@@ -5,7 +5,7 @@ use jv_lexer::{Token, TokenMetadata, TokenType};
 pub fn regex_literal_from_token(token: &Token, span: Span) -> RegexLiteral {
     let normalized = match &token.token_type {
         TokenType::RegexLiteral(value) => value.clone(),
-        _ => token.lexeme.clone(),
+        _ => token.lexeme.to_string(),
     };
 
     let (raw, pattern) = token

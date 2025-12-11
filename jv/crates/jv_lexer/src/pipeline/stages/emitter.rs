@@ -9,6 +9,7 @@ use crate::{
 };
 
 use crate::{LayoutMode, Lexer, StringInterpolationSegment};
+use std::sync::Arc;
 
 #[derive(Default)]
 pub struct Emitter;
@@ -20,7 +21,7 @@ impl Emitter {
 
     fn build_token(
         token_type: TokenType,
-        lexeme: String,
+        lexeme: Arc<str>,
         trivia: TokenTrivia,
         line: usize,
         column: usize,
@@ -127,7 +128,7 @@ impl Emitter {
 
                     tokens.push(Self::build_token(
                         token_type,
-                        literal,
+                        Arc::from(literal),
                         trivia,
                         line,
                         column,
@@ -154,7 +155,7 @@ impl Emitter {
             let metadata_vec = std::mem::take(&mut first_metadata);
             tokens.push(Self::build_token(
                 TokenType::String(trailing_literal.clone()),
-                trailing_literal,
+                Arc::from(trailing_literal),
                 leading_trivia,
                 line,
                 column,
@@ -166,7 +167,7 @@ impl Emitter {
 
         tokens.push(Self::build_token(
             TokenType::StringEnd,
-            trailing_literal,
+            Arc::from(trailing_literal),
             TokenTrivia::default(),
             line,
             column,
@@ -185,7 +186,7 @@ impl Emitter {
         };
         Self::build_token(
             TokenType::FieldNameLabel(payload),
-            candidate.name.clone(),
+            Arc::from(candidate.name.clone()),
             TokenTrivia::default(),
             candidate.line,
             candidate.column,
@@ -219,7 +220,7 @@ impl EmitterStage for Emitter {
         let span_start = normalized.raw.span.start;
         let mut tokens = match emission_plan {
             EmissionPlan::Direct => {
-                let lexeme = normalized.normalized_text.clone();
+                let lexeme: Arc<str> = Arc::from(normalized.normalized_text.as_str());
                 vec![Self::build_token(
                     token_type,
                     lexeme,
