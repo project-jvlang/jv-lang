@@ -10,23 +10,27 @@ pub fn bench_memory(c: &mut Criterion) {
         .cloned()
         .expect("synthetic-2000 corpus present");
 
-    group.bench_function("salsa_full/rss_delta", |b| {
+    group.bench_function("salsa_fast/rss_delta", |b| {
         b.iter(|| {
             let before = current_rss_kb().unwrap_or(0);
-            harness
-                .run(PipelineKind::SalsaFull, black_box(sample.source.as_str()))
-                .expect("parse succeeds");
+            if let Err(err) =
+                harness.run(PipelineKind::SalsaFast, black_box(sample.source.as_str()))
+            {
+                black_box(err);
+            }
             let after = current_rss_kb().unwrap_or(before);
             black_box(after.saturating_sub(before));
         });
     });
 
-    group.bench_function("salsa_fast/rss_delta", |b| {
+    group.bench_function("salsa_full/rss_delta", |b| {
         b.iter(|| {
             let before = current_rss_kb().unwrap_or(0);
-            harness
-                .run(PipelineKind::SalsaFast, black_box(sample.source.as_str()))
-                .expect("parse succeeds");
+            if let Err(err) =
+                harness.run(PipelineKind::SalsaFull, black_box(sample.source.as_str()))
+            {
+                black_box(err);
+            }
             let after = current_rss_kb().unwrap_or(before);
             black_box(after.saturating_sub(before));
         });

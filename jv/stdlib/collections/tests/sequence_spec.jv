@@ -5,79 +5,92 @@ import jv.collections.sequenceFromIterable
 
 data Person(name: String age: Int)
 
+fun <T> collect(stream: Stream<T>): List<T> {
+    val bucket = ArrayList<T>()
+    stream.forEach { element -> bucket.add(element) }
+    return bucket
+}
+
+fun <T> assertList(actual: List<T>, expected: List<T>, label: String) {
+    when (actual == expected) {
+        true -> {}
+        else -> throw IllegalStateException("${label} expected ${expected} but was ${actual}")
+    }
+}
+
+fun assertInt(actual: Int, expected: Int, label: String) {
+    when (actual == expected) {
+        true -> {}
+        else -> throw IllegalStateException("${label} expected ${expected} but was ${actual}")
+    }
+}
+
+fun assertLong(actual: Long, expected: Long, label: String) {
+    when (actual == expected) {
+        true -> {}
+        else -> throw IllegalStateException("${label} expected ${expected} but was ${actual}")
+    }
+}
+
 fun validateSampleSingleStageOperations() {
     numbers = [1 2 3 4 5]
 
-    doubled = numbers
-        .map { value -> value * 2 }
-        .toList()
-    if (doubled != [2 4 6 8 10]) {
-        throw IllegalStateException("map expected [2 4 6 8 10] but was ${doubled}")
-    }
+    doubled = collect(numbers.map { value -> value * 2 })
+    assertList(doubled [2 4 6 8 10] "map")
 
-    evens = numbers
-        .filter { value -> value % 2 == 0 }
-        .toList()
-    if (evens != [2 4]) {
-        throw IllegalStateException("filter expected [2 4] but was ${evens}")
-    }
+    evens = collect(numbers.filter { value -> value % 2 == 0 })
+    assertList(evens [2 4] "filter")
 
     sum = numbers.reduce { left right -> left + right }
-    if (sum != 15) {
-        throw IllegalStateException("reduce expected 15 but was ${sum}")
-    }
+    assertInt(sum 15 "reduce")
 }
 
 fun validatePhase1MapFilterToList() {
     numbers = [1 2 3 4 5]
-    result = numbers
-        .map { value -> value * 2 }
-        .filter { candidate -> candidate >= 6 }
-        .toList()
+    result = collect(
+        numbers
+            .map { value -> value * 2 }
+            .filter { candidate -> candidate >= 6 }
+    )
 
     expected = [6 8 10]
-    if (result != expected) {
-        throw IllegalStateException("map/filter/toList expected ${expected} but was ${result}")
-    }
+    assertList(result expected "map/filter")
 }
 
 fun validatePhase1SequenceFromIterableToList() {
     numbers = [10 20 30]
     sequence = sequenceFromIterable(numbers)
-    result = sequence
-        .map { value -> value / 10 }
-        .toList()
+    result = collect(
+        sequence
+            .map { value -> value / 10 }
+    )
 
     expected = [1 2 3]
-    if (result != expected) {
-        throw IllegalStateException("sequenceFromIterable toList expected ${expected} but was ${result}")
-    }
+    assertList(result expected "sequenceFromIterable map")
 }
 
 fun validatePhase1FilterOnlyChain() {
     numbers = [5 6 7 8 9]
-    result = numbers
-        .filter { value -> value % 2 == 0 }
-        .toList()
+    result = collect(
+        numbers
+            .filter { value -> value % 2 == 0 }
+    )
 
     expected = [6 8]
-    if (result != expected) {
-        throw IllegalStateException("filter/toList expected ${expected} but was ${result}")
-    }
+    assertList(result expected "filter/toList")
 }
 
 fun validatePhase2TakeDropChain() {
     numbers = [1 2 3 4 5 6]
-    result = numbers
-        .map { value -> value * 10 }
-        .drop(2)
-        .take(3)
-        .toList()
+    result = collect(
+        numbers
+            .map { value -> value * 10 }
+            .drop(2)
+            .take(3)
+    )
 
     expected = [30 40 50]
-    if (result != expected) {
-        throw IllegalStateException("drop/take chain expected ${expected} but was ${result}")
-    }
+    assertList(result expected "drop/take chain")
 }
 
 fun validatePhase2FlatMapFromIterable() {
@@ -87,27 +100,25 @@ fun validatePhase2FlatMapFromIterable() {
         [5]
     ]
 
-    result = groups
-        .flatMap { group -> group }
-        .toList()
+    result = collect(
+        groups
+            .flatMap { group -> group }
+    )
 
     expected = [1 2 3 4 5]
-    if (result != expected) {
-        throw IllegalStateException("flatMap from iterable expected ${expected} but was ${result}")
-    }
+    assertList(result expected "flatMap from iterable")
 }
 
 fun validatePhase2FlatMapFromSequence() {
     base = sequenceFromIterable([1 2 3])
-    result = base
-        .flatMap { value -> [value value * 10] }
-        .take(4)
-        .toList()
+    result = collect(
+        base
+            .flatMap { value -> [value value * 10] }
+            .take(4)
+    )
 
     expected = [1 10 2 20]
-    if (result != expected) {
-        throw IllegalStateException("flatMap sequence expected ${expected} but was ${result}")
-    }
+    assertList(result expected "flatMap sequence")
 }
 
 fun validatePhase3FoldAggregates() {
@@ -116,18 +127,14 @@ fun validatePhase3FoldAggregates() {
         .map { value -> value * 2 }
         .fold(10) { acc value -> acc + value }
 
-    if (total != 30) {
-        throw IllegalStateException("fold expected 30 but was ${total}")
-    }
+    assertInt(total 30 "fold")
 }
 
 fun validatePhase3ReduceAggregates() {
     numbers = sequenceFromIterable([5 6 7])
     reduceResult = numbers.reduce { left right -> left + right }
 
-    if (reduceResult != 18) {
-        throw IllegalStateException("reduce expected 18 but was ${reduceResult}")
-    }
+    assertInt(reduceResult 18 "reduce")
 }
 
 fun validatePhase3ReduceEmptyThrows() {
@@ -144,29 +151,21 @@ fun validatePhase3ReduceEmptyThrows() {
 fun validatePhase3CountAndSum() {
     numbers = [2 4 6 8]
     countResult = numbers.count()
-    if (countResult != 4L) {
-        throw IllegalStateException("count expected 4 but was ${countResult}")
-    }
+    assertLong(countResult 4L "count")
 
     sumResult = numbers
         .map { value -> value + 1 }
         .sum()
 
-    if (sumResult != 24L) {
-        throw IllegalStateException("sum expected 24 but was ${sumResult}")
-    }
+    assertLong(sumResult 24L "sum")
 }
 
 fun validatePhase4SortedSequence() {
     numbers = [5 2 4 1 3]
-    result = numbers
-        .sorted()
-        .toList()
+    result = collect(numbers.sorted())
 
     expected = [1 2 3 4 5]
-    if (result != expected) {
-        throw IllegalStateException("sorted expected ${expected} but was ${result}")
-    }
+    assertList(result expected "sorted")
 }
 
 fun validatePhase4SortedBySequence() {
@@ -176,9 +175,10 @@ fun validatePhase4SortedBySequence() {
         Person("Bob" 28)
     ]
 
-    result = people
-        .sortedBy { person -> person.age }
-        .toList()
+    result = collect(
+        people
+            .sortedBy { person -> person.age }
+    )
 
     expected = [
         Person("Bob" 28)
@@ -186,27 +186,23 @@ fun validatePhase4SortedBySequence() {
         Person("Carol" 40)
     ]
 
-    if (result != expected) {
-        throw IllegalStateException("sortedBy expected ${expected} but was ${result}")
-    }
+    assertList(result expected "sortedBy")
 }
 
 fun validatePhase4GroupByOperation() {
     words = ["alpha" "amber" "bravo" "blue"]
     grouped = words.groupBy { word -> word.substring(0 1) }
 
-    if (grouped.size() != 2) {
-        throw IllegalStateException("groupBy expected 2 buckets but was ${grouped.size()}")
-    }
+    assertInt(grouped.size() 2 "groupBy buckets")
 
     aBucket = grouped.get("a")
-    if (aBucket == null || aBucket != ["alpha" "amber"]) {
-        throw IllegalStateException("groupBy bucket 'a' expected [alpha amber] but was ${aBucket}")
+    when (aBucket == null || aBucket != ["alpha" "amber"]) {
+        true -> throw IllegalStateException("groupBy bucket 'a' expected [alpha amber] but was ${aBucket}")
     }
 
     bBucket = grouped.get("b")
-    if (bBucket == null || bBucket != ["bravo" "blue"]) {
-        throw IllegalStateException("groupBy bucket 'b' expected [bravo blue] but was ${bBucket}")
+    when (bBucket == null || bBucket != ["bravo" "blue"]) {
+        true -> throw IllegalStateException("groupBy bucket 'b' expected [bravo blue] but was ${bBucket}")
     }
 }
 
@@ -223,12 +219,14 @@ fun validatePhase4AssociateOperation() {
         throw IllegalStateException("associate expected size 2 but was ${associated.size()}")
     }
 
-    if (associated.get("Alice") != 32) {
-        throw IllegalStateException("associate expected Alice -> 32 but was ${associated.get("Alice")}")
+    val aliceAge = associated.get("Alice")
+    if (aliceAge != 32) {
+        throw IllegalStateException("associate expected Alice -> 32 but was ${aliceAge}")
     }
 
-    if (associated.get("Bob") != 35) {
-        throw IllegalStateException("associate expected Bob -> 35 but was ${associated.get("Bob")}")
+    val bobAge = associated.get("Bob")
+    if (bobAge != 35) {
+        throw IllegalStateException("associate expected Bob -> 35 but was ${bobAge}")
     }
 }
 
@@ -246,49 +244,41 @@ fun validatePhase5ForEachSideEffects() {
 }
 
 fun validatePrimitiveStreamSumSpecialization() {
-    charValues = [
-        java.lang.Character.valueOf('A')
-        java.lang.Character.valueOf('B')
-        java.lang.Character.valueOf('C')
-    ]
+    charValues = ['A' 'B' 'C']
 
-    charSum = charValues.stream().sumIntFamily()
+    charSum = charValues.sum()
     if (charSum != (65 + 66 + 67)) {
-        throw IllegalStateException("sumIntFamily expected 198 for Character aliases but was ${charSum}")
+        throw IllegalStateException("sum expected 198 for Character aliases but was ${charSum}")
     }
 
-    shortValues = [
-        java.lang.Short.valueOf("5")
-        java.lang.Short.valueOf("7")
-        java.lang.Short.valueOf("9")
-    ]
+    shortValues = [5S 7S 9S]
 
-    shortSum = shortValues.stream().sumIntFamily()
+    shortSum = shortValues.sum()
     if (shortSum != 21) {
-        throw IllegalStateException("sumIntFamily expected 21 for Short aliases but was ${shortSum}")
+        throw IllegalStateException("sum expected 21 for Short aliases but was ${shortSum}")
     }
 
     intValues = [10 20 30]
-    intSum = intValues.stream().sumIntFamily()
+    intSum = intValues.sum()
     if (intSum != 60) {
-        throw IllegalStateException("sumIntFamily expected 60 for Integer aliases but was ${intSum}")
+        throw IllegalStateException("sum expected 60 for Integer aliases but was ${intSum}")
     }
 
     longValues = [100L 200L 300L]
-    longSum = longValues.stream().sumLongFamily()
+    longSum = longValues.sum()
     if (longSum != 600L) {
-        throw IllegalStateException("sumLongFamily expected 600L but was ${longSum}")
+        throw IllegalStateException("sum expected 600L but was ${longSum}")
     }
 
     floatValues = [1.5f 2.5f 3.0f]
-    floatSum = floatValues.stream().sumFloatFamily()
+    floatSum = floatValues.sum()
     if (floatSum != 7.0f) {
-        throw IllegalStateException("sumFloatFamily expected 7.0f but was ${floatSum}")
+        throw IllegalStateException("sum expected 7.0f but was ${floatSum}")
     }
 
     doubleValues = [1.25 2.75 3.0]
-    doubleSum = doubleValues.stream().sumDoubleFamily()
+    doubleSum = doubleValues.sum()
     if (doubleSum != 7.0) {
-        throw IllegalStateException("sumDoubleFamily expected 7.0 but was ${doubleSum}")
+        throw IllegalStateException("sum expected 7.0 but was ${doubleSum}")
     }
 }

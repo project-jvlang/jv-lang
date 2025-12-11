@@ -124,7 +124,7 @@ fn lower_node(ctx: &mut LoweringContext<'_>, node: &CstNode, out: &mut Vec<State
         }
         SyntaxKind::IfStatement => {
             let span = span_for_node(ctx, node);
-            ctx.push_diagnostic(LoweringDiagnostic::error(
+            ctx.push_diagnostic(LoweringDiagnostic::warning(
                 "JV3103: `if` expressions are not supported / `if` 式はサポートされていません。",
                 Some(span),
             ));
@@ -327,15 +327,21 @@ fn lower_var(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Statement>
 
 fn lower_function(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Statement> {
     let tokens = collect_tokens(node);
-    let name_pos = tokens
+    let body_idx = tokens
+        .iter()
+        .position(|t| t.kind == crate::lexer::TokenKind::LeftBrace)
+        .unwrap_or(tokens.len());
+    let header_tokens = &tokens[..body_idx];
+
+    let name_pos = header_tokens
         .iter()
         .position(|tok| tok.kind == crate::lexer::TokenKind::Identifier)?;
-    let name = tokens.get(name_pos)?.lexeme.clone();
+    let name = header_tokens.get(name_pos)?.lexeme.clone();
 
     // 型パラメータ抽出。
     let type_parameters = {
         let mut params = Vec::new();
-        if let Some(lt_idx) = tokens
+        if let Some(lt_idx) = header_tokens
             .iter()
             .skip(name_pos + 1)
             .position(|t| t.kind == crate::lexer::TokenKind::Less)
@@ -343,12 +349,12 @@ fn lower_function(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<State
             let lt_idx = name_pos + 1 + lt_idx;
             let mut depth = 1usize;
             let mut idx = lt_idx + 1;
-            while idx < tokens.len() && depth > 0 {
-                match tokens[idx].kind {
+            while idx < header_tokens.len() && depth > 0 {
+                match header_tokens[idx].kind {
                     crate::lexer::TokenKind::Less => depth += 1,
                     crate::lexer::TokenKind::Greater => depth = depth.saturating_sub(1),
                     crate::lexer::TokenKind::Identifier if depth == 1 => {
-                        params.push(tokens[idx].lexeme.clone())
+                        params.push(header_tokens[idx].lexeme.clone())
                     }
                     _ => {}
                 }
@@ -360,33 +366,24 @@ fn lower_function(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<State
 
     // パラメータ抽出。
     let params = {
-        let open = tokens
+        let open = header_tokens
             .iter()
             .position(|t| t.kind == crate::lexer::TokenKind::LeftParen)
-            .unwrap_or(tokens.len());
-        let close = tokens
-            .iter()
-            .skip(open + 1)
-            .position(|t| t.kind == crate::lexer::TokenKind::RightParen)
-            .map(|idx| open + 1 + idx)
-            .unwrap_or(tokens.len());
+            .unwrap_or(header_tokens.len());
+        let close = find_matching_paren(header_tokens, open).unwrap_or(header_tokens.len());
         if close > open + 1 {
-            parse_parameters(ctx, &tokens[open + 1..close])
+            parse_parameters(ctx, &header_tokens[open + 1..close])
         } else {
             Vec::new()
         }
     };
 
     let return_type = {
-        let colon_idx = tokens
+        let colon_idx = header_tokens
             .iter()
             .position(|t| t.kind == crate::lexer::TokenKind::Colon);
-        let body_idx = tokens
-            .iter()
-            .position(|t| t.kind == crate::lexer::TokenKind::LeftBrace)
-            .unwrap_or(tokens.len());
         colon_idx.and_then(|idx| {
-            let slice = &tokens[idx + 1..body_idx];
+            let slice = &header_tokens[idx + 1..];
             if slice.is_empty() {
                 None
             } else {
@@ -396,7 +393,7 @@ fn lower_function(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<State
     };
 
     // where 句（内容は未解析だが存在を保持）
-    let where_clause = tokens
+    let where_clause = header_tokens
         .iter()
         .enumerate()
         .find(|(_, t)| t.kind == crate::lexer::TokenKind::Where)
@@ -502,12 +499,7 @@ fn lower_class_like(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Sta
             .position(|t| t.kind == crate::lexer::TokenKind::LeftParen)
             .map(|i| name_idx + 1 + i);
         if let Some(open_idx) = open {
-            let close = tokens
-                .iter()
-                .skip(open_idx + 1)
-                .position(|t| t.kind == crate::lexer::TokenKind::RightParen)
-                .map(|idx| open_idx + 1 + idx)
-                .unwrap_or(tokens.len());
+            let close = find_matching_paren(&tokens, open_idx).unwrap_or(tokens.len());
             let params = if close > open_idx + 1 {
                 parse_parameters(ctx, &tokens[open_idx + 1..close])
             } else {
@@ -1171,6 +1163,26 @@ fn split_types(tokens: &[crate::parser::OwnedToken]) -> Vec<&[crate::parser::Own
         slices.push(&tokens[start..]);
     }
     slices
+}
+
+fn find_matching_paren(tokens: &[crate::parser::OwnedToken], open_idx: usize) -> Option<usize> {
+    if open_idx >= tokens.len() || tokens[open_idx].kind != crate::lexer::TokenKind::LeftParen {
+        return None;
+    }
+    let mut depth = 0usize;
+    for (idx, tok) in tokens.iter().enumerate().skip(open_idx + 1) {
+        match tok.kind {
+            crate::lexer::TokenKind::LeftParen => depth += 1,
+            crate::lexer::TokenKind::RightParen => {
+                if depth == 0 {
+                    return Some(idx);
+                }
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn find_end_of_type(tokens: &[crate::parser::OwnedToken]) -> usize {

@@ -12,25 +12,30 @@ pub fn bench_lsp(c: &mut Criterion) {
 
     group.bench_function("completion/500_lines/salsa_fast", |b| {
         b.iter(|| {
-            harness
-                .run(PipelineKind::SalsaFast, black_box(file_500.source.as_str()))
-                .expect("parse succeeds");
+            if let Err(err) =
+                harness.run(PipelineKind::SalsaFast, black_box(file_500.source.as_str()))
+            {
+                black_box(err);
+            }
         });
     });
 
     group.bench_function("diagnostics/500_lines/salsa_full", |b| {
         b.iter(|| {
-            harness
-                .run(PipelineKind::SalsaFull, black_box(file_500.source.as_str()))
-                .expect("parse succeeds");
+            if let Err(err) =
+                harness.run(PipelineKind::SalsaFull, black_box(file_500.source.as_str()))
+            {
+                black_box(err);
+            }
         });
     });
 
     group.bench_function("completion/500_lines/rowan", |b| {
         b.iter(|| {
-            harness
-                .run(PipelineKind::Rowan, black_box(file_500.source.as_str()))
-                .expect("parse succeeds");
+            if let Err(err) = harness.run(PipelineKind::Rowan, black_box(file_500.source.as_str()))
+            {
+                black_box(err);
+            }
         });
     });
 

@@ -1,10 +1,9 @@
 use criterion::Criterion;
-use jv_parser_frontend::ParseError;
+use jv_parser_frontend::{ParseError, ParserPipeline};
 use jv_parser_rowan::frontend::RowanPipeline;
 use jv_parser_salsa::pipeline::{ParseOptions, SalsaPipeline};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::time::Duration;
 
 #[derive(Clone, Copy, Debug)]
@@ -166,15 +165,12 @@ pub fn estimate_hit_rate(before: &str, after: &str) -> f64 {
         .filter(|(l, r)| l != r)
         .count();
     let delta = changed as f64 / total_lines as f64;
-    1.0_f64.saturating_sub(delta)
+    (1.0_f64 - delta).max(0.0)
 }
 
-static HARNESS: OnceLock<PipelineSwitcher> = OnceLock::new();
-static CORPUS: OnceLock<BenchCorpus> = OnceLock::new();
-
 /// ベンチで共有するハーネスとコーパスを取得する。
-pub fn bench_state() -> (&'static PipelineSwitcher, &'static BenchCorpus) {
-    let harness = HARNESS.get_or_init(PipelineSwitcher::new);
-    let corpus = CORPUS.get_or_init(|| BenchCorpus::load().expect("corpus should load"));
+pub fn bench_state() -> (PipelineSwitcher, BenchCorpus) {
+    let harness = PipelineSwitcher::new();
+    let corpus = BenchCorpus::load().expect("corpus should load");
     (harness, corpus)
 }

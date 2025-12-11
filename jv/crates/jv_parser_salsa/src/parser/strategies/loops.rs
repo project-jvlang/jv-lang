@@ -18,13 +18,29 @@ impl StatementStrategy for ForStrategy {
     fn parse(&self, ctx: &mut ParserContext) -> bool {
         ctx.start_node(SyntaxKind::ForStatement);
         ctx.bump(); // for
-        // 簡易: in までを消費
-        ctx.bump_while(|k| k != TokenKind::In && k != TokenKind::LeftBrace);
-        if ctx.peek_kind() == Some(TokenKind::In) {
-            ctx.bump();
-            let _ = ctx.parse_expression();
+        if ctx.peek_kind() == Some(TokenKind::LeftParen) {
+            ctx.bump(); // (
+            ctx.bump_while(|k| k != TokenKind::In && k != TokenKind::RightParen);
+            if ctx.peek_kind() == Some(TokenKind::In) {
+                ctx.bump();
+                let _ = ctx.parse_expression();
+            }
+            if ctx.peek_kind() == Some(TokenKind::RightParen) {
+                ctx.bump();
+            }
+        } else {
+            // 簡易: in までを消費
+            ctx.bump_while(|k| k != TokenKind::In && k != TokenKind::LeftBrace);
+            if ctx.peek_kind() == Some(TokenKind::In) {
+                ctx.bump();
+                let _ = ctx.parse_expression();
+            }
         }
-        parse_block(ctx);
+        if ctx.peek_kind() == Some(TokenKind::LeftBrace) {
+            parse_block(ctx);
+        } else {
+            ctx.error("for ブロックが `}` で閉じていません");
+        }
         ctx.finish_node();
         true
     }

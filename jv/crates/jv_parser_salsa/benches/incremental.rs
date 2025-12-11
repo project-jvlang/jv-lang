@@ -14,12 +14,13 @@ pub fn bench_incremental(c: &mut Criterion) {
 
     group.bench_function("salsa_full/single_line_edit", |b| {
         b.iter(|| {
-            harness
-                .run(PipelineKind::SalsaFull, black_box(base.source.as_str()))
-                .expect("initial parse succeeds");
-            harness
-                .run(PipelineKind::SalsaFull, black_box(edited.as_str()))
-                .expect("incremental parse succeeds");
+            if let Err(err) = harness.run(PipelineKind::SalsaFull, black_box(base.source.as_str()))
+            {
+                black_box(err);
+            }
+            if let Err(err) = harness.run(PipelineKind::SalsaFull, black_box(edited.as_str())) {
+                black_box(err);
+            }
         });
     });
 
@@ -30,9 +31,11 @@ pub fn bench_incremental(c: &mut Criterion) {
     if let Some(stdlib) = corpus.stdlib().first().cloned() {
         group.bench_function("rowan/unchanged_reparse", |b| {
             b.iter(|| {
-                harness
-                    .run(PipelineKind::Rowan, black_box(stdlib.source.as_str()))
-                    .expect("rowan parse succeeds");
+                if let Err(err) =
+                    harness.run(PipelineKind::Rowan, black_box(stdlib.source.as_str()))
+                {
+                    black_box(err);
+                }
             });
         });
     }

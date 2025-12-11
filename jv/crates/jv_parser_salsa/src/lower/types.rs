@@ -8,21 +8,44 @@ pub fn lower_type_annotation(
     ctx: &mut LoweringContext<'_>,
     tokens: &[OwnedToken],
 ) -> Option<TypeAnnotation> {
-    if tokens.is_empty() {
+    let filtered: Vec<_> = tokens
+        .iter()
+        .cloned()
+        .filter(|tok| {
+            !matches!(
+                tok.kind,
+                TokenKind::Whitespace
+                    | TokenKind::Newline
+                    | TokenKind::LineComment
+                    | TokenKind::BlockComment
+                    | TokenKind::JavaDocComment
+            )
+        })
+        .collect();
+
+    if filtered.is_empty() {
         return None;
     }
-    let end = find_type_boundary(tokens);
-    let slice = &tokens[..end];
-    let converted = convert_tokens(ctx, tokens);
-    match jv_type_inference_java::lower_type_annotation_from_tokens(&converted) {
-        Ok(lowered) => Some(lowered.into_annotation()),
-        Err(err) => {
-            let span = slice.first().map(|t| ctx.span_for_token(t));
-            let message = format!("型注釈の解釈に失敗しました: {:?}", err.kind());
-            ctx.push_diagnostic(LoweringDiagnostic::error(message, span));
-            None
+    let mut end = find_type_boundary(&filtered);
+    let mut last_error = None;
+    while end > 0 {
+        let slice = &filtered[..end];
+        let converted = convert_tokens(ctx, slice);
+        match jv_type_inference_java::lower_type_annotation_from_tokens(&converted) {
+            Ok(lowered) => return Some(lowered.into_annotation()),
+            Err(err) => {
+                last_error = Some((slice.to_vec(), err.kind()));
+                end = end.saturating_sub(1);
+            }
         }
     }
+
+    if let Some((slice, kind)) = last_error {
+        let span = slice.first().map(|t| ctx.span_for_token(t));
+        let message = format!("型注釈の解釈に失敗しました: {:?}", kind);
+        ctx.push_diagnostic(LoweringDiagnostic::error(message, span));
+    }
+    None
 }
 
 fn find_type_boundary(tokens: &[OwnedToken]) -> usize {
@@ -34,25 +57,26 @@ fn find_type_boundary(tokens: &[OwnedToken]) -> usize {
             TokenKind::Less => angle += 1,
             TokenKind::Greater => angle = angle.saturating_sub(1),
             TokenKind::LeftParen => paren += 1,
-            TokenKind::RightParen => {
-                if paren == 0 {
-                    return idx;
-                }
-                paren -= 1;
-            }
+            TokenKind::RightParen => paren = paren.saturating_sub(1),
             TokenKind::LeftBracket => bracket += 1,
-            TokenKind::RightBracket => {
-                if bracket == 0 {
-                    return idx;
-                }
-                bracket -= 1;
-            }
-            TokenKind::Comma | TokenKind::Semicolon | TokenKind::Assign
-                if angle == 0 && paren == 0 && bracket == 0 =>
-            {
-                return idx;
-            }
+            TokenKind::RightBracket => bracket = bracket.saturating_sub(1),
             _ => {}
+        }
+
+        if angle == 0 && paren == 0 && bracket == 0 {
+            match tok.kind {
+                TokenKind::Comma | TokenKind::Semicolon | TokenKind::Assign => return idx,
+                TokenKind::Where | TokenKind::Colon => return idx,
+                TokenKind::RightParen => {
+                    if matches!(
+                        tokens.get(idx + 1).map(|t| t.kind),
+                        Some(TokenKind::Colon | TokenKind::Where)
+                    ) {
+                        return idx;
+                    }
+                }
+                _ => {}
+            }
         }
     }
     tokens.len()

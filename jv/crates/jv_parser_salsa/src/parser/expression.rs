@@ -20,6 +20,11 @@ pub fn parse_expression_bp(ctx: &mut ParserContext, min_bp: u8) -> bool {
             None => break,
         };
 
+        if op_tok.kind == TokenKind::Less && should_parse_type_args(ctx) {
+            consume_type_args(ctx);
+            continue;
+        }
+
         if let Some((l_bp, r_bp)) = infix_binding_power(&op_tok) {
             if l_bp < min_bp {
                 break;
@@ -59,6 +64,33 @@ fn parse_prefix(ctx: &mut ParserContext) -> bool {
             }
             true
         }
+        Some(TokenKind::LeftBracket) => {
+            ctx.bump(); // [
+            loop {
+                ctx.bump_while(|kind| {
+                    matches!(
+                        kind,
+                        TokenKind::Comma | TokenKind::LayoutComma | TokenKind::Newline
+                    )
+                });
+                if ctx.is_eof() || ctx.peek_kind() == Some(TokenKind::RightBracket) {
+                    break;
+                }
+                let before = ctx.cursor;
+                let _ = parse_expression_bp(ctx, 0);
+                if ctx.cursor == before {
+                    break;
+                }
+            }
+            if ctx.peek_kind() == Some(TokenKind::RightBracket) {
+                ctx.bump();
+            }
+            true
+        }
+        Some(TokenKind::LeftBrace) => {
+            consume_brace_block(ctx);
+            true
+        }
         Some(op) if is_prefix_operator(op) => {
             let (_, r_bp) = prefix_binding_power(op);
             ctx.bump();
@@ -82,11 +114,24 @@ fn parse_postfix(ctx: &mut ParserContext) -> bool {
         TokenKind::LeftParen => {
             ctx.bump(); // (
             // 引数リスト
-            while !ctx.is_eof() && ctx.peek_kind() != Some(TokenKind::RightParen) {
+            loop {
+                // レイアウトカンマや改行は区切りとして扱う。
+                ctx.bump_while(|kind| {
+                    matches!(
+                        kind,
+                        TokenKind::Comma | TokenKind::LayoutComma | TokenKind::Newline
+                    )
+                });
+
+                if ctx.is_eof() || ctx.peek_kind() == Some(TokenKind::RightParen) {
+                    break;
+                }
+
+                let before = ctx.cursor;
                 let _ = parse_expression_bp(ctx, 0);
-                if ctx.peek_kind() == Some(TokenKind::Comma) {
-                    ctx.bump();
-                } else {
+
+                // 進捗がなければ無限ループを避けるために抜ける。
+                if ctx.cursor == before {
                     break;
                 }
             }
@@ -131,6 +176,10 @@ fn parse_postfix(ctx: &mut ParserContext) -> bool {
             }
             true
         }
+        TokenKind::LeftBrace => {
+            consume_brace_block(ctx);
+            true
+        }
         _ => false,
     }
 }
@@ -159,7 +208,11 @@ fn is_prefix_operator(kind: TokenKind) -> bool {
 fn is_postfix(tok: &OwnedToken) -> bool {
     matches!(
         tok.kind,
-        TokenKind::LeftParen | TokenKind::Dot | TokenKind::NullSafe | TokenKind::LeftBracket
+        TokenKind::LeftParen
+            | TokenKind::Dot
+            | TokenKind::NullSafe
+            | TokenKind::LeftBracket
+            | TokenKind::LeftBrace
     )
 }
 
@@ -189,4 +242,101 @@ fn infix_binding_power(op: &OwnedToken) -> Option<(u8, u8)> {
         _ => return None,
     };
     Some(power)
+}
+
+fn should_parse_type_args(ctx: &ParserContext) -> bool {
+    let Some(close_idx) = find_matching_angle(ctx) else {
+        return false;
+    };
+    // <T> のように最低1トークンを含む必要がある。
+    if close_idx == 0 {
+        return false;
+    }
+    // `>` の次に呼び出しやアクセスが続く場合のみ型引数とみなす。
+    matches!(
+        ctx.peek(close_idx + 1).map(|tok| tok.kind),
+        Some(
+            TokenKind::LeftParen
+                | TokenKind::Dot
+                | TokenKind::LeftBracket
+                | TokenKind::LeftBrace
+                | TokenKind::Comma
+                | TokenKind::RightParen
+        )
+    )
+}
+
+fn find_matching_angle(ctx: &ParserContext) -> Option<usize> {
+    let mut depth: isize = 0;
+    let mut i = 0;
+    while let Some(tok) = ctx.peek(i) {
+        match tok.kind {
+            TokenKind::Less => {
+                depth += 1;
+            }
+            TokenKind::Greater => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                } else if depth < 0 {
+                    return None;
+                }
+            }
+            TokenKind::Eof | TokenKind::Semicolon => return None,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn consume_type_args(ctx: &mut ParserContext) {
+    // 前提: peek(0) は `<`
+    let mut depth: isize = 0;
+    while let Some(kind) = ctx.peek_kind() {
+        match kind {
+            TokenKind::Less => {
+                depth += 1;
+                ctx.bump();
+            }
+            TokenKind::Greater => {
+                depth -= 1;
+                ctx.bump();
+                if depth <= 0 {
+                    break;
+                }
+            }
+            TokenKind::Eof => break,
+            _ => {
+                ctx.bump();
+            }
+        }
+    }
+}
+
+fn consume_brace_block(ctx: &mut ParserContext) {
+    if ctx.peek_kind() != Some(TokenKind::LeftBrace) {
+        return;
+    }
+    let mut depth: usize = 0;
+    ctx.bump(); // {
+    while let Some(kind) = ctx.peek_kind() {
+        match kind {
+            TokenKind::LeftBrace => {
+                depth += 1;
+                ctx.bump();
+            }
+            TokenKind::RightBrace => {
+                ctx.bump();
+                if depth == 0 {
+                    break;
+                }
+                depth = depth.saturating_sub(1);
+            }
+            TokenKind::Eof => break,
+            _ => {
+                ctx.bump();
+            }
+        }
+    }
 }
