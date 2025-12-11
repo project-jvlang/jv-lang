@@ -370,6 +370,20 @@ fn configure_command(command: &mut Command, project: &Path, home: &Path) -> Resu
     Ok(())
 }
 
+fn ensure_clean_environment() {
+    // Remove any stray jv.toml in the repo root to avoid wrapper/native mode conflicts during integration tests.
+    let root = repo_root();
+    let manifest = root.join("jv.toml");
+    if manifest.exists() {
+        let _ = fs::remove_file(&manifest);
+    }
+    // Clear shared test-temp directory to avoid leftover manifests between runs.
+    let test_temp = root.join("target").join("test-temp");
+    if test_temp.exists() {
+        let _ = fs::remove_dir_all(&test_temp);
+    }
+}
+
 fn maven_bin_dir() -> Option<PathBuf> {
     maven_binary().and_then(|path| path.parent().map(|dir| dir.to_path_buf()))
 }
@@ -700,6 +714,7 @@ fn parity_specs() -> Vec<DependencySpec> {
 
 #[test]
 fn wrapper_default_add_and_remove_manage_jars() -> Result<()> {
+    ensure_clean_environment();
     let jvpm_bin = ensure_jvpm_bin()?;
 
     let home = tempdir().context("failed to create home tempdir")?;
@@ -796,6 +811,7 @@ fn wrapper_default_add_and_remove_manage_jars() -> Result<()> {
 
 #[test]
 fn wrapper_pubgrub_strategy_downloads_jars() -> Result<()> {
+    ensure_clean_environment();
     let jvpm_bin = ensure_jvpm_bin()?;
 
     let home = tempdir().context("failed to create home tempdir")?;
@@ -858,6 +874,7 @@ fn wrapper_pubgrub_strategy_downloads_jars() -> Result<()> {
 
 #[test]
 fn wrapper_default_matches_maven_dependency_resolve_jars() -> Result<()> {
+    ensure_clean_environment();
     let jvpm_bin = ensure_jvpm_bin()?;
     let Some(mvn_bin) = maven_binary() else {
         eprintln!("skipping wrapper_default_matches_maven_dependency_resolve_jars: maven binary unavailable");
@@ -956,6 +973,7 @@ fn wrapper_default_matches_maven_dependency_resolve_jars() -> Result<()> {
 
 #[test]
 fn wrapper_default_misses_maven_baseline_fixture_set() -> Result<()> {
+    ensure_clean_environment();
     let jvpm_bin = ensure_jvpm_bin()?;
 
     let coords = load_baseline_fixture()?;
@@ -1014,6 +1032,7 @@ fn wrapper_default_misses_maven_baseline_fixture_set() -> Result<()> {
 
 #[test]
 fn jv_native_default_downloads_and_records_lockfile() -> Result<()> {
+    ensure_clean_environment();
     let jv_bin = ensure_jv_bin()?;
     let jvpm_bin = ensure_jvpm_bin()?;
 
@@ -1076,6 +1095,7 @@ fn jv_native_default_downloads_and_records_lockfile() -> Result<()> {
 
 #[test]
 fn jv_native_maven_compat_strategy_downloads_via_wrapper_flow() -> Result<()> {
+    ensure_clean_environment();
     let jv_bin = ensure_jv_bin()?;
     let jvpm_bin = ensure_jvpm_bin()?;
 
