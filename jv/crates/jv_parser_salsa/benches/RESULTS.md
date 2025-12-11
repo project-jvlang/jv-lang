@@ -24,9 +24,23 @@
 | 変更なし再パース (rowan unchanged_reparse) | 154.93 ms | n/a | 50% 以上短縮 |
 
 ### 8.4 メモリ
+#### 8.4.1 synthetic-2000 (cacheless)
 | シナリオ | Salsa Fast RSS Δ(KiB) | Salsa Full RSS Δ(KiB) | Rowan RSS Δ(KiB) | 目標 |
 | --- | --- | --- | --- | --- |
 | synthetic-2000 (cacheless) | 13,124 KiB | 18,240 KiB | 9,676 KiB | Rowan 比 70% 以下（基準: Rowan 実測値×0.7=6,773 KiB） |
+
+#### 8.4.2 大規模合成データでの RSS スケーリング
+`cargo run -p jv_parser_salsa --release --example rss_probe -- --pipeline <pipeline> --generate-functions N --cache-mode cacheless` で 1 プロセス・1 パイプラインずつ計測（約 6 行/関数、Salsa Fast は trim_trivia_and_metadata=true）。
+
+| 行数（関数数） | Salsa Fast RSS Δ(KiB) | Salsa Full RSS Δ(KiB) | Rowan RSS Δ(KiB) |
+| --- | --- | --- | --- |
+| 2,000（333 関数相当） | 13,124 | 18,240 | 9,676 |
+| 9,998（1,666 関数相当） | 61,196 | 86,800 | 43,400 |
+| 20,000（3,333 関数相当） | 121,188 | 171,372 | 83,164 |
+| 39,998（6,666 関数相当） | 102,056 | 202,376 | 91,988 |
+
+- 傾向: Fast の傾きは ~6.1 MiB/1k 行（10k/20k 領域）まで改善。Full は ~8.6–9.1 MiB/1k 行、Rowan は ~4.3–4.6 MiB/1k 行。40k 行で Fast がやや頭打ちに見えるのは測定揺らぎの可能性。
+- 条件: Salsa は cacheless（CacheMode::Ephemeral）、Fast は trim_trivia_and_metadata=true。Rowan は同プロセス単体実行。
 
 ### 8.5 LSP
 | シナリオ | Salsa Fast p95 (ms) | Salsa Full p95 (ms) | Rowan p95 (ms) | 目標 |
@@ -57,19 +71,6 @@
 ## Rowan 比で低性能だった項目と原因考察（修正後の現状）
 - フルパース: ベンチを対称化（Rowan stdlib/synthetic_2000 追加、各イテレーションで PipelineSwitcher を新規生成）し、過去の回帰扱いは解消。現状 Salsa が優位で No-Go 要因なし。
 - メモリ: 新しい RSS 測定では synthetic-2000 時点で Rowan 9,904 KiB に対し Salsa Fast 14,064 / Full 18,800 KiB と 70% 基準未達。上記ボトルネックが主因。改善が必要。
-
-## 追加測定: 大規模合成データでの RSS スケーリング
-`cargo run -p jv_parser_salsa --release --example rss_probe -- --pipeline <pipeline> --generate-functions N --cache-mode cacheless` で 1 プロセス・1 パイプラインずつ計測（約 6 行/関数、Salsa Fast は trim_trivia_and_metadata=true）。
-
-| 行数（関数数） | Salsa Fast RSS Δ(KiB) | Salsa Full RSS Δ(KiB) | Rowan RSS Δ(KiB) |
-| --- | --- | --- | --- |
-| 2,000（333 関数相当） | 13,124 | 18,240 | 9,676 |
-| 9,998（1,666 関数相当） | 61,196 | 86,800 | 43,400 |
-| 20,000（3,333 関数相当） | 121,188 | 171,372 | 83,164 |
-| 39,998（6,666 関数相当） | 102,056 | 202,376 | 91,988 |
-
-- 傾向: Fast の傾きは ~6.1 MiB/1k 行（10k/20k 領域）まで改善。Full は ~8.6–9.1 MiB/1k 行、Rowan は ~4.3–4.6 MiB/1k 行。40k 行で Fast がやや頭打ちに見えるのは測定揺らぎの可能性。
-- 条件: Salsa は cacheless（CacheMode::Ephemeral）、Fast は trim_trivia_and_metadata=true。Rowan は同プロセス単体実行。
 
 ## メモリ削減タスク
 [x] 1. SalsaPipeline に「キャッシュなし」モードを追加する（Database 再生成 or `salsa_runtime_mut().sweep(SweepStrategy::discard_everything())` をパイプライン終了時に呼べる API を実装し、ベンチ/CLI から切り替え可能にする）。→ `CacheMode::Ephemeral` と `SalsaPipeline::with_cache_mode/new_cacheless`、`rss_probe --cache-mode` で切替可能。
