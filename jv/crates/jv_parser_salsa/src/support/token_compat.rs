@@ -56,7 +56,7 @@ pub fn to_legacy_token_with_index(token: &OwnedToken, index: &LineIndex) -> Lega
     let (line, column) = index.offset_to_line_col(token.span.start as usize);
     LegacyToken {
         token_type: token_type_from_kind(token.kind),
-        lexeme: token.lexeme.clone(),
+        lexeme: token.lexeme_string(),
         line,
         column,
         leading_trivia: token.leading_trivia.clone(),

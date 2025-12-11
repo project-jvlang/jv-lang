@@ -6,7 +6,7 @@ pub struct UseStrategy;
 pub struct DeferStrategy;
 
 fn is_keyword(ctx: &ParserContext, kw: &str) -> bool {
-    matches!(ctx.current(), Some(tok) if tok.lexeme == kw)
+    matches!(ctx.current(), Some(tok) if tok.lexeme_eq(kw))
 }
 
 impl StatementStrategy for UseStrategy {

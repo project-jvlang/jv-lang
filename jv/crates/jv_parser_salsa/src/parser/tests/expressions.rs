@@ -8,7 +8,7 @@ fn tok(kind: TokenKind, lexeme: &str) -> OwnedToken {
     OwnedToken {
         kind,
         span: Span { start: 0, end: 0 },
-        lexeme: lexeme.to_string(),
+        lexeme: lexeme.to_string().into(),
         leading_trivia: TokenTrivia::default(),
         metadata: Vec::<TokenMetadata>::new(),
         diagnostic: None::<TokenDiagnostic>,

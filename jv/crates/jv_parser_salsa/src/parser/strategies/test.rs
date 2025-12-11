@@ -11,7 +11,7 @@ impl StatementStrategy for TestStrategy {
 
     fn matches(&self, ctx: &ParserContext, lookahead: TokenKind) -> bool {
         lookahead == TokenKind::Identifier
-            && matches!(ctx.current(), Some(tok) if tok.lexeme == "test")
+            && matches!(ctx.current(), Some(tok) if tok.lexeme_eq("test"))
     }
 
     fn parse(&self, ctx: &mut ParserContext) -> bool {
@@ -25,7 +25,7 @@ impl StatementStrategy for TestStrategy {
         }
         if matches!(
             ctx.current(),
-            Some(tok) if tok.lexeme.eq_ignore_ascii_case("dataset")
+            Some(tok) if tok.lexeme_eq("dataset")
         ) {
             ctx.bump(); // dataset
             if matches!(

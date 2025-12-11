@@ -147,7 +147,7 @@ fn parse_modifiers(ctx: &mut ParserContext) {
         "ref",
     ];
     while let Some(tok) = ctx.current() {
-        if tok.kind == TokenKind::Identifier && MODS.iter().any(|m| tok.lexeme == *m) {
+        if tok.kind == TokenKind::Identifier && MODS.iter().any(|m| tok.lexeme_eq(*m)) {
             ctx.start_node(SyntaxKind::Modifier);
             ctx.bump();
             ctx.finish_node();

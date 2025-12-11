@@ -1,8 +1,8 @@
-use crate::harness::{PipelineKind, bench_state, current_rss_kb};
+use crate::harness::{BenchCorpus, PipelineKind, PipelineSwitcher, current_rss_kb};
 use criterion::{Criterion, black_box};
 
 pub fn bench_memory(c: &mut Criterion) {
-    let (harness, corpus) = bench_state();
+    let corpus = BenchCorpus::load().expect("corpus loads");
     let mut group = c.benchmark_group("memory");
 
     let sample = corpus
@@ -10,29 +10,35 @@ pub fn bench_memory(c: &mut Criterion) {
         .cloned()
         .expect("synthetic-2000 corpus present");
 
+    // Helper: run once with fresh pipeline to avoid accumulating salsa DB state across iters.
+    let run_delta = |kind: PipelineKind| -> u64 {
+        let before = current_rss_kb().unwrap_or(0);
+        let harness = PipelineSwitcher::new();
+        if let Err(err) = harness.run(kind, black_box(sample.source.as_str())) {
+            black_box(err);
+        }
+        let after = current_rss_kb().unwrap_or(before);
+        after.saturating_sub(before)
+    };
+
     group.bench_function("salsa_fast/rss_delta", |b| {
         b.iter(|| {
-            let before = current_rss_kb().unwrap_or(0);
-            if let Err(err) =
-                harness.run(PipelineKind::SalsaFast, black_box(sample.source.as_str()))
-            {
-                black_box(err);
-            }
-            let after = current_rss_kb().unwrap_or(before);
-            black_box(after.saturating_sub(before));
+            let delta = run_delta(PipelineKind::SalsaFast);
+            black_box(delta);
         });
     });
 
     group.bench_function("salsa_full/rss_delta", |b| {
         b.iter(|| {
-            let before = current_rss_kb().unwrap_or(0);
-            if let Err(err) =
-                harness.run(PipelineKind::SalsaFull, black_box(sample.source.as_str()))
-            {
-                black_box(err);
-            }
-            let after = current_rss_kb().unwrap_or(before);
-            black_box(after.saturating_sub(before));
+            let delta = run_delta(PipelineKind::SalsaFull);
+            black_box(delta);
+        });
+    });
+
+    group.bench_function("rowan/rss_delta", |b| {
+        b.iter(|| {
+            let delta = run_delta(PipelineKind::Rowan);
+            black_box(delta);
         });
     });
 

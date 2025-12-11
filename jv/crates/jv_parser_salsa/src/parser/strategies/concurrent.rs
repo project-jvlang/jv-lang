@@ -6,7 +6,7 @@ pub struct SpawnStrategy;
 pub struct AsyncStrategy;
 
 fn matches_ident(ctx: &ParserContext, text: &str) -> bool {
-    matches!(ctx.current(), Some(tok) if tok.lexeme == text)
+    matches!(ctx.current(), Some(tok) if tok.lexeme_eq(text))
 }
 
 impl StatementStrategy for SpawnStrategy {

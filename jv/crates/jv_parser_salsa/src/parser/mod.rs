@@ -140,10 +140,20 @@ impl TokenSpan {
 pub struct OwnedToken {
     pub kind: TokenKind,
     pub span: Span,
-    pub lexeme: String,
+    pub lexeme: std::sync::Arc<str>,
     pub leading_trivia: TokenTrivia,
     pub metadata: Vec<TokenMetadata>,
     pub diagnostic: Option<TokenDiagnostic>,
+}
+
+impl OwnedToken {
+    pub fn lexeme_eq(&self, s: &str) -> bool {
+        self.lexeme.as_ref() == s
+    }
+
+    pub fn lexeme_string(&self) -> String {
+        self.lexeme.as_ref().to_string()
+    }
 }
 
 /// 構文解析結果。
@@ -179,10 +189,10 @@ pub struct ParseResult {
 
 /// トークン列からイベント列を生成する。
 pub fn parse(tokens: Vec<OwnedToken>) -> ParseResult {
-    let mut ctx = ParserContext::new(tokens.clone());
+    let mut ctx = ParserContext::new(tokens);
     let output = ctx.parse();
     ParseResult {
-        tokens,
+        tokens: ctx.tokens,
         output,
         errors: Vec::new(),
     }

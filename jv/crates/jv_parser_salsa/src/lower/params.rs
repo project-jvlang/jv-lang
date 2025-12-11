@@ -43,10 +43,10 @@ fn push_param(ctx: &mut LoweringContext<'_>, slice: &[OwnedToken], out: &mut Vec
 
     let mut modifiers = ParameterModifiers::default();
     let mut name_token = first;
-    if first.lexeme == "val" {
+    if first.lexeme_eq("val") {
         modifiers.property = ParameterProperty::Val;
         name_token = iter.next().unwrap_or(first);
-    } else if first.lexeme == "var" {
+    } else if first.lexeme_eq("var") {
         modifiers.property = ParameterProperty::Var;
         name_token = iter.next().unwrap_or(first);
     }
@@ -73,7 +73,7 @@ fn push_param(ctx: &mut LoweringContext<'_>, slice: &[OwnedToken], out: &mut Vec
     };
 
     out.push(Parameter {
-        name: name_token.lexeme.clone(),
+        name: name_token.lexeme_string(),
         type_annotation,
         default_value,
         modifiers,

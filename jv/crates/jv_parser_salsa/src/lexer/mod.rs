@@ -11,6 +11,7 @@ pub mod trivia;
 pub use compat::{kind_from_token_type, token_type_from_kind};
 pub use span::Span;
 pub use token::{Token, TokenDiagnostic, TokenKind, TokenMetadata, TokenTrivia};
+use std::sync::Arc;
 
 pub type LexError = jv_lexer::LexError;
 
@@ -52,7 +53,7 @@ impl<'src> Lexer<'src> {
             .map(|tok| crate::parser::OwnedToken {
                 kind: tok.kind,
                 span: tok.span,
-                lexeme: tok.lexeme.to_string(),
+                lexeme: Arc::from(tok.lexeme),
                 leading_trivia: tok.leading_trivia.clone(),
                 metadata: tok.metadata.clone(),
                 diagnostic: tok.diagnostic.clone(),

@@ -79,7 +79,7 @@ fn lower_node(ctx: &mut LoweringContext<'_>, node: &CstNode, out: &mut Vec<State
                 ));
             } else if tokens
                 .iter()
-                .any(|t| t.kind == crate::lexer::TokenKind::While || t.lexeme == "do")
+                .any(|t| t.kind == crate::lexer::TokenKind::While || t.lexeme_eq("do"))
             {
                 ctx.push_diagnostic(LoweringDiagnostic::error(
                     "E_LOOP_001: `while`/`do-while` loops have been removed from the language / `while`/`do-while` ループはサポートされていません。",
@@ -251,7 +251,7 @@ fn lower_val(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Statement>
     let name = tokens
         .iter()
         .find(|tok| tok.kind == crate::lexer::TokenKind::Identifier)
-        .map(|tok| tok.lexeme.clone())?;
+        .map(|tok| tok.lexeme_string())?;
 
     let type_tokens = slice_until(&tokens, crate::lexer::TokenKind::Colon, |t| t.kind);
     let type_annotation = if let Some((_, after)) = type_tokens {
@@ -293,7 +293,7 @@ fn lower_var(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Statement>
     let name = tokens
         .iter()
         .find(|tok| tok.kind == crate::lexer::TokenKind::Identifier)
-        .map(|tok| tok.lexeme.clone())?;
+        .map(|tok| tok.lexeme_string())?;
 
     let type_tokens = slice_until(&tokens, crate::lexer::TokenKind::Colon, |t| t.kind);
     let type_annotation = if let Some((_, after)) = type_tokens {
@@ -336,7 +336,7 @@ fn lower_function(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<State
     let name_pos = header_tokens
         .iter()
         .position(|tok| tok.kind == crate::lexer::TokenKind::Identifier)?;
-    let name = header_tokens.get(name_pos)?.lexeme.clone();
+    let name = header_tokens.get(name_pos)?.lexeme_string();
 
     // 型パラメータ抽出。
     let type_parameters = {
@@ -354,7 +354,7 @@ fn lower_function(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<State
                     crate::lexer::TokenKind::Less => depth += 1,
                     crate::lexer::TokenKind::Greater => depth = depth.saturating_sub(1),
                     crate::lexer::TokenKind::Identifier if depth == 1 => {
-                        params.push(header_tokens[idx].lexeme.clone())
+                        params.push(header_tokens[idx].lexeme_string())
                     }
                     _ => {}
                 }
@@ -448,7 +448,7 @@ fn lower_class_like(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Sta
     let name_idx = tokens
         .iter()
         .position(|tok| tok.kind == crate::lexer::TokenKind::Identifier)?;
-    let name = tokens.get(name_idx)?.lexeme.clone();
+    let name = tokens.get(name_idx)?.lexeme_string();
     let span = span_for_node(ctx, node);
 
     let brace_idx = tokens
@@ -481,7 +481,7 @@ fn lower_class_like(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Sta
                     crate::lexer::TokenKind::Less => depth += 1,
                     crate::lexer::TokenKind::Greater => depth = depth.saturating_sub(1),
                     crate::lexer::TokenKind::Identifier if depth == 1 => {
-                        params.push(tokens[idx].lexeme.clone())
+                        params.push(tokens[idx].lexeme_string())
                     }
                     _ => {}
                 }
@@ -821,7 +821,7 @@ fn lower_use(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Statement>
     let tokens = collect_tokens(node);
     let keyword = tokens
         .iter()
-        .find(|tok| tok.lexeme == "use")
+        .find(|tok| tok.lexeme_eq("use"))
         .cloned()
         .unwrap_or_else(|| {
             tokens
@@ -842,7 +842,7 @@ fn lower_use(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Statement>
         .unwrap_or(tokens.len());
     let use_pos = tokens
         .iter()
-        .position(|tok| tok.lexeme == "use")
+        .position(|tok| tok.lexeme_eq("use"))
         .unwrap_or(0);
     let after_use: Vec<_> = if brace_pos > use_pos + 1 {
         tokens[use_pos + 1..brace_pos].to_vec()
@@ -872,7 +872,7 @@ fn lower_defer(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Statemen
     let tokens = collect_tokens(node);
     let keyword = tokens
         .iter()
-        .find(|tok| tok.lexeme == "defer")
+        .find(|tok| tok.lexeme_eq("defer"))
         .cloned()
         .unwrap_or_else(|| {
             tokens
@@ -893,7 +893,7 @@ fn lower_defer(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Statemen
         .unwrap_or(tokens.len());
     let defer_pos = tokens
         .iter()
-        .position(|tok| tok.lexeme == "defer")
+        .position(|tok| tok.lexeme_eq("defer"))
         .unwrap_or(0);
     let after_defer: Vec<_> = if brace_pos > defer_pos + 1 {
         tokens[defer_pos + 1..brace_pos].to_vec()
@@ -1107,7 +1107,7 @@ fn collect_identifiers(node: &CstNode) -> Vec<String> {
     collect_tokens(node)
         .into_iter()
         .filter(|tok| tok.kind == crate::lexer::TokenKind::Identifier)
-        .map(|tok| tok.lexeme)
+        .map(|tok| tok.lexeme_string())
         .collect()
 }
 
@@ -1119,7 +1119,7 @@ fn span_for_node(ctx: &LoweringContext<'_>, node: &CstNode) -> jv_ast::Span {
         .unwrap_or_else(|| crate::parser::OwnedToken {
             kind: crate::lexer::TokenKind::Invalid,
             span: crate::lexer::Span { start: 0, end: 0 },
-            lexeme: String::new(),
+            lexeme: "".into(),
             leading_trivia: Default::default(),
             metadata: Vec::new(),
             diagnostic: None,

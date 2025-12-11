@@ -1,6 +1,6 @@
 //! Salsa パーサーパイプライン統合。
 
-use crate::db::{Database, FileInput, preprocess};
+use crate::db::{Database, FileInput, PreprocessOutput, preprocess};
 use crate::diagnostics::{self, SALSA_LOWERING_STAGE, SALSA_PARSER_STAGE};
 use crate::lower::{LoweringDiagnosticSeverity, LoweringResult};
 use crate::parser::cst::CstNode;
@@ -78,11 +78,13 @@ impl SalsaPipeline {
 
         // 1. 前処理
         let preprocess_output = preprocess(&self.db, file);
-        let (pre_tokens, preprocess_diagnostics, preprocess_halted_stage) = (
-            preprocess_output.tokens.clone(),
-            preprocess_output.diagnostics.clone(),
-            preprocess_output.halted_stage,
-        );
+        let preprocess_owned =
+            Arc::try_unwrap(preprocess_output).unwrap_or_else(|arc| (*arc).clone());
+        let PreprocessOutput {
+            tokens: pre_tokens,
+            diagnostics: preprocess_diagnostics,
+            halted_stage: preprocess_halted_stage,
+        } = preprocess_owned;
 
         if let Some(stage_name) = preprocess_halted_stage {
             return Err(preprocess_halt_error(stage_name, &preprocess_diagnostics));
@@ -90,7 +92,7 @@ impl SalsaPipeline {
 
         // 2. パース
         let line_index = LineIndex::new(source);
-        let parse_result = parser::parse(build_owned_tokens(&pre_tokens, &line_index, source));
+        let mut parse_result = parser::parse(build_owned_tokens(pre_tokens, &line_index, source));
         let legacy_tokens = owned_tokens_to_legacy(&parse_result.tokens, &line_index);
 
         let parser_error = parse_result
@@ -163,15 +165,23 @@ impl SalsaPipeline {
 
         // 8. 成果物構築
         let legacy_tokens = owned_tokens_to_legacy(&parse_result.tokens, &line_index);
+        let parser_diagnostics = parse_result.output.diagnostics.clone();
+        let lowering_diagnostics = lowering.diagnostics.clone();
+        let recovered = parse_result.output.recovered;
         let artifacts = PipelineArtifacts::new(program, legacy_tokens, frontend_diagnostics);
         let output = SalsaPipelineOutput {
             artifacts,
             cst,
             trivia_map,
-            parser_diagnostics: parse_result.output.diagnostics.clone(),
-            lowering_diagnostics: lowering.diagnostics.clone(),
-            recovered: parse_result.output.recovered,
+            parser_diagnostics,
+            lowering_diagnostics,
+            recovered,
         };
+
+        // 余計なバッファを早期に解放してメモリフットプリントを抑える。
+        let _ = std::mem::take(&mut parse_result.tokens);
+        let _ = std::mem::take(&mut parse_result.output.events);
+        let _ = std::mem::take(&mut parse_result.output.diagnostics);
 
         match pipeline_error {
             Some(err) => Err(err),
@@ -198,19 +208,22 @@ fn owned_tokens_to_legacy(
 }
 
 fn build_owned_tokens(
-    tokens: &[LegacyToken],
+    tokens: Vec<LegacyToken>,
     index: &LineIndex,
     source: &str,
 ) -> Vec<crate::parser::OwnedToken> {
     tokens
-        .iter()
-        .map(|tok| crate::parser::OwnedToken {
-            kind: crate::lexer::kind_from_token_type(&tok.token_type),
-            span: span_from_legacy_token(tok, index, source),
-            lexeme: tok.lexeme.clone(),
-            leading_trivia: tok.leading_trivia.clone(),
-            metadata: tok.metadata.clone(),
-            diagnostic: tok.diagnostic.clone(),
+        .into_iter()
+        .map(|tok| {
+            let span = span_from_legacy_token(&tok, index, source);
+            crate::parser::OwnedToken {
+                kind: crate::lexer::kind_from_token_type(&tok.token_type),
+                span,
+                lexeme: Arc::from(tok.lexeme),
+                leading_trivia: tok.leading_trivia,
+                metadata: tok.metadata,
+                diagnostic: tok.diagnostic,
+            }
         })
         .collect()
 }

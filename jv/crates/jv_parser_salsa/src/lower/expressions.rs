@@ -149,11 +149,11 @@ fn parse_prefix(
             expr
         }
         TokenKind::Number => Some(Expression::Literal(
-            Literal::Number(tok.lexeme.clone()),
+            Literal::Number(tok.lexeme_string()),
             ctx.span_for_token(tok),
         )),
         TokenKind::String | TokenKind::StringInterpolation => Some(Expression::Literal(
-            Literal::String(tok.lexeme.clone()),
+            Literal::String(tok.lexeme_string()),
             ctx.span_for_token(tok),
         )),
         TokenKind::Character => {
@@ -173,7 +173,7 @@ fn parse_prefix(
         )),
         TokenKind::Null => Some(Expression::Literal(Literal::Null, ctx.span_for_token(tok))),
         TokenKind::Identifier => Some(Expression::Identifier(
-            tok.lexeme.clone(),
+            tok.lexeme_string(),
             ctx.span_for_token(tok),
         )),
         TokenKind::Minus | TokenKind::Plus | TokenKind::Not => {
@@ -270,7 +270,7 @@ fn parse_postfix(
                     let span = expr.span().merge(&ctx.span_for_token(ident));
                     expr = Expression::MemberAccess {
                         object: Box::new(expr),
-                        property: ident.lexeme.clone(),
+                        property: ident.lexeme_string(),
                         span,
                     };
                 } else {
@@ -283,7 +283,7 @@ fn parse_postfix(
                     let span = expr.span().merge(&ctx.span_for_token(ident));
                     expr = Expression::NullSafeMemberAccess {
                         object: Box::new(expr),
-                        property: ident.lexeme.clone(),
+                        property: ident.lexeme_string(),
                         span,
                     };
                 } else {
@@ -317,7 +317,7 @@ fn infix_binding_power(token: &OwnedToken) -> Option<(u8, u8, BinaryOp)> {
         TokenKind::Elvis => (3, 4, BinaryOp::Elvis),
         TokenKind::Equal => (4, 5, BinaryOp::Equal),
         TokenKind::NotEqual => (4, 5, BinaryOp::NotEqual),
-        TokenKind::Identifier if token.lexeme == "is" => (4, 5, BinaryOp::Is),
+        TokenKind::Identifier if token.lexeme_eq("is") => (4, 5, BinaryOp::Is),
         TokenKind::Less => (5, 6, BinaryOp::Less),
         TokenKind::LessEqual => (5, 6, BinaryOp::LessEqual),
         TokenKind::Greater => (5, 6, BinaryOp::Greater),

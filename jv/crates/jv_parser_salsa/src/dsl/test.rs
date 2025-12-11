@@ -5,7 +5,7 @@ use crate::parser::OwnedToken;
 pub fn extract_test_name(tokens: &[OwnedToken], source: &str) -> Option<String> {
     tokens.iter().skip(1).find_map(|tok| match tok.kind {
         crate::lexer::TokenKind::String => Some(value_from_span(tok, source)),
-        crate::lexer::TokenKind::Identifier => Some(tok.lexeme.clone()),
+        crate::lexer::TokenKind::Identifier => Some(tok.lexeme_string()),
         _ => None,
     })
 }
@@ -17,7 +17,7 @@ pub fn extract_dataset(tokens: &[OwnedToken], source: &str) -> Option<String> {
         if first.lexeme.eq_ignore_ascii_case("dataset") {
             match second.kind {
                 crate::lexer::TokenKind::String => Some(value_from_span(second, source)),
-                crate::lexer::TokenKind::Identifier => Some(second.lexeme.clone()),
+                crate::lexer::TokenKind::Identifier => Some(second.lexeme_string()),
                 _ => None,
             }
         } else {
@@ -53,7 +53,7 @@ fn normalize_lexeme(text: &str) -> String {
 }
 
 fn value_from_span(token: &OwnedToken, source: &str) -> String {
-    let normalized_lexeme = normalize_lexeme(&token.lexeme);
+    let normalized_lexeme = normalize_lexeme(token.lexeme.as_ref());
     let span_value = source
         .get(token.span.start as usize..token.span.end as usize)
         .map(|slice| normalize_lexeme(slice));

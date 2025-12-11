@@ -231,8 +231,8 @@ fn infix_binding_power(op: &OwnedToken) -> Option<(u8, u8)> {
         TokenKind::Equal | TokenKind::NotEqual => (4, 5),
         // NOTE: Rowan 版も is/as を専用 TokenKind にせず lexeme ベースで判定しているため、ここも同等の扱いにする。
         // TODO: TokenKind に is/as を追加して lexeme 依存を排除する。
-        TokenKind::Identifier if op.lexeme == "is" => (4, 5),
-        TokenKind::Identifier if op.lexeme == "as" => (4, 5), // equality 相当の優先度
+        TokenKind::Identifier if op.lexeme_eq("is") => (4, 5),
+        TokenKind::Identifier if op.lexeme_eq("as") => (4, 5), // equality 相当の優先度
         TokenKind::Less | TokenKind::LessEqual | TokenKind::Greater | TokenKind::GreaterEqual => {
             (5, 6)
         }

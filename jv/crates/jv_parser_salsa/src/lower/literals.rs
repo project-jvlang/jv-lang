@@ -8,7 +8,7 @@ use jv_ast::types::{Literal, RegexLiteral};
 pub fn lower_literal(tok: &OwnedToken, ctx: &LoweringContext<'_>) -> Option<Expression> {
     match tok.kind {
         TokenKind::Number => Some(Expression::Literal(
-            Literal::Number(tok.lexeme.clone()),
+            Literal::Number(tok.lexeme_string()),
             ctx.span_for_token(tok),
         )),
         TokenKind::String | TokenKind::StringInterpolation => Some(Expression::Literal(
@@ -32,8 +32,8 @@ pub fn lower_literal(tok: &OwnedToken, ctx: &LoweringContext<'_>) -> Option<Expr
         )),
         TokenKind::Null => Some(Expression::Literal(Literal::Null, ctx.span_for_token(tok))),
         TokenKind::RegexLiteral => Some(Expression::RegexLiteral(RegexLiteral {
-            pattern: tok.lexeme.clone(),
-            raw: tok.lexeme.clone(),
+            pattern: tok.lexeme_string(),
+            raw: tok.lexeme_string(),
             span: ctx.span_for_token(tok),
             origin: None,
             const_key: None,
