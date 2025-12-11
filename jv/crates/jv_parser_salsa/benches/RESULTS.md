@@ -79,3 +79,5 @@
 [x] 3. Fast 用軽量モードを `ParseOptions` に追加し、トリビア/metadata のコピーをスキップして `OwnedToken` を最小構成にする（必要ならトリビアを後付けできるデフォルト値で埋める）。→ `trim_trivia_and_metadata` を追加し、Salsa Fast / `rss_probe --pipeline salsa_fast` で有効化。
 [x] 4. 上記 1〜3 を適用後、`rss_probe` で synthetic-2000/10k/20k/40k を再計測し、8.4 およびスケーリング表を更新する。→ cacheless + Fast 軽量モードで再測定済み。
 [x] 5. ベンチ改善: 新しい `rss_probe` をベンチから呼び出すか、各パイプラインを別プロセスで測定するように変更し、Rowan の基準値を取り直して RESULTS.md を更新する。→ `JV_BENCH_USE_RSS_PROBE=1` で Criterion メモリベンチが rss_probe を別プロセス実行し、cacheless/プロセス分離で測定可能。
+[ ] 6. salsa クエリに LRU 上限を付ける（rust-analyzer 参考）。parse/lower/constraints など重いクエリに `#[salsa::lru(N)]` を設定し、環境変数でキャパを調整できるようにする。
+[ ] 7. 非インクリメンタル用途は DB 再生成をデフォルトとし、インクリメンタルのみキャッシュ有効にする運用を徹底するスイッチを設ける。
