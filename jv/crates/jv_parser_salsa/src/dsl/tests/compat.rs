@@ -6,7 +6,7 @@ use jv_parser_rowan::frontend::RowanPipeline;
 #[test]
 fn salsa_and_rowan_produce_compatible_log_block_programs() {
     let source = r#"LOG { "compat" }"#;
-    let salsa = SalsaPipeline::new();
+    let salsa = SalsaPipeline::new_without_jdk();
     let rowan = RowanPipeline::new();
 
     let salsa_program = salsa

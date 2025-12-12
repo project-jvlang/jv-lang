@@ -8,6 +8,7 @@ pub mod db;
 pub mod diagnostics;
 pub mod dsl;
 pub mod hir;
+pub mod jdk;
 pub mod lexer;
 pub mod lower;
 pub mod parser;

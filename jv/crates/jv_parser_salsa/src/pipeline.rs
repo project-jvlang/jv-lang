@@ -2,6 +2,7 @@
 
 use crate::db::{Database, FileInput, PreprocessOutput, preprocess};
 use crate::diagnostics::{self, SALSA_LOWERING_STAGE, SALSA_PARSER_STAGE};
+use crate::jdk::{self, JdkModules};
 use crate::lower::{LoweringDiagnosticSeverity, LoweringResult};
 use crate::parser::cst::CstNode;
 use crate::parser::{self, ParseEvent, ParseResult, ParserDiagnostic};
@@ -47,6 +48,27 @@ impl Default for ParseOptions {
     }
 }
 
+/// パイプラインが保持する共有リソース（JDK メタデータなど）。
+#[derive(Debug, Clone)]
+pub struct PipelineResources {
+    jdk_modules: Option<Arc<JdkModules>>,
+}
+
+impl PipelineResources {
+    pub fn preload(mode: jdk::JdkLoadMode) -> Result<Self, jdk::JdkLoadError> {
+        let jdk_modules = jdk::preload_jdk_modules(mode)?;
+        Ok(Self { jdk_modules })
+    }
+
+    pub fn without_jdk() -> Self {
+        Self { jdk_modules: None }
+    }
+
+    pub fn jdk_modules(&self) -> Option<Arc<JdkModules>> {
+        self.jdk_modules.as_ref().map(Arc::clone)
+    }
+}
+
 /// Salsa パイプラインの成果物（デバッグ情報付き）。
 pub struct SalsaPipelineOutput {
     pub artifacts: PipelineArtifacts,
@@ -67,6 +89,7 @@ impl SalsaPipelineOutput {
 pub struct SalsaPipeline {
     db: Database,
     cache_mode: CacheMode,
+    resources: PipelineResources,
 }
 
 impl Default for SalsaPipeline {
@@ -78,20 +101,51 @@ impl Default for SalsaPipeline {
 impl SalsaPipeline {
     /// 新しいパイプラインを生成する。
     pub fn new() -> Self {
-        Self::with_cache_mode(CacheMode::Shared)
+        Self::try_new().unwrap_or_else(|err| panic!("failed to preload JDK modules: {err}"))
+    }
+
+    /// JDK プリロードを含むパイプラインを生成する（エラーを返す版）。
+    pub fn try_new() -> Result<Self, jdk::JdkLoadError> {
+        Self::try_with_cache_mode(CacheMode::Shared)
     }
 
     /// キャッシュモードを指定してパイプラインを生成する。
     pub fn with_cache_mode(cache_mode: CacheMode) -> Self {
-        Self {
-            db: Database::new(),
-            cache_mode,
-        }
+        Self::try_with_cache_mode(cache_mode)
+            .unwrap_or_else(|err| panic!("failed to preload JDK modules: {err}"))
+    }
+
+    /// キャッシュモードを指定し、JDK プリロードを含むパイプラインを生成する。
+    pub fn try_with_cache_mode(cache_mode: CacheMode) -> Result<Self, jdk::JdkLoadError> {
+        let resources = PipelineResources::preload(jdk::default_load_mode())?;
+        Ok(Self::with_cache_mode_and_resources(cache_mode, resources))
     }
 
     /// キャッシュなし（実行ごとに DB 再生成）モードのパイプライン。
     pub fn new_cacheless() -> Self {
         Self::with_cache_mode(CacheMode::Ephemeral)
+    }
+
+    /// JDK ロード有無を指定できるパイプライン生成。
+    pub fn with_cache_mode_and_resources(
+        cache_mode: CacheMode,
+        resources: PipelineResources,
+    ) -> Self {
+        Self {
+            db: Database::new(),
+            cache_mode,
+            resources,
+        }
+    }
+
+    /// JDK ロードを明示的に無効化したパイプライン。
+    pub fn new_without_jdk() -> Self {
+        Self::with_cache_mode_and_resources(CacheMode::Shared, PipelineResources::without_jdk())
+    }
+
+    /// JDK ロードを明示的に無効化したパイプライン（キャッシュモード指定）。
+    pub fn with_cache_mode_without_jdk(cache_mode: CacheMode) -> Self {
+        Self::with_cache_mode_and_resources(cache_mode, PipelineResources::without_jdk())
     }
 
     /// パーサーパイプラインを実行し、必要に応じて CST/TriviaMap を生成する。
@@ -100,6 +154,9 @@ impl SalsaPipeline {
         source: &str,
         options: ParseOptions,
     ) -> Result<SalsaPipelineOutput, ParseError> {
+        // JDK シンボルインデックスなどの共有リソースを保持しておく。
+        let _ = self.resources.jdk_modules();
+
         match self.cache_mode {
             CacheMode::Shared => self.execute_with_db(&self.db, source, options),
             CacheMode::Ephemeral => {
@@ -388,7 +445,7 @@ mod tests {
 
     #[test]
     fn executes_pipeline_and_builds_artifacts() {
-        let pipeline = SalsaPipeline::new();
+        let pipeline = SalsaPipeline::new_without_jdk();
         let source = "package main\nval x = 1\n";
         let output = pipeline
             .execute_with_options(
@@ -418,7 +475,7 @@ mod tests {
 
     #[test]
     fn reports_parser_error_for_invalid_constructs() {
-        let pipeline = SalsaPipeline::new();
+        let pipeline = SalsaPipeline::new_without_jdk();
         let source = "if true { }";
         let error = pipeline
             .execute(source)
@@ -438,7 +495,7 @@ mod tests {
 
     #[test]
     fn matches_rowan_pipeline_on_simple_input() {
-        let salsa = SalsaPipeline::new();
+        let salsa = SalsaPipeline::new_without_jdk();
         let rowan = RowanPipeline::new();
         let source = "package sample\nval a = 1\n";
 

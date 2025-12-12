@@ -27,14 +27,14 @@
 #### 8.4.1 synthetic-2000 (cacheless, 2025-xx 再計測)
 | シナリオ | Salsa Fast RSS Δ(KiB) | Salsa Full RSS Δ(KiB) | Rowan RSS Δ(KiB) | 目標 |
 | --- | --- | --- | --- | --- |
-| synthetic-2000 (cacheless) | 13,120 KiB | 18,112 KiB | 9,420 KiB | Rowan 比 70% 以下（基準: Rowan 実測値×0.7=6,594 KiB） |
+| synthetic-2000 (cacheless) | 13,248 KiB | 18,240 KiB | 9,416 KiB | Rowan 比 70% 以下（基準: Rowan 実測値×0.7=6,591 KiB） |
 
 #### 8.4.2 大規模合成データでの RSS スケーリング
 `cargo run -p jv_parser_salsa --release --example rss_probe -- --pipeline <pipeline> --generate-functions N --cache-mode cacheless` で 1 プロセス・1 パイプラインずつ計測（約 6 行/関数、Salsa Fast は trim_trivia_and_metadata=true）。
 
 | 行数（関数数） | Salsa Fast RSS Δ(KiB) | Salsa Full RSS Δ(KiB) | Rowan RSS Δ(KiB) |
 | --- | --- | --- | --- |
-| 2,000（333 関数相当） | 13,120 | 18,112 | 9,420 |
+| 2,000（333 関数相当） | 13,248 | 18,240 | 9,416 |
 | 9,998（1,666 関数相当） | 61,200 | 86,604 | 43,656 |
 | 20,000（3,333 関数相当） | 121,188 | 171,376 | 83,160 |
 | 39,998（6,666 関数相当） | 102,344 | 202,500 | 91,692 |
@@ -43,6 +43,24 @@
 - 条件: Salsa は cacheless（CacheMode::Ephemeral）、Fast は trim_trivia_and_metadata=true。Rowan は同プロセス単体実行。
 - 伸び方評価: いずれも指数・対数的増加は見られず、概ね線形（Rowan はサブリニア寄り）にスケール。40k 行での頭打ちは揺らぎ/OS リクレームの可能性が高い。
 - 2025-… 再実行メモ: `JV_BENCH_USE_RSS_PROBE=1 cargo bench -p jv_parser_salsa --bench bench_main -- memory` では rss_probe を別プロセスで 20 サンプル呼び出すため、計測時間が 0.6–0.8s(fast)/0.5–0.6s(full)/~2s(rowan) に膨らみ Criterion が回帰判定。サンプル数を 10 に下げるか、ターゲット時間を延長してオーバーヘッド影響を減らすこと。
+
+#### 8.4.3 JDK 読み込み時の RSS（cacheless）
+| シナリオ | Salsa Fast RSS Δ(KiB) | Salsa Full RSS Δ(KiB) | Rowan RSS Δ(KiB) |
+| --- | --- | --- | --- |
+| synthetic-2000 | 116,388 | 121,512 | 113,208 |
+| generate-functions 3333（~20k 行） | 224,472 | 274,692 | 186,660 |
+| generate-functions 6666（~40k 行） | 205,936 | 306,220 | 162,560 |
+
+- 条件: `--with-jdk --cache-mode cacheless`。パイプライン初期化時に JDK モジュールをプリロードし、`toolchains/jdk25/lib/modules`（プロジェクトルート）または `JV_BENCH_JDK_MODULES` で指定した jimage を使用。相対指定はワークスペース（`jv/`）とその親の両方を探索。`JV_BENCH_SKIP_JDK_MODULES=1` または `--skip-jdk` で明示的にオプトアウト。
+- 測定手順: `cargo run --manifest-path jv/Cargo.toml -p jv_parser_salsa --release --example rss_probe -- --with-jdk --pipeline <p> --corpus jv/crates/jv_parser_salsa/benches/corpus/synthetic/synthetic-2000.jv --cache-mode cacheless`。20k/40k 行は `--generate-functions 3333/6666` に切り替え。1 パイプライン=1 プロセスで JDK プリロード＋1 パースをまとめて計測。
+- 備考: 40k 行で Fast が 20k 行より低いのは RSS サンプリング揺らぎの可能性が高い。再実行して傾向を確認すること。
+- 8.4.2 との比較: Salsa Fast/Full は各サイズでほぼ一定 +103 MiB（2k:+103,140/103,272 KiB、20k:+103,284/103,316 KiB、40k:+103,592/103,720 KiB）増。Rowan は +103,792（2k）/+103,500（20k）/+70,868（40k）KiB。倍率は 2k で Fast×8.8/Full×6.7/Rowan×12.0、20k で ×1.85/×1.60/×2.24、40k で ×2.01/×1.51/×1.77。JDKプリロードがほぼ「定数オフセット」（約+100 MiB）で全パイプラインに乗るため、行数に対する傾きは 8.4.2 と大きく変わらない。**結果として大規模になるほど差が開く形にはならず、むしろ 20k/40k では Fast/Full/Rowan のスケール感が近づいている（40k Fast 落ち込みは揺らぎの可能性）。JDKを含む典型的な大規模アプリでも、メモリ面で Rowan が圧倒的に有利とは言い切れず、優位性は限定的**。
+
+### JDK読み込みベンチ構築タスク（8.4.3 実施のための準備）
+- [x] `jv_build/src/metadata/builder.rs` の Jimage 走査（lib/modules から module-info/class をインデックス化する処理）を再利用し、`jv_parser_salsa/src/pipeline.rs` のパイプライン初期化でデフォルト実行するフックを追加する（デフォルトパス `toolchains/jdk25/lib/modules`、未存在はエラー、`JV_BENCH_JDK_MODULES` で上書きのみ可、`JV_BENCH_SKIP_JDK_MODULES` で明示スキップ）。
+- [x] ベンチハーネス `benches/harness.rs` と `examples/rss_probe.rs` を「JDKロード済みパイプライン」をデフォルトで使う経路に切り替え、オプトアウトを明示フラグ化する（`--skip-jdk`/`JV_BENCH_SKIP_JDK_MODULES`）。cacheless/軽量モードは維持する。
+- [x] synthetic-2000, generate-functions 3333/6666 で `salsa_fast`/`salsa_full`/`rowan` を実行し、8.4.1/8.4.2 と同形式で「JDKロードあり」の RSS Δ を表に追記する。
+- [x] 手順と前提（lib/modules の位置、オプトアウトフラグ）を README に追記し、計測コマンド例を記載する。
 
 ### 8.5 LSP
 | シナリオ | Salsa Fast p95 (ms) | Salsa Full p95 (ms) | Rowan p95 (ms) | 目標 |

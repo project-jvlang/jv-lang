@@ -3,7 +3,7 @@ use jv_parser_salsa::pipeline::{ParseOptions, SalsaPipeline};
 #[test]
 fn parses_simple_program_without_errors() {
     let source = "package regression\nval x = 1\nval y = x + 2\n";
-    let pipeline = SalsaPipeline::new();
+    let pipeline = SalsaPipeline::new_without_jdk();
     let output = pipeline
         .execute_with_options(
             source,

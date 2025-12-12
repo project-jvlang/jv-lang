@@ -20,7 +20,7 @@ fn salsa_matches_rowan_on_stdlib_corpus() {
         .map(|rel| manifest_dir.parent().unwrap().parent().unwrap().join(rel))
         .collect();
 
-    let salsa = SalsaPipeline::new();
+    let salsa = SalsaPipeline::new_without_jdk();
     let rowan = RowanPipeline::new();
 
     for path in entries {

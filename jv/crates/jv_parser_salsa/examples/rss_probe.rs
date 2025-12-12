@@ -1,6 +1,7 @@
 use jv_parser_frontend::ParserPipeline;
 use jv_parser_rowan::frontend::RowanPipeline;
-use jv_parser_salsa::pipeline::{CacheMode, ParseOptions, SalsaPipeline};
+use jv_parser_salsa::jdk::{self, JdkLoadMode};
+use jv_parser_salsa::pipeline::{CacheMode, ParseOptions, PipelineResources, SalsaPipeline};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -39,17 +40,24 @@ impl Pipeline {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 struct Config {
     pipeline: Option<Pipeline>,
     corpus: Option<PathBuf>,
     generate_functions: Option<usize>,
     cache_mode: CacheMode,
+    jdk_mode: JdkLoadMode,
 }
 
 fn parse_args() -> Config {
     let mut args = env::args().skip(1);
-    let mut config = Config::default();
+    let mut config = Config {
+        pipeline: None,
+        corpus: None,
+        generate_functions: None,
+        cache_mode: CacheMode::default(),
+        jdk_mode: jdk::default_load_mode(),
+    };
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -108,6 +116,12 @@ fn parse_args() -> Config {
                     std::process::exit(1);
                 }
             }
+            "--skip-jdk" | "--no-jdk" => {
+                config.jdk_mode = JdkLoadMode::Skip;
+            }
+            "--with-jdk" => {
+                config.jdk_mode = JdkLoadMode::Auto;
+            }
             "--help" => {
                 print_help_and_exit();
             }
@@ -125,12 +139,14 @@ fn print_help_and_exit() -> ! {
     eprintln!(
         "\
 Usage: rss_probe [--pipeline salsa_fast|salsa_full|rowan] [--corpus PATH] [--generate-functions N]
-                 [--cache-mode shared|cacheless]
+                 [--cache-mode shared|cacheless] [--skip-jdk|--with-jdk]
 
 Without arguments this runs all pipelines on benches/corpus/synthetic/synthetic-2000.jv.
 When --pipeline is set, only that pipeline is executed. --generate-functions builds an
 in-memory synthetic corpus with N functions (~6 lines per function). --cache-mode
-controls whether Salsa keeps query cache across runs (default: shared).
+ controls whether Salsa keeps query cache across runs (default: cacheless). JDK modules are
+ preloaded by default using JV_BENCH_JDK_MODULES or toolchains/jdk25/lib/modules; use
+ --skip-jdk to opt out.
 "
     );
     std::process::exit(1);
@@ -173,11 +189,18 @@ fn measure_pipeline(
     pipeline: Pipeline,
     source: &str,
     cache_mode: CacheMode,
+    jdk_mode: JdkLoadMode,
 ) -> Result<u64, Box<dyn std::error::Error>> {
     let before = current_rss_kb().unwrap_or(0);
+    let resources = match PipelineResources::preload(jdk_mode) {
+        Ok(res) => res,
+        Err(err) => {
+            return Err(format!("failed to preload JDK modules: {err}").into());
+        }
+    };
     match pipeline {
         Pipeline::SalsaFast => {
-            let salsa = SalsaPipeline::with_cache_mode(cache_mode);
+            let salsa = SalsaPipeline::with_cache_mode_and_resources(cache_mode, resources.clone());
             salsa
                 .execute_with_options(
                     source,
@@ -190,7 +213,7 @@ fn measure_pipeline(
                 .map_err(|e| format!("salsa_fast parse failed: {e:?}"))?;
         }
         Pipeline::SalsaFull => {
-            let salsa = SalsaPipeline::with_cache_mode(cache_mode);
+            let salsa = SalsaPipeline::with_cache_mode_and_resources(cache_mode, resources.clone());
             salsa
                 .execute_with_options(
                     source,
@@ -224,7 +247,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     for pipeline in pipelines {
-        let delta = measure_pipeline(pipeline, &source, config.cache_mode)?;
+        let delta = measure_pipeline(pipeline, &source, config.cache_mode, config.jdk_mode)?;
         println!(
             "pipeline={} rss_delta_kib={} lines={} corpus={} cache_mode={:?}",
             pipeline.as_str(),

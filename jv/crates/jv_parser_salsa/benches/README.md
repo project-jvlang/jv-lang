@@ -44,3 +44,8 @@
 - 実行ガイド:
   - ベンチ実装側で `JV_BENCH_JDK_MODULES` が未設定かつ `toolchains/jdk25/lib/modules` が存在しない場合はエラーにする（スキップしない）。
   - 単一ファイルを取る `rss_probe --corpus` を使う場合は、モジュールイメージを走査して順次パイプラインへ流すドライバを用意する（仮実装でも可）。
+  - `SalsaPipeline` / `PipelineSwitcher` / `rss_probe` はデフォルトで JDK をプリロードする。`toolchains/jdk25/lib/modules`（プロジェクトルート）を優先し、相対指定の `JV_BENCH_JDK_MODULES` は `jv/` ワークスペースとその親の両方を探索する。
+  - 明示オプトアウトは `JV_BENCH_SKIP_JDK_MODULES=1` または `rss_probe --skip-jdk`。強制オンは `--with-jdk`。
+  - 8.4.3 の測定コマンド例（cacheless、JDK ロード込み）:
+    - 2k 行: `cargo run --manifest-path jv/Cargo.toml -p jv_parser_salsa --release --example rss_probe -- --with-jdk --pipeline salsa_fast --corpus jv/crates/jv_parser_salsa/benches/corpus/synthetic/synthetic-2000.jv --cache-mode cacheless`
+    - 20k/40k 行: `--generate-functions 3333` / `--generate-functions 6666` に切り替え、pipeline は `salsa_fast`/`salsa_full`/`rowan` で個別実行する。

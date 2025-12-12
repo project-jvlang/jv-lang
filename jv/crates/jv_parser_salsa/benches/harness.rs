@@ -1,7 +1,8 @@
 use criterion::Criterion;
 use jv_parser_frontend::{ParseError, ParserPipeline};
 use jv_parser_rowan::frontend::RowanPipeline;
-use jv_parser_salsa::pipeline::{CacheMode, ParseOptions, SalsaPipeline};
+use jv_parser_salsa::jdk::{self, JdkLoadMode};
+use jv_parser_salsa::pipeline::{CacheMode, ParseOptions, PipelineResources, SalsaPipeline};
 use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -24,16 +25,33 @@ pub struct PipelineSwitcher {
     rowan: RowanPipeline,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct PipelineOptions {
+    pub cache_mode: CacheMode,
+    pub jdk_mode: JdkLoadMode,
+}
+
+impl Default for PipelineOptions {
+    fn default() -> Self {
+        Self {
+            cache_mode: CacheMode::default(),
+            jdk_mode: jdk::default_load_mode(),
+        }
+    }
+}
+
 impl PipelineSwitcher {
     pub fn new() -> Self {
-        Self::with_cache_mode(CacheMode::default())
+        Self::with_options(PipelineOptions::default())
+            .unwrap_or_else(|err| panic!("failed to initialize pipelines: {err}"))
     }
 
     pub fn with_cache_mode(cache_mode: CacheMode) -> Self {
-        Self {
-            salsa: SalsaPipeline::with_cache_mode(cache_mode),
-            rowan: RowanPipeline::new(),
-        }
+        Self::with_options(PipelineOptions {
+            cache_mode,
+            ..PipelineOptions::default()
+        })
+        .unwrap_or_else(|err| panic!("failed to initialize pipelines: {err}"))
     }
 
     /// パイプラインを切り替えて実行する。診断件数を返す。
@@ -65,6 +83,15 @@ impl PipelineSwitcher {
                 .execute(source)
                 .map(|artifacts| artifacts.diagnostics.final_diagnostics().len()),
         }
+    }
+
+    fn with_options(options: PipelineOptions) -> Result<Self, String> {
+        let resources = PipelineResources::preload(options.jdk_mode)
+            .map_err(|err| format!("failed to preload JDK modules: {err}"))?;
+        Ok(Self {
+            salsa: SalsaPipeline::with_cache_mode_and_resources(options.cache_mode, resources),
+            rowan: RowanPipeline::new(),
+        })
     }
 }
 
@@ -113,7 +140,7 @@ impl BenchCorpus {
 
 impl JdkModulesCorpus {
     pub fn load() -> Result<Self, String> {
-        let modules_path = resolve_jdk_modules_path()?;
+        let modules_path = jdk::resolve_modules_path().map_err(|err| err.to_string())?;
         Ok(Self { modules_path })
     }
 
@@ -162,37 +189,6 @@ fn workspace_root(manifest_dir: &Path) -> PathBuf {
         .and_then(|p| p.parent())
         .map(PathBuf::from)
         .unwrap_or_else(|| manifest_dir.to_path_buf())
-}
-
-/// デフォルトの JDK モジュールイメージパスを解決する。
-fn resolve_jdk_modules_path() -> Result<PathBuf, String> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace_root = workspace_root(&manifest_dir);
-
-    let env_override = env::var("JV_BENCH_JDK_MODULES").ok();
-    let candidate = env_override
-        .map(PathBuf::from)
-        .unwrap_or_else(|| workspace_root.join("toolchains/jdk25/lib/modules"));
-    let modules_path = if candidate.is_absolute() {
-        candidate
-    } else {
-        workspace_root.join(candidate)
-    };
-
-    if !modules_path.exists() {
-        return Err(format!(
-            "JDK modules image not found at {modules_path:?}. \
-             Set JV_BENCH_JDK_MODULES=/path/to/lib/modules or provision toolchains/jdk25/lib/modules."
-        ));
-    }
-
-    if !modules_path.is_file() {
-        return Err(format!(
-            "JDK modules path {modules_path:?} is not a file; expected a lib/modules jimage."
-        ));
-    }
-
-    Ok(modules_path)
 }
 
 /// JRT イメージを走査し、各エントリのサイズ・ハッシュ・サンプルをベースに簡易ソースを生成する。
