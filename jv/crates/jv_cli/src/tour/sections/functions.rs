@@ -1,8 +1,7 @@
 use std::io::Write;
 
 use anyhow::{Result, anyhow};
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser::Parser;
 
 /// Render the Functions learning module covering defaults and extensions.
 pub fn render<W: Write>(writer: &mut W) -> Result<()> {
@@ -60,8 +59,7 @@ impl LessonExample {
 }
 
 fn validate_jv(source: &str) -> Result<()> {
-    RowanPipeline::default()
-        .parse(source)
+    Parser::parse(source)
         .map(|_| ())
         .map_err(|err| anyhow!("{:?}", err))
 }

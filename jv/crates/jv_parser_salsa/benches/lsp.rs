@@ -30,14 +30,5 @@ pub fn bench_lsp(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("completion/500_lines/rowan", |b| {
-        b.iter(|| {
-            if let Err(err) = harness.run(PipelineKind::Rowan, black_box(file_500.source.as_str()))
-            {
-                black_box(err);
-            }
-        });
-    });
-
     group.finish();
 }

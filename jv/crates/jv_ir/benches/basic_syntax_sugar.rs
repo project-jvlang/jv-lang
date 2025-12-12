@@ -1,7 +1,6 @@
-use criterion::{Criterion, criterion_group, criterion_main};
-use jv_ir::{TransformContext, transform::transform_program_with_context};
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use criterion::{criterion_group, criterion_main, Criterion};
+use jv_ir::{transform::transform_program_with_context, TransformContext};
+use jv_parser::Parser;
 
 const SOURCE: &str = r#"
     val payload = {
@@ -34,13 +33,9 @@ Tags: ${first_tag}, ${second_tag}, ${third_tag}
 "#;
 
 fn bench_basic_syntax_sugar(c: &mut Criterion) {
-    let pipeline = RowanPipeline::default();
     c.bench_function("basic_syntax_sugar_pipeline", |b| {
         b.iter(|| {
-            let program = pipeline
-                .parse(SOURCE)
-                .expect("source parses")
-                .into_program();
+            let program = Parser::parse(SOURCE).expect("source parses").into_program();
             let mut context = TransformContext::new();
             transform_program_with_context(program, &mut context).expect("lowering succeeds");
         });

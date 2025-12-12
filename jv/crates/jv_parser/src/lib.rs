@@ -1,9 +1,6 @@
 #![warn(missing_docs)]
 
-//! High-level parser facade bridging the Rowan frontend pipeline with external consumers.
-
-#[cfg(not(feature = "rowan-parser"))]
-compile_error!("The `rowan-parser` feature must be enabled to use the jv parser frontend.");
+//! High-level parser facade bridging the Salsa frontend pipeline with external consumers.
 
 pub use jv_parser_frontend as frontend;
 pub use jv_parser_frontend::{
@@ -14,22 +11,19 @@ pub use jv_parser_frontend::{
 pub use jv_parser_preprocess as preprocess;
 pub use jv_parser_semantics as semantics;
 
-#[cfg(feature = "rowan-parser")]
-pub use jv_parser_rowan::frontend::RowanPipeline;
+pub use jv_parser_salsa::pipeline::SalsaPipeline;
 
 /// 高水準パーサ API。
 pub struct Parser;
 
 impl Parser {
     /// ソースコードを解析し、`FrontendOutput` を生成する。
-    #[cfg(feature = "rowan-parser")]
     pub fn parse(input: &str) -> Result<FrontendOutput, ParseError> {
-        let pipeline = RowanPipeline::default();
+        let pipeline = SalsaPipeline::default();
         pipeline.parse(input)
     }
 
     /// 任意のパイプライン実装で解析を実行する。
-    #[cfg(feature = "rowan-parser")]
     pub fn parse_with<P: ParserPipeline>(
         pipeline: &P,
         input: &str,

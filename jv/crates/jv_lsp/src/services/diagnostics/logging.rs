@@ -319,12 +319,10 @@ fn collect_from_log_block(block: &LogBlock, depth: usize, diagnostics: &mut Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_parser_frontend::ParserPipeline;
-    use jv_parser_rowan::frontend::RowanPipeline;
+    use jv_parser::Parser;
 
     fn parse_program(source: &str) -> jv_ast::Program {
-        RowanPipeline::default()
-            .parse(source)
+        Parser::parse(source)
             .expect("source should parse for logging diagnostics")
             .into_program()
     }

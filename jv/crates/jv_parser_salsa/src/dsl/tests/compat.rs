@@ -1,29 +1,18 @@
 use super::lower_source;
 use crate::pipeline::{ParseOptions, SalsaPipeline};
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
 
 #[test]
-fn salsa_and_rowan_produce_compatible_log_block_programs() {
+fn salsa_parses_log_block_program() {
     let source = r#"LOG { "compat" }"#;
     let salsa = SalsaPipeline::new_without_jdk();
-    let rowan = RowanPipeline::new();
 
     let salsa_program = salsa
         .execute_with_options(source, ParseOptions::default())
         .expect("salsa pipeline succeeds")
         .artifacts
         .program;
-    let rowan_program = rowan
-        .execute(source)
-        .expect("rowan pipeline succeeds")
-        .program;
 
-    assert_eq!(
-        salsa_program.statements.len(),
-        rowan_program.statements.len(),
-        "statement count should match"
-    );
+    assert_eq!(salsa_program.statements.len(), 1, "one statement emitted");
 }
 
 #[test]

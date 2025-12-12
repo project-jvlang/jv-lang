@@ -4,13 +4,11 @@
 
 use jv_checker::{CheckError, PrimitiveType, TypeChecker, TypeInferenceService, TypeKind};
 use jv_inference::service::TypeFacts;
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser::Parser;
 use serde_json::Value;
 
 fn parse_program(source: &str) -> jv_ast::Program {
-    RowanPipeline::default()
-        .parse(source)
+    Parser::parse(source)
         .expect("source snippet should be valid")
         .into_program()
 }

@@ -26,7 +26,7 @@ jv_type_inference_java = { workspace = true }
 serde_json = { workspace = true }
 test-case = { workspace = true }
 fastrand = { workspace = true }
-jv_parser_rowan = { workspace = true }
+jv_parser = { workspace = true }
 
 [[test]]
 name = "java_inference_bench"

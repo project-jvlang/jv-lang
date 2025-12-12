@@ -24,8 +24,7 @@ use jv_ir::{
     IrGenericMetadata, IrProgram, IrStatement, IrTypeLevelValue, IrTypeParameter, IrVariance,
     JavaType, JavaWildcardKind, TransformContext, transform_program_with_context,
 };
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser::Parser;
 use serde::Serialize;
 
 use crate::java_type_names::derive_type_name;
@@ -1129,7 +1128,6 @@ fn visit_embedded_stdlib(
     modules: &mut Vec<StdlibModule>,
     catalog: &mut StdlibCatalog,
 ) -> Result<()> {
-    let pipeline = RowanPipeline::default();
     #[cfg(feature = "dump-sequence-ast")]
     let debug_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
     let cursor = Cursor::new(bundled_stdlib::STDLIB_ZIP);
@@ -1165,7 +1163,7 @@ fn visit_embedded_stdlib(
 
     for (relative_path, source) in entries {
         let virtual_path = Path::new(EMBEDDED_STDLIB_ROOT).join(&relative_path);
-        let frontend_output = pipeline.parse(&source).map_err(|error| {
+        let frontend_output = Parser::parse(&source).map_err(|error| {
             anyhow!(
                 "Failed to parse embedded stdlib module {}: {:?}",
                 virtual_path.display(),
@@ -1349,8 +1347,7 @@ fn compile_module(
     parallel_config: ParallelInferenceConfig,
     symbol_index: &Arc<SymbolIndex>,
 ) -> Result<StdlibModuleArtifacts> {
-    let pipeline = RowanPipeline::default();
-    let frontend_output = match pipeline.parse(&module.source) {
+    let frontend_output = match Parser::parse(&module.source) {
         Ok(output) => output,
         Err(error) => {
             if let Some(diagnostic) = from_parse_error(&error) {
@@ -1707,7 +1704,6 @@ mod tests {
     use jv_ast::Span;
     use jv_checker::imports::resolution::{ResolvedImport, ResolvedImportKind};
     use jv_ir::{IrModifiers, IrStatement, LoggingMetadata};
-    use jv_parser_rowan::frontend::RowanPipeline;
 
     use std::{
         fs,
@@ -1716,8 +1712,7 @@ mod tests {
     };
 
     fn parse_program(source: &str) -> Program {
-        RowanPipeline::default()
-            .parse(source)
+        Parser::parse(source)
             .expect("source should parse for embedded stdlib tests")
             .into_program()
     }

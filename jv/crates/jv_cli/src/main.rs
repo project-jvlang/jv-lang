@@ -12,8 +12,7 @@ use jv_checker::diagnostics::{
 };
 use jv_fmt::JavaFormatter;
 use jv_ir::transform_program;
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser::Parser as JvParser;
 
 use jv_cli::commands;
 use jv_cli::pipeline::project::output::PreparedOutput;
@@ -411,7 +410,6 @@ fn main() -> Result<()> {
 
 fn repl() -> Result<()> {
     println!("jv REPL (type :help for help, :quit to exit)");
-    let pipeline = RowanPipeline::default();
 
     let mut buffer = String::new();
     loop {
@@ -442,7 +440,7 @@ fn repl() -> Result<()> {
             _ => {}
         }
 
-        match pipeline.parse(line) {
+        match JvParser::parse(line) {
             Ok(output) => {
                 let stmt_count = output.program().statements().len();
                 println!("Parsed ✓ (statements: {})", stmt_count);
@@ -678,7 +676,6 @@ mod tests {
 
 fn format_jv_files(files: Vec<String>) -> Result<()> {
     println!("Formatting {} file(s)...", files.len());
-    let pipeline = RowanPipeline::default();
 
     for file in &files {
         if !Path::new(file).exists() {
@@ -690,7 +687,7 @@ fn format_jv_files(files: Vec<String>) -> Result<()> {
             fs::read_to_string(file).with_context(|| format!("Failed to read file: {}", file))?;
 
         if file.ends_with(".jv") {
-            match pipeline.parse(&source) {
+            match JvParser::parse(&source) {
                 Ok(frontend_output) => {
                     let frontend_diagnostics = from_frontend_diagnostics(
                         frontend_output.diagnostics().final_diagnostics(),

@@ -1,6 +1,5 @@
 use criterion::Criterion;
-use jv_parser_frontend::{ParseError, ParserPipeline};
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser_frontend::ParseError;
 use jv_parser_salsa::jdk::{self, JdkLoadMode};
 use jv_parser_salsa::pipeline::{CacheMode, ParseOptions, PipelineResources, SalsaPipeline};
 use std::env;
@@ -16,13 +15,10 @@ pub enum PipelineKind {
     SalsaFast,
     /// Salsa パイプライン（CST/Trivia あり）
     SalsaFull,
-    /// Rowan ベースのリファレンスパイプライン
-    Rowan,
 }
 
 pub struct PipelineSwitcher {
     salsa: SalsaPipeline,
-    rowan: RowanPipeline,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -78,10 +74,6 @@ impl PipelineSwitcher {
                     },
                 )
                 .map(|out| out.artifacts.diagnostics.final_diagnostics().len()),
-            PipelineKind::Rowan => self
-                .rowan
-                .execute(source)
-                .map(|artifacts| artifacts.diagnostics.final_diagnostics().len()),
         }
     }
 
@@ -90,7 +82,6 @@ impl PipelineSwitcher {
             .map_err(|err| format!("failed to preload JDK modules: {err}"))?;
         Ok(Self {
             salsa: SalsaPipeline::with_cache_mode_and_resources(options.cache_mode, resources),
-            rowan: RowanPipeline::new(),
         })
     }
 }

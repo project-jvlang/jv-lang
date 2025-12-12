@@ -28,17 +28,5 @@ pub fn bench_incremental(c: &mut Criterion) {
         b.iter(|| black_box(hit_rate));
     });
 
-    if let Some(stdlib) = corpus.stdlib().first().cloned() {
-        group.bench_function("rowan/unchanged_reparse", |b| {
-            b.iter(|| {
-                if let Err(err) =
-                    harness.run(PipelineKind::Rowan, black_box(stdlib.source.as_str()))
-                {
-                    black_box(err);
-                }
-            });
-        });
-    }
-
     group.finish();
 }

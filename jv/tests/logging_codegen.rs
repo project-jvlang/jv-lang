@@ -2,16 +2,14 @@ use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator};
 use jv_ir::{
     transform_program_with_context, LogLevel as IrLogLevel, LoggingFrameworkKind, TransformContext,
 };
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser::Parser;
 
 fn lower_with_logging(
     source: &str,
     framework: LoggingFrameworkKind,
     trace_context: bool,
 ) -> jv_ir::types::IrProgram {
-    let pipeline = RowanPipeline::default();
-    let output = pipeline.parse(source).expect("ソースコードの解析に成功するはずです");
+    let output = Parser::parse(source).expect("ソースコードの解析に成功するはずです");
     let diagnostics = output.diagnostics().final_diagnostics();
     assert!(
         diagnostics.is_empty(),

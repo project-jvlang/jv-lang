@@ -2,12 +2,10 @@ use jv_ir::error::{TestLoweringDiagnostic, TransformError};
 use jv_ir::types::{IrAnnotation, IrModifiers, IrStatement, JavaType};
 use jv_ir::{AssertionPattern, TransformContext};
 use jv_ir::{IrProgram, transform::transform_program_with_context};
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser::Parser;
 
 fn lower_program(source: &str) -> Result<IrProgram, TransformError> {
-    let program = RowanPipeline::default()
-        .parse(source)
+    let program = Parser::parse(source)
         .expect("test fixtures should parse")
         .into_program();
     let mut context = TransformContext::new();

@@ -441,7 +441,6 @@ fn first_lowering_error(lowering: &LoweringResult) -> Option<ParseError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jv_parser_rowan::frontend::RowanPipeline;
 
     #[test]
     fn executes_pipeline_and_builds_artifacts() {
@@ -491,38 +490,5 @@ mod tests {
             }
             other => panic!("Syntax エラーを期待したが {:?} を受け取った", other),
         }
-    }
-
-    #[test]
-    fn matches_rowan_pipeline_on_simple_input() {
-        let salsa = SalsaPipeline::new_without_jdk();
-        let rowan = RowanPipeline::new();
-        let source = "package sample\nval a = 1\n";
-
-        let salsa_output = salsa
-            .execute_with_options(source, ParseOptions::default())
-            .expect("salsa パイプラインが成功する");
-        let rowan_artifacts = rowan.execute(source).expect("rowan パイプラインが成功する");
-
-        let salsa_artifacts = &salsa_output.artifacts;
-        assert_eq!(
-            salsa_artifacts.program.package, rowan_artifacts.program.package,
-            "package が一致する"
-        );
-        assert_eq!(
-            salsa_artifacts.program.statements.len(),
-            rowan_artifacts.program.statements.len(),
-            "ステートメント数が一致する"
-        );
-        assert_eq!(
-            salsa_artifacts.tokens.len(),
-            rowan_artifacts.tokens.len(),
-            "トークン数が一致する"
-        );
-        assert_eq!(
-            salsa_artifacts.diagnostics.final_diagnostics().len(),
-            rowan_artifacts.diagnostics.final_diagnostics().len(),
-            "診断件数が一致する"
-        );
     }
 }

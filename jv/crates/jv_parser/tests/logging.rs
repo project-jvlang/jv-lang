@@ -1,8 +1,9 @@
-use jv_parser_rowan::{
-    frontend::RowanPipeline,
-    parser::{self, ParseEvent},
-    syntax::SyntaxKind,
+use jv_ast::{
+    expression::{Expression, LogBlockLevel, LogItem},
+    statement::Statement,
 };
+use jv_lexer::TokenType;
+use jv_parser::{ParseError, Parser};
 
 #[test]
 fn log_block_items_are_preserved_in_ast_order() {
@@ -18,61 +19,85 @@ fn log_block_items_are_preserved_in_ast_order() {
         }
     "#;
 
-    let pipeline = RowanPipeline::default();
-    let debug = pipeline
-        .execute_with_debug(source)
-        .expect("ログ構文のパースが成功するはずです");
-    if let Some(error) = debug.pipeline_error() {
-        panic!("パーサがエラーを報告しました: {error:?}");
-    }
+    let output = Parser::parse(source).expect("ログ構文のパースが成功するはずです");
+    let (program, tokens, diagnostics) = output.into_parts();
 
-    let artifacts = debug.artifacts();
-    let tokens = artifacts.tokens();
+    assert!(
+        diagnostics.final_diagnostics().is_empty(),
+        "診断が空であること: {:?}",
+        diagnostics.final_diagnostics()
+    );
 
     assert!(
         tokens
             .iter()
-            .any(|token| matches!(token.token_type, jv_lexer::TokenType::Log)),
+            .any(|token| matches!(token.token_type, TokenType::Log)),
         "LOG キーワードがトークン列に存在するべきです"
     );
     assert!(
         tokens
             .iter()
-            .any(|token| matches!(token.token_type, jv_lexer::TokenType::Trace)),
+            .any(|token| matches!(token.token_type, TokenType::Trace)),
         "TRACE キーワードがトークン列に存在するべきです"
     );
     assert!(
         tokens
             .iter()
-            .any(|token| matches!(token.token_type, jv_lexer::TokenType::String(_))),
+            .any(|token| matches!(token.token_type, TokenType::String(_))),
         "文字列メッセージがトークン化されているべきです"
     );
 
-    let parse_output = parser::parse(tokens);
-    assert!(
-        parse_output
-            .diagnostics
-            .iter()
-            .all(|diagnostic| !matches!(diagnostic.severity, parser::DiagnosticSeverity::Error)),
-        "ログ構文には構文エラーが発生しないはずです: {:?}",
-        parse_output.diagnostics
+    let function_body = match program.statements.first() {
+        Some(Statement::FunctionDeclaration { body, .. }) => body.as_ref(),
+        other => panic!("関数宣言を期待しましたが {:?} でした", other),
+    };
+
+    let statements = match function_body {
+        Expression::Block { statements, .. } => statements,
+        other => panic!("関数本体はブロック式のはずです: {:?}", other),
+    };
+
+    let log_expr = match statements.first() {
+        Some(Statement::Expression { expr, .. }) => expr,
+        other => panic!("最初のステートメントは式のはずです: {:?}", other),
+    };
+
+    let log_block = match log_expr {
+        Expression::LogBlock(block) => block,
+        other => panic!("LOG ブロック式を期待しましたが {:?} でした", other),
+    };
+
+    assert_eq!(log_block.level, LogBlockLevel::Default);
+    assert_eq!(
+        log_block.items.len(),
+        3,
+        "宣言・ネスト・メッセージの3要素になるはずです"
     );
 
-    let log_block_nodes = parse_output
-        .events
-        .iter()
-        .filter(|event| {
-            matches!(
-                event,
-                ParseEvent::StartNode {
-                    kind: SyntaxKind::LogBlockExpression,
-                }
-            )
-        })
-        .count();
+    match log_block.items.first() {
+        Some(LogItem::Statement(_)) => {}
+        other => panic!("最初の要素はステートメントのはずです: {:?}", other),
+    }
+
+    match log_block.items.get(1) {
+        Some(LogItem::Nested(inner)) => assert_eq!(inner.level, LogBlockLevel::Trace),
+        other => panic!("2番目の要素は TRACE ブロックのはずです: {:?}", other),
+    }
+
+    match log_block.items.get(2) {
+        Some(LogItem::Expression(Expression::Literal(_, _))) => {}
+        other => panic!("3番目の要素はメッセージ式のはずです: {:?}", other),
+    }
+
+    let nested_blocks = 1
+        + log_block
+            .items
+            .iter()
+            .filter(|item| matches!(item, LogItem::Nested(_)))
+            .count();
     assert_eq!(
-        log_block_nodes, 2,
-        "親子2つの LogBlockExpression ノードが生成されるべきです"
+        nested_blocks, 2,
+        "親子2つの LogBlock が生成されるべきです"
     );
 }
 
@@ -90,23 +115,17 @@ fn log_block_reports_diagnostic_when_nested_too_deep() {
         }
     "#;
 
-    let pipeline = RowanPipeline::default();
-    let debug = pipeline
-        .execute_with_debug(source)
-        .expect("ネスト上限テストのパース実行に失敗しました");
-    assert!(
-        debug.pipeline_error().is_some(),
-        "過剰なネストではパイプラインエラーが発生するはずです"
-    );
-    let artifacts = debug.into_artifacts();
-    let frontend = artifacts.into_frontend_output();
-    let diagnostics = frontend.diagnostics().final_diagnostics();
+    let error =
+        Parser::parse(source).expect_err("過剰なネストではパースエラーが発生するはずです");
 
-    assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic
-            .message()
-            .contains("ログブロックのネストは1段までです")),
-        "過剰なネストに対する診断が必要ですが {:?} でした",
-        diagnostics
-    );
+    match error {
+        ParseError::Syntax { message, .. } => {
+            assert!(
+                message.contains("ログブロックのネストは1段までです")
+                    || message.contains("JV-DSL-001"),
+                "過剰なネスト診断が必要ですが {message:?} でした"
+            );
+        }
+        other => panic!("構文エラーを期待しましたが {:?} を受け取りました", other),
+    }
 }

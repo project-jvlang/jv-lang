@@ -35,8 +35,7 @@ use jv_inference::{
 use jv_ir::types::{IrImport, IrImportDetail};
 use jv_ir::{TransformContext, transform_program_with_context};
 use jv_lexer::{Token, TokenMetadata, TokenType};
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser::Parser;
 use serde::{Deserialize, Serialize};
 use services::completion::logging::{log_block_snippet_completions, manifest_logging_completions};
 use services::diagnostics::logging::collect_logging_diagnostics;
@@ -616,8 +615,7 @@ impl JvLanguageServer {
         &self,
         content: &str,
     ) -> Result<Vec<IrImport>, ImportPlanError> {
-        let pipeline = RowanPipeline::default();
-        let frontend_output = pipeline.parse(content).map_err(|error| {
+        let frontend_output = Parser::parse(content).map_err(|error| {
             from_parse_error(&error)
                 .map(|diagnostic| ImportPlanError::new(diagnostic.message))
                 .unwrap_or_else(|| ImportPlanError::new(format!("Parser error: {error}")))
@@ -693,8 +691,7 @@ impl JvLanguageServer {
             return Vec::new();
         };
 
-        let pipeline = RowanPipeline::default();
-        let frontend_output = match pipeline.parse(content) {
+        let frontend_output = match Parser::parse(content) {
             Ok(output) => output,
             Err(error) => {
                 self.type_facts.remove(uri);

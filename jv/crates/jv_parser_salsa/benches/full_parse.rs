@@ -32,35 +32,12 @@ pub fn bench_full_parse(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("rowan/stdlib", |b| {
-        b.iter(|| {
-            let harness = PipelineSwitcher::new();
-            for entry in &stdlib {
-                if let Err(err) = harness.run(PipelineKind::Rowan, black_box(entry.source.as_str()))
-                {
-                    black_box(err);
-                }
-            }
-        });
-    });
-
     if let Some(syn100) = corpus.synthetic_by_lines(100).cloned() {
         group.bench_function("salsa_fast/synthetic_100", |b| {
             b.iter(|| {
                 let harness = PipelineSwitcher::new();
                 if let Err(err) =
                     harness.run(PipelineKind::SalsaFast, black_box(syn100.source.as_str()))
-                {
-                    black_box(err);
-                }
-            });
-        });
-
-        group.bench_function("rowan/synthetic_100", |b| {
-            b.iter(|| {
-                let harness = PipelineSwitcher::new();
-                if let Err(err) =
-                    harness.run(PipelineKind::Rowan, black_box(syn100.source.as_str()))
                 {
                     black_box(err);
                 }
@@ -80,16 +57,6 @@ pub fn bench_full_parse(c: &mut Criterion) {
             });
         });
 
-        group.bench_function("rowan/synthetic_2000", |b| {
-            b.iter(|| {
-                let harness = PipelineSwitcher::new();
-                if let Err(err) =
-                    harness.run(PipelineKind::Rowan, black_box(syn2000.source.as_str()))
-                {
-                    black_box(err);
-                }
-            });
-        });
     }
 
     let (modules_path, jdk_modules) = load_jdk_modules_entries().unwrap_or_else(|err| {
@@ -120,18 +87,6 @@ pub fn bench_full_parse(c: &mut Criterion) {
             for entry in &jdk_modules {
                 if let Err(err) =
                     harness.run(PipelineKind::SalsaFull, black_box(entry.source.as_str()))
-                {
-                    black_box(err);
-                }
-            }
-        });
-    });
-
-    group.bench_function("rowan/jdk_modules", |b| {
-        b.iter(|| {
-            let harness = PipelineSwitcher::new();
-            for entry in &jdk_modules {
-                if let Err(err) = harness.run(PipelineKind::Rowan, black_box(entry.source.as_str()))
                 {
                     black_box(err);
                 }

@@ -1,5 +1,3 @@
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
 use jv_parser_salsa::jdk::{self, JdkLoadMode};
 use jv_parser_salsa::pipeline::{CacheMode, ParseOptions, PipelineResources, SalsaPipeline};
 use std::env;
@@ -23,19 +21,17 @@ fn current_rss_kb() -> Option<u64> {
 enum Pipeline {
     SalsaFast,
     SalsaFull,
-    Rowan,
 }
 
 impl Pipeline {
-    fn all() -> [Self; 3] {
-        [Self::SalsaFast, Self::SalsaFull, Self::Rowan]
+    fn all() -> [Self; 2] {
+        [Self::SalsaFast, Self::SalsaFull]
     }
 
     fn as_str(self) -> &'static str {
         match self {
             Pipeline::SalsaFast => "salsa_fast",
             Pipeline::SalsaFull => "salsa_full",
-            Pipeline::Rowan => "rowan",
         }
     }
 }
@@ -66,11 +62,8 @@ fn parse_args() -> Config {
                     let pipeline = match value.as_str() {
                         "salsa_fast" => Some(Pipeline::SalsaFast),
                         "salsa_full" => Some(Pipeline::SalsaFull),
-                        "rowan" => Some(Pipeline::Rowan),
                         other => {
-                            eprintln!(
-                                "Unknown pipeline '{other}'. Use salsa_fast|salsa_full|rowan."
-                            );
+                            eprintln!("Unknown pipeline '{other}'. Use salsa_fast|salsa_full.");
                             std::process::exit(1);
                         }
                     };
@@ -138,7 +131,7 @@ fn parse_args() -> Config {
 fn print_help_and_exit() -> ! {
     eprintln!(
         "\
-Usage: rss_probe [--pipeline salsa_fast|salsa_full|rowan] [--corpus PATH] [--generate-functions N]
+Usage: rss_probe [--pipeline salsa_fast|salsa_full] [--corpus PATH] [--generate-functions N]
                  [--cache-mode shared|cacheless] [--skip-jdk|--with-jdk]
 
 Without arguments this runs all pipelines on benches/corpus/synthetic/synthetic-2000.jv.
@@ -224,12 +217,6 @@ fn measure_pipeline(
                     },
                 )
                 .map_err(|e| format!("salsa_full parse failed: {e:?}"))?;
-        }
-        Pipeline::Rowan => {
-            let rowan = RowanPipeline::new();
-            rowan
-                .execute(source)
-                .map_err(|e| format!("rowan parse failed: {e:?}"))?;
         }
     };
     let after = current_rss_kb().unwrap_or(before);

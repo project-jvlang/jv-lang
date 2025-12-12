@@ -1,12 +1,10 @@
 use jv_codegen_java::{JavaCodeGenConfig, JavaCodeGenerator, JavaTarget};
 use jv_ir::transform::transform_program_with_context;
 use jv_ir::TransformContext;
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser::Parser;
 
 fn lower_program(source: &str) -> jv_ir::types::IrProgram {
-    let program = RowanPipeline::default()
-        .parse(source)
+    let program = Parser::parse(source)
         .expect("source parses")
         .into_program();
     let mut context = TransformContext::new();

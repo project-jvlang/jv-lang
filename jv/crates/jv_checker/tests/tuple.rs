@@ -6,12 +6,10 @@ use jv_checker::{
     PrimitiveType, TypeChecker, TypeInferenceService, TypeKind, inference::type_parser,
 };
 use jv_ir::{TupleRecordStrategy, TupleUsageKind};
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser::Parser;
 
 fn 構文解析(ソース: &str) -> jv_ast::Program {
-    RowanPipeline::default()
-        .parse(ソース)
+    Parser::parse(ソース)
         .expect("構文解析が成功すること")
         .into_program()
 }

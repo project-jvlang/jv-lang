@@ -19,8 +19,7 @@ use jv_ir::{
     IrParameter, IrProgram, IrRecordComponent, IrStatement, IrSwitchCase, IrVisibility, JavaType,
     transform_program,
 };
-use jv_parser_frontend::ParserPipeline;
-use jv_parser_rowan::frontend::RowanPipeline;
+use jv_parser::Parser;
 use jv_pm::JavaTarget;
 use tempfile::tempdir;
 
@@ -121,8 +120,7 @@ fn collect_fixture_diagnostic(
     let source = fs::read_to_string(source_path)
         .with_context(|| format!("read fixture source {}", source_path.display()))?;
 
-    let pipeline = RowanPipeline::default();
-    let output = match pipeline.parse(&source) {
+    let output = match Parser::parse(&source) {
         Ok(output) => output,
         Err(error) => {
             if let Some(diagnostic) = from_parse_error(&error) {

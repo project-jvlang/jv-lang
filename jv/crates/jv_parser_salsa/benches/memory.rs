@@ -51,13 +51,6 @@ pub fn bench_memory(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("rowan/rss_delta", |b| {
-        b.iter(|| {
-            let delta = run_delta(PipelineKind::Rowan);
-            black_box(delta);
-        });
-    });
-
     let (modules_path, jdk_modules) = load_jdk_modules_entries().unwrap_or_else(|err| {
         panic!(
             "failed to load JDK modules corpus: {err}. \
@@ -89,18 +82,6 @@ pub fn bench_memory(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("rowan/jdk_modules_rss_delta", |b| {
-        b.iter(|| {
-            let delta = run_modules_delta(
-                PipelineKind::Rowan,
-                &jdk_modules,
-                use_process_probe,
-                &modules_path,
-            );
-            black_box(delta);
-        });
-    });
-
     println!(
         "JDK modules memory benchmark source: {}",
         modules_path.display()
@@ -123,7 +104,6 @@ fn run_delta_via_rss_probe(kind: PipelineKind, corpus_path: &PathBuf) -> u64 {
     let pipeline_arg = match kind {
         PipelineKind::SalsaFast => "salsa_fast",
         PipelineKind::SalsaFull => "salsa_full",
-        PipelineKind::Rowan => "rowan",
     };
 
     let output = Command::new("cargo")
