@@ -3,10 +3,12 @@ use super::classfile::{ClassParseError, ModuleInfo, parse_class, parse_module_in
 use super::index::{ModuleEntry, SymbolIndex, TypeEntry};
 use crate::{config::BuildConfig, jdk};
 use jv_pm::JavaTarget;
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{self, File};
-use std::io::{self, BufReader, Read};
+use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::Instant;
 use thiserror::Error;
 use tracing::{debug, info, warn};
@@ -74,6 +76,15 @@ pub enum IndexError {
         #[source]
         source: ClassParseError,
     },
+    #[error("jimage helper error while scanning {path}: {message}")]
+    JimageHelper { path: PathBuf, message: String },
+    #[error("jimage helper exited with {path}: {status}")]
+    JimageProcess {
+        path: PathBuf,
+        status: std::process::ExitStatus,
+    },
+    #[error("invalid jimage entry data in {path}: {message}")]
+    JimageData { path: PathBuf, message: String },
 }
 
 pub struct SymbolIndexBuilder<'a> {
@@ -205,7 +216,12 @@ impl<'a> SymbolIndexBuilder<'a> {
 
         // Scan module path first (JDK modules, explicit module path entries).
         for path in module_artifacts {
-            self.scan_artifact(path, ArtifactKind::Module, &mut index)?;
+            let kind = if is_jimage(path) {
+                ArtifactKind::Jimage
+            } else {
+                ArtifactKind::Module
+            };
+            self.scan_artifact(path, kind, &mut index)?;
         }
 
         // Then scan classpath entries (project dependencies, compiled output directories, etc.).
@@ -227,6 +243,11 @@ impl<'a> SymbolIndexBuilder<'a> {
             let jmods_dir = java_home.join("jmods");
             if jmods_dir.exists() {
                 collect_artifact(&jmods_dir, &mut artifacts)?;
+            } else {
+                let jimage = java_home.join("lib").join("modules");
+                if jimage.exists() {
+                    collect_artifact(&jimage, &mut artifacts)?;
+                }
             }
         }
 
@@ -248,6 +269,11 @@ impl<'a> SymbolIndexBuilder<'a> {
             return Ok(());
         }
 
+        if kind == ArtifactKind::Jimage {
+            self.scan_jimage(path, index)?;
+            return Ok(());
+        }
+
         if is_archive(path) {
             self.scan_archive(path, kind, index)?;
             return Ok(());
@@ -255,6 +281,39 @@ impl<'a> SymbolIndexBuilder<'a> {
 
         if path.extension().and_then(OsStr::to_str) == Some("class") {
             self.scan_class_file(path, None, index)?;
+        }
+
+        Ok(())
+    }
+
+    fn scan_jimage(&self, path: &Path, index: &mut SymbolIndex) -> Result<(), IndexError> {
+        let entries = read_jimage_entries(path)?;
+        let mut module_infos: HashMap<String, ModuleInfo> = HashMap::new();
+
+        for entry in entries
+            .iter()
+            .filter(|e| e.path.ends_with("module-info.class"))
+        {
+            if let Some(module_name) = entry.path.split('/').next() {
+                let info =
+                    parse_module_info(&entry.bytes).map_err(|source| IndexError::ClassFile {
+                        path: virtual_jimage_path(path, &entry.path),
+                        source,
+                    })?;
+                register_module(index, &info);
+                module_infos.insert(module_name.to_string(), info);
+            }
+        }
+
+        for entry in entries.iter().filter(|e| e.path.ends_with(".class")) {
+            if entry.path.ends_with("module-info.class") {
+                continue;
+            }
+
+            let module_name = entry.path.split('/').next();
+            let module_info = module_name.and_then(|m| module_infos.get(m));
+            let virtual_path = virtual_jimage_path(path, &entry.path);
+            self.index_class_bytes(&entry.bytes, module_info, index, virtual_path)?;
         }
 
         Ok(())
@@ -344,6 +403,7 @@ impl<'a> SymbolIndexBuilder<'a> {
         let module_info = match kind {
             ArtifactKind::Module => extract_module_info(path)?,
             ArtifactKind::Classpath => extract_module_info(path)?,
+            ArtifactKind::Jimage => extract_module_info(path)?,
         };
 
         if let Some(info) = &module_info {
@@ -459,10 +519,263 @@ impl<'a> SymbolIndexBuilder<'a> {
     }
 }
 
+#[derive(Debug)]
+struct JimageEntry {
+    path: String,
+    bytes: Vec<u8>,
+}
+
+fn read_jimage_entries(path: &Path) -> Result<Vec<JimageEntry>, IndexError> {
+    let (java_bin, java_home) = java_command_for_modules(path);
+    let helper = TempJavaSource::new().map_err(|source| IndexError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    fs::write(&helper.path, JIMAGE_CLASS_DUMP_SOURCE).map_err(|source| IndexError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let mut cmd = Command::new(java_bin);
+    cmd.arg(&helper.path)
+        .arg(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+
+    if let Some(home) = java_home {
+        cmd.env("JAVA_HOME", home);
+    }
+
+    let mut child = cmd.spawn().map_err(|e| IndexError::JimageHelper {
+        path: path.to_path_buf(),
+        message: e.to_string(),
+    })?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| IndexError::JimageHelper {
+            path: path.to_path_buf(),
+            message: "failed to capture stdout".into(),
+        })?;
+
+    let reader = BufReader::new(stdout);
+    let mut entries = Vec::new();
+
+    for line in reader.lines() {
+        let line = line.map_err(|e| IndexError::JimageHelper {
+            path: path.to_path_buf(),
+            message: e.to_string(),
+        })?;
+
+        if line.starts_with("ERROR\t") {
+            return Err(IndexError::JimageHelper {
+                path: path.to_path_buf(),
+                message: line.replace("ERROR\t", ""),
+            });
+        }
+
+        let mut parts = line.splitn(2, '\t');
+        let entry_path = parts.next().ok_or_else(|| IndexError::JimageData {
+            path: path.to_path_buf(),
+            message: "missing entry path".into(),
+        })?;
+        let hex = parts.next().ok_or_else(|| IndexError::JimageData {
+            path: path.to_path_buf(),
+            message: "missing entry data".into(),
+        })?;
+
+        let bytes = decode_hex(hex).map_err(|message| IndexError::JimageData {
+            path: path.to_path_buf(),
+            message,
+        })?;
+
+        entries.push(JimageEntry {
+            path: entry_path.to_string(),
+            bytes,
+        });
+    }
+
+    let status = child.wait().map_err(|e| IndexError::JimageHelper {
+        path: path.to_path_buf(),
+        message: e.to_string(),
+    })?;
+    if !status.success() {
+        return Err(IndexError::JimageProcess {
+            path: path.to_path_buf(),
+            status,
+        });
+    }
+
+    Ok(entries)
+}
+
+fn decode_hex(input: &str) -> Result<Vec<u8>, String> {
+    if input.len() % 2 != 0 {
+        return Err("hex payload has odd length".into());
+    }
+    let mut bytes = Vec::with_capacity(input.len() / 2);
+    let mut chars = input.chars();
+    while let (Some(hi_ch), Some(lo_ch)) = (chars.next(), chars.next()) {
+        let hi = hex_val(hi_ch)?;
+        let lo = hex_val(lo_ch)?;
+        bytes.push((hi << 4) | lo);
+    }
+    Ok(bytes)
+}
+
+fn hex_val(c: char) -> Result<u8, String> {
+    c.to_digit(16)
+        .map(|d| d as u8)
+        .ok_or_else(|| format!("invalid hex digit '{c}'"))
+}
+
+fn java_command_for_modules(path: &Path) -> (PathBuf, Option<PathBuf>) {
+    let java_home = path.parent().and_then(|p| p.parent()).map(PathBuf::from);
+    if let Some(home) = &java_home {
+        let candidate = home.join("bin").join(java_exec_name());
+        if candidate.exists() {
+            return (candidate, Some(home.clone()));
+        }
+    }
+    (PathBuf::from(java_exec_name()), java_home)
+}
+
+fn java_exec_name() -> &'static str {
+    if cfg!(windows) { "java.exe" } else { "java" }
+}
+
+fn virtual_jimage_path(jimage: &Path, entry: &str) -> PathBuf {
+    let mut display = jimage.display().to_string();
+    display.push_str("!/");
+    display.push_str(entry);
+    PathBuf::from(display)
+}
+
+fn is_jimage(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    if let Some(name) = path.file_name().and_then(OsStr::to_str) {
+        return name.eq_ignore_ascii_case("modules");
+    }
+    false
+}
+
+struct TempJavaSource {
+    path: PathBuf,
+}
+
+impl TempJavaSource {
+    fn new() -> io::Result<Self> {
+        let mut path = std::env::temp_dir();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        path.push(format!("jrt_list_{nanos}.java"));
+        Ok(Self { path })
+    }
+}
+
+impl Drop for TempJavaSource {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+const JIMAGE_CLASS_DUMP_SOURCE: &str = r#"
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Map;
+import java.util.stream.Stream;
+
+class JrtClassDump {
+    public static void main(String[] args) throws Exception {
+        if (args.length != 1) {
+            System.err.println("ERROR\tmissing modules path");
+            System.exit(2);
+        }
+
+        Path modulesPath = Paths.get(args[0]).toAbsolutePath();
+        if (modulesPath.getParent() == null || modulesPath.getParent().getParent() == null) {
+            System.err.println("ERROR\tinvalid modules path: " + modulesPath);
+            System.exit(2);
+        }
+
+        Path jdkHome = modulesPath.getParent().getParent();
+        Map<String, String> env = Map.of("java.home", jdkHome.toString());
+
+        try (JrtHandle handle = openJrtFileSystem(env)) {
+            FileSystem fs = handle.fs();
+            Path modulesRoot = fs.getPath("/modules");
+
+            try (Stream<Path> moduleDirs = Files.list(modulesRoot)) {
+                moduleDirs.filter(Files::isDirectory).forEach(module -> {
+                    try (Stream<Path> files = Files.walk(module)) {
+                        files.filter(Files::isRegularFile)
+                             .filter(file -> file.toString().endsWith(".class"))
+                             .forEach(JrtClassDump::emitClass);
+                    } catch (IOException io) {
+                        System.err.println("ERROR\t" + module + "\t" + io.getMessage());
+                    }
+                });
+            }
+        }
+    }
+
+    private static void emitClass(Path file) {
+        try (InputStream in = Files.newInputStream(file)) {
+            byte[] data = in.readAllBytes();
+            String hex = toHex(data);
+            String rel = file.toString().substring(1); // drop leading /
+            System.out.println(rel + "\t" + hex);
+        } catch (Exception ex) {
+            System.err.println("ERROR\t" + file + "\t" + ex.getMessage());
+        }
+    }
+
+    private static String toHex(byte[] data) {
+        StringBuilder sb = new StringBuilder(data.length * 2);
+        for (byte b : data) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+
+    private static JrtHandle openJrtFileSystem(Map<String, String> env) throws IOException {
+        try {
+            FileSystem fs = FileSystems.newFileSystem(URI.create("jrt:/"), env);
+            return new JrtHandle(fs, true);
+        } catch (Exception alreadyOpen) {
+            FileSystem fs = FileSystems.getFileSystem(URI.create("jrt:/"));
+            return new JrtHandle(fs, false);
+        }
+    }
+}
+
+record JrtHandle(FileSystem fs, boolean closeable) implements AutoCloseable {
+    @Override
+    public void close() throws IOException {
+        if (closeable) {
+            fs.close();
+        }
+    }
+}
+"#;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ArtifactKind {
     Module,
     Classpath,
+    Jimage,
 }
 
 fn detect_java_home() -> Option<PathBuf> {

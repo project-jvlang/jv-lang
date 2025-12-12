@@ -6,6 +6,10 @@ authors = ["jv Language Team"]
 license = "MIT OR Apache-2.0"
 description = "Salsa-based incremental parser pipeline for the jv language"
 publish = false
+autobenches = false
+
+[features]
+bench-rss-probe = []
 
 [dependencies]
 salsa = "0.18"

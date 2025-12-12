@@ -34,3 +34,13 @@
 - CST/TriviaMap 無効: `ParseOptions::default()`（高速パス）
 - CST/TriviaMap 有効: `ParseOptions { generate_cst: true, generate_trivia_map: true }`
 - いずれのモードでもコーパスは `benches/corpus` を利用し、ウォーム/コールド条件を揃えること。
+
+## JDK コーパスシナリオ（型解決前提）
+
+- 背景: 実際の型解決は JDK シンボルの読み込みが前提。パーサー／名前解決パイプラインでも JDK モジュールイメージを直接入力するシナリオをベンチに追加する。
+- 入力準備:
+  - デフォルト入力は `toolchains/jdk25/lib/modules`（jimage）。`JV_BENCH_JDK_MODULES` 環境変数で差し替え可能。
+  - `lib/modules` は展開せずに直接読む。`java.base` に限定せず、デフォルトで解決可能な標準モジュール全体を対象にする。
+- 実行ガイド:
+  - ベンチ実装側で `JV_BENCH_JDK_MODULES` が未設定かつ `toolchains/jdk25/lib/modules` が存在しない場合はエラーにする（スキップしない）。
+  - 単一ファイルを取る `rss_probe --corpus` を使う場合は、モジュールイメージを走査して順次パイプラインへ流すドライバを用意する（仮実装でも可）。

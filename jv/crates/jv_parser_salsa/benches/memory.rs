@@ -1,5 +1,9 @@
-use crate::harness::{BenchCorpus, PipelineKind, PipelineSwitcher, current_rss_kb};
+use crate::harness::{
+    BenchCorpus, CorpusEntry, PipelineKind, PipelineSwitcher, current_rss_kb,
+    load_jdk_modules_entries,
+};
 use criterion::{Criterion, black_box};
+use std::env;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -12,7 +16,8 @@ pub fn bench_memory(c: &mut Criterion) {
         .cloned()
         .expect("synthetic-2000 corpus present");
 
-    let use_process_probe = std::env::var("JV_BENCH_USE_RSS_PROBE").is_ok();
+    let use_process_probe =
+        cfg!(feature = "bench-rss-probe") || env::var("JV_BENCH_USE_RSS_PROBE").is_ok();
     let corpus_path = sample_path();
 
     // Helper: run once with fresh pipeline to avoid accumulating salsa DB state across iters.
@@ -52,6 +57,54 @@ pub fn bench_memory(c: &mut Criterion) {
             black_box(delta);
         });
     });
+
+    let (modules_path, jdk_modules) = load_jdk_modules_entries().unwrap_or_else(|err| {
+        panic!(
+            "failed to load JDK modules corpus: {err}. \
+             Set JV_BENCH_JDK_MODULES or provision toolchains/jdk25/lib/modules."
+        )
+    });
+
+    group.bench_function("salsa_fast/jdk_modules_rss_delta", |b| {
+        b.iter(|| {
+            let delta = run_modules_delta(
+                PipelineKind::SalsaFast,
+                &jdk_modules,
+                use_process_probe,
+                &modules_path,
+            );
+            black_box(delta);
+        });
+    });
+
+    group.bench_function("salsa_full/jdk_modules_rss_delta", |b| {
+        b.iter(|| {
+            let delta = run_modules_delta(
+                PipelineKind::SalsaFull,
+                &jdk_modules,
+                use_process_probe,
+                &modules_path,
+            );
+            black_box(delta);
+        });
+    });
+
+    group.bench_function("rowan/jdk_modules_rss_delta", |b| {
+        b.iter(|| {
+            let delta = run_modules_delta(
+                PipelineKind::Rowan,
+                &jdk_modules,
+                use_process_probe,
+                &modules_path,
+            );
+            black_box(delta);
+        });
+    });
+
+    println!(
+        "JDK modules memory benchmark source: {}",
+        modules_path.display()
+    );
 
     group.finish();
 }
@@ -105,4 +158,30 @@ fn run_delta_via_rss_probe(kind: PipelineKind, corpus_path: &PathBuf) -> u64 {
                 .and_then(|val| val.parse::<u64>().ok())
         })
         .expect("rss_probe output should contain rss_delta_kib")
+}
+
+fn run_modules_delta(
+    kind: PipelineKind,
+    modules: &[CorpusEntry],
+    use_process_probe: bool,
+    modules_path: &PathBuf,
+) -> u64 {
+    if use_process_probe {
+        panic!(
+            "rss_probe path driver does not yet support JDK module images ({}). \
+             Implement streaming support in rss_probe before enabling JV_BENCH_USE_RSS_PROBE.",
+            modules_path.display()
+        );
+    }
+
+    let before = current_rss_kb().unwrap_or(0);
+    let harness =
+        PipelineSwitcher::with_cache_mode(jv_parser_salsa::pipeline::CacheMode::Ephemeral);
+    for entry in modules {
+        if let Err(err) = harness.run(kind, black_box(entry.source.as_str())) {
+            black_box(err);
+        }
+    }
+    let after = current_rss_kb().unwrap_or(before);
+    after.saturating_sub(before)
 }

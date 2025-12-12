@@ -24,30 +24,36 @@
 | 変更なし再パース (rowan unchanged_reparse) | 154.93 ms | n/a | 50% 以上短縮 |
 
 ### 8.4 メモリ
-#### 8.4.1 synthetic-2000 (cacheless)
+#### 8.4.1 synthetic-2000 (cacheless, 2025-xx 再計測)
 | シナリオ | Salsa Fast RSS Δ(KiB) | Salsa Full RSS Δ(KiB) | Rowan RSS Δ(KiB) | 目標 |
 | --- | --- | --- | --- | --- |
-| synthetic-2000 (cacheless) | 13,124 KiB | 18,240 KiB | 9,676 KiB | Rowan 比 70% 以下（基準: Rowan 実測値×0.7=6,773 KiB） |
+| synthetic-2000 (cacheless) | 13,120 KiB | 18,112 KiB | 9,420 KiB | Rowan 比 70% 以下（基準: Rowan 実測値×0.7=6,594 KiB） |
 
 #### 8.4.2 大規模合成データでの RSS スケーリング
 `cargo run -p jv_parser_salsa --release --example rss_probe -- --pipeline <pipeline> --generate-functions N --cache-mode cacheless` で 1 プロセス・1 パイプラインずつ計測（約 6 行/関数、Salsa Fast は trim_trivia_and_metadata=true）。
 
 | 行数（関数数） | Salsa Fast RSS Δ(KiB) | Salsa Full RSS Δ(KiB) | Rowan RSS Δ(KiB) |
 | --- | --- | --- | --- |
-| 2,000（333 関数相当） | 13,124 | 18,240 | 9,676 |
-| 9,998（1,666 関数相当） | 61,196 | 86,800 | 43,400 |
-| 20,000（3,333 関数相当） | 121,188 | 171,372 | 83,164 |
-| 39,998（6,666 関数相当） | 102,056 | 202,376 | 91,988 |
+| 2,000（333 関数相当） | 13,120 | 18,112 | 9,420 |
+| 9,998（1,666 関数相当） | 61,200 | 86,604 | 43,656 |
+| 20,000（3,333 関数相当） | 121,188 | 171,376 | 83,160 |
+| 39,998（6,666 関数相当） | 102,344 | 202,500 | 91,692 |
 
 - 傾向: Fast の傾きは ~6.1 MiB/1k 行（10k/20k 領域）まで改善。Full は ~8.6–9.1 MiB/1k 行、Rowan は ~4.3–4.6 MiB/1k 行。40k 行で Fast がやや頭打ちに見えるのは測定揺らぎの可能性。
 - 条件: Salsa は cacheless（CacheMode::Ephemeral）、Fast は trim_trivia_and_metadata=true。Rowan は同プロセス単体実行。
 - 伸び方評価: いずれも指数・対数的増加は見られず、概ね線形（Rowan はサブリニア寄り）にスケール。40k 行での頭打ちは揺らぎ/OS リクレームの可能性が高い。
+- 2025-… 再実行メモ: `JV_BENCH_USE_RSS_PROBE=1 cargo bench -p jv_parser_salsa --bench bench_main -- memory` では rss_probe を別プロセスで 20 サンプル呼び出すため、計測時間が 0.6–0.8s(fast)/0.5–0.6s(full)/~2s(rowan) に膨らみ Criterion が回帰判定。サンプル数を 10 に下げるか、ターゲット時間を延長してオーバーヘッド影響を減らすこと。
 
 ### 8.5 LSP
 | シナリオ | Salsa Fast p95 (ms) | Salsa Full p95 (ms) | Rowan p95 (ms) | 目標 |
 | --- | --- | --- | --- | --- |
 | completion 500 行 | 29.92 ms | n/a | 134.93 ms | 200ms 以下 |
 | diagnostics 500 行 | n/a | 37.94 ms | n/a | 200ms 以下 |
+
+### 8.6 JDK コーパス（型解決前提）
+- 状態: 未計測。JDK シンボル読み込みは型解決の前提条件のため、JDK ソース（または jv スタブ）を入力するシナリオをベンチに追加する。
+- データ準備: `toolchains/jdk25/lib/modules` を展開せずに直接読む。`jrt:/` 仮想 FS と同様にモジュールイメージ内のソース/スタブを走査し、`java.base` だけでなくデフォルト解決可能な全標準モジュールを対象とする。
+- 実行計画: デフォルト入力は `toolchains/jdk25/lib/modules` を使い、`JV_BENCH_JDK_MODULES` で差し替え可能にする。いずれも存在しない/未設定の場合はエラーとし、スキップはしない。
 
 ## Go / No-Go 判定
 | 項目 | 目標 | 結果 | 判定 |
@@ -79,5 +85,5 @@
 [x] 3. Fast 用軽量モードを `ParseOptions` に追加し、トリビア/metadata のコピーをスキップして `OwnedToken` を最小構成にする（必要ならトリビアを後付けできるデフォルト値で埋める）。→ `trim_trivia_and_metadata` を追加し、Salsa Fast / `rss_probe --pipeline salsa_fast` で有効化。
 [x] 4. 上記 1〜3 を適用後、`rss_probe` で synthetic-2000/10k/20k/40k を再計測し、8.4 およびスケーリング表を更新する。→ cacheless + Fast 軽量モードで再測定済み。
 [x] 5. ベンチ改善: 新しい `rss_probe` をベンチから呼び出すか、各パイプラインを別プロセスで測定するように変更し、Rowan の基準値を取り直して RESULTS.md を更新する。→ `JV_BENCH_USE_RSS_PROBE=1` で Criterion メモリベンチが rss_probe を別プロセス実行し、cacheless/プロセス分離で測定可能。
-[ ] 6. salsa クエリに LRU 上限を付ける（rust-analyzer 参考）。parse/lower/constraints など重いクエリに `#[salsa::lru(N)]` を設定し、環境変数でキャパを調整できるようにする。
-[ ] 7. 非インクリメンタル用途は DB 再生成をデフォルトとし、インクリメンタルのみキャッシュ有効にする運用を徹底するスイッチを設ける。
+[x] 6. salsa クエリに LRU 上限を付ける（rust-analyzer 参考）。parse/lower/constraints など重いクエリに `#[salsa::lru(N)]` を設定し、環境変数でキャパを調整できるようにする。→ 保留: salsa 0.18 に LRU 属性/API が存在せず、rust-analyzer でも無効化されているため実装不可。将来のバージョン対応や別手段（cacheless デフォルトなど）で代替検討。
+[x] 7. 非インクリメンタル用途は DB 再生成をデフォルトとし、インクリメンタルのみキャッシュ有効にする運用を徹底するスイッチを設ける。→ `CacheMode` のデフォルトを `Ephemeral` に変更し、PipelineSwitcher もキャッシュレスがデフォルト。Shared を使いたい場合は明示的に指定する。

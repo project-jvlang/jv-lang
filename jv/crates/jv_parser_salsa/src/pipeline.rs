@@ -33,7 +33,7 @@ pub enum CacheMode {
 
 impl Default for CacheMode {
     fn default() -> Self {
-        CacheMode::Shared
+        CacheMode::Ephemeral
     }
 }
 
