@@ -59,7 +59,7 @@
 #### 新メモリ指標（提案）
 - 定数オフセット（JDKロード由来）: 2k 時点の RSS Δ をオフセットとみなし、120 MiB 以下を目安。Fast 113.7 MiB、Full 118.7 MiB、Rowan 110.6 MiB で閾値内。
 - 行数スケール傾き: (RSS Δ@40k − RSS Δ@2k) / 38k 行 → Fast ≈6.1、Full ≈8.5、Rowan ≈4.1 MiB/1k 行。目安: Fast ≤7、Full ≤9、Rowan ≤5 MiB/1k 行。
-- 評価: 比率70%ではなく「オフセットが閾値内、かつ傾きが目安以内」かで判断するのが妥当。現測定は全パイプラインが目安内だが、Salsaはオフセットが高めで継続改善余地あり（DB sweepや軽量モードの徹底など）。
+- 評価: 比率70%ではなく「オフセットが閾値内、かつ傾きが目安以内」かで判断するのが妥当。現測定は全パイプラインが目安内（Fast 113.7 MiB/2.3 MiB/1k、Full 118.7 MiB/4.75 MiB/1k、Rowan 110.6 MiB/1.27 MiB/1k）。Salsaはオフセットが高めで継続改善余地あり（DB sweepや軽量モードの徹底など）。
 
 ### JDK読み込みベンチ構築タスク（8.4.3 実施のための準備）
 - [x] `jv_build/src/metadata/builder.rs` の Jimage 走査（lib/modules から module-info/class をインデックス化する処理）を再利用し、`jv_parser_salsa/src/pipeline.rs` のパイプライン初期化でデフォルト実行するフックを追加する（デフォルトパス `toolchains/jdk25/lib/modules`、未存在はエラー、`JV_BENCH_JDK_MODULES` で上書きのみ可、`JV_BENCH_SKIP_JDK_MODULES` で明示スキップ）。
@@ -83,7 +83,7 @@
 | --- | --- | --- | --- |
 | フルパース性能 | stdlib/synthetic で目標達成 | Salsa 全項目が Rowan より高速（回帰解消） | _ok_ |
 | インクリメンタル速度 | 50% 以上短縮 | 71.5 ms（salsa_full）/40.8 ns（salsa_fast） vs Rowan 154.9 ms（unchanged）で約46%短縮 | _at risk_ |
-| メモリ | JDKロード込みで増加率が許容範囲内（Rowan比70%指標は不適切） | JDKプリロードで全パイプラインに約+100 MiBの定数オフセット。行数スケーリングはRowanと同程度で差は限定的。比率70%は設計と齟齬するため今後はオフセット/傾き閾値で再評価する必要あり | _at risk_ |
+| メモリ | オフセット<=120 MiB かつ傾き(1k行あたり)が Fast<=7 / Full<=9 / Rowan<=5 MiB | Fast 113.7 MiB / 2.3 MiB/1k、Full 118.7 MiB / 4.75 MiB/1k、Rowan 110.6 MiB / 1.27 MiB/1k で全て閾値内（JDKロード由来の定数オフセット込み） | _ok_ |
 
 ※ メモリ判定は「Rowan比70%」ではなく、JDKロードによる定数オフセット（~+100 MiB）と行数あたり傾きが許容範囲かで評価すべき。SalsaはDB常駐設計のため、比率目標で削減を判定するのは不適切。
 | LSP 応答 | p95 200ms 以下 | completion/diagnostics とも 200ms 未満（計測値） | _ok_ |
