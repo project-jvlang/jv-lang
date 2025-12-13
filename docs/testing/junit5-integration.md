@@ -13,7 +13,7 @@
 | `booleanExpr` | 真理値アサーション | `Assertions.assertTrue(booleanExpr)` |
 | `@BeforeEach`, `@AfterEach` など | ライフサイクルアノテーション | Java コードへ透過的にコピー |
 
-> **Tip**: `jv_parser_rowan` → `jv_ir` → `jv_codegen_java` → `jv_cli` の 4 段構成で一貫した Span / DisplayName を保持します。
+> **Tip**: `jv_parser`（Salsa パイプライン）→ `jv_ir` → `jv_codegen_java` → `jv_cli` の 4 段構成で一貫した Span / DisplayName を保持します。
 
 ## 2. DSL 構文サンプル
 
@@ -141,6 +141,6 @@ Surefire には `-Djv.generated.tests=<path>` が渡されるため、`pom.xml` 
 - `jv/tests/junit5_integration.rs` – CLI E2E テスト実装例
 - `.spec-workflow/specs/junit5-integration/design.md` – アーキテクチャ設計文書
 - `jv/crates/jv_codegen_java/src/tests/junit5.rs` – 生成コードの期待スナップショット
-- `jv/crates/jv_parser_rowan/tests/test_dsl.rs` – DSL パーサーフィクスチャ
+- `jv/crates/jv_parser_salsa/tests/regression.rs` – パーサーフィクスチャと DSL ローワリングのリグレッション
 
 これらの資料を併用することで、テスト DSL → Java → Maven 実行までの一連のフローを短時間で検証できます。

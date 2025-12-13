@@ -1287,9 +1287,9 @@ fun scenario79(): Int {
 }
 
 fun scenario80(): Int {
-    val userName = "Rowan"
+    val userName = "Salsa"
     val status = "ACTIVE"
-    val tags = ["parser" "rowan" "integration"]
+    val tags = ["parser" "salsa" "integration"]
 
     val summary = """
 User: ${userName}

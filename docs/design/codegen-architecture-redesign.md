@@ -11,7 +11,7 @@
 - **制約**: 段階的移行は不要。別ブランチでの完全刷新を前提とする
 
 ### 成功事例からの学び
-`jv_parser_rowan`は従来の巨大パーサ（Chumsky依存）をStrategy Patternベースのイベント駆動アーキテクチャで刷新し、以下を実現した：
+従来の巨大パーサ（Chumsky依存）を Strategy Pattern ベースのイベント駆動アーキテクチャへ刷新し、以下を実現した：
 - ファイルサイズ: 2,800行 → 200-400行/戦略（約70%削減）
 - 保守性: 各戦略が独立したテスト可能単位
 - 拡張性: 新構文追加時の既存コードへの影響ゼロ
@@ -1421,12 +1421,12 @@ let registry = StrategyRegistry::default_registry()
 
 ## Appendix A: Comparison with Parser Architecture
 
-| 観点 | jv_parser_rowan | jv_codegen_java_v2 |
+| 観点 | legacy parser | jv_codegen_java_v2 |
 |------|----------------|-------------------|
 | **入力** | `Vec<Token>` | `IrProgram` |
 | **出力** | `rowan::GreenNode` + `jv_ast::Program` | `JavaCompilationUnit` |
 | **戦略** | `StatementStrategy` (10戦略) | `CodeGenStrategy` (6戦略) |
-| **中間表現** | Rowan SyntaxTree | Java Model |
+ | **中間表現** | CST SyntaxTree | Java Model |
 | **レンダリング** | N/A（ASTが出力） | CodeBuilder（Rope） |
 | **ターゲット** | jv言語構文 | Java 21/25 |
 

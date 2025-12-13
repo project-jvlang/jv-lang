@@ -9,7 +9,7 @@
 
 ---
 
-> **Status (2025-10-25):** Rowan パイプラインへの完全移行に伴い `jv_parser_syntax*` クレート群はリポジトリから撤去済み。本書はアーカイブ目的で残している。
+> **Status (2025-10-25):** Red-Green CST パイプラインへの移行に伴い `jv_parser_syntax*` クレート群はリポジトリから撤去済み。本書はアーカイブ目的で残している。
 
 ## エグゼクティブサマリー
 
@@ -605,7 +605,7 @@ impl ArenaParser for StatementParser {
 キャッシュ効率: 最高 (連続メモリ配置)
 ```
 
-### アプローチ 3: Rowan (Red-Green Tree) 🌳
+### アプローチ 3: Red-Green Tree CST 🌳
 
 #### 3.1 概要
 
@@ -628,7 +628,7 @@ pub struct SyntaxNode {
 }
 ```
 
-**Rowan の利点**:
+**Red-Green CST の利点**:
 ```rust
 use rowan::{GreenNodeBuilder, Language};
 
@@ -670,7 +670,7 @@ pub fn parse_statement(builder: &mut GreenNodeBuilder) {
 - ノード操作が間接的
 
 **比較表**:
-| 項目 | Chumsky AST | Rowan CST |
+| 項目 | Chumsky AST | Red-Green CST |
 |------|-------------|-----------|
 | **型安全性** | 強い | 弱い (kind による識別) |
 | **ロスレス** | ❌ | ✅ |
@@ -880,7 +880,7 @@ let parser = (
 | **動的ディスパッチ** | 数時間 | ✅ 成功 | 1.1x | <1GB | ✅ | ⭐⭐⭐⭐⭐ |
 | **Visitor 2パス** | 2-4ヶ月 | ✅ 成功 | 1.2x | 500MB | ✅ | ⭐⭐⭐⭐ |
 | **Arena アロケーター** | 3-6ヶ月 | ✅ 成功 | 0.3x (3倍速) | 300MB | ⚠️ 大改修 | ⭐⭐⭐ |
-| **Rowan CST** | 6-12ヶ月 | ✅ 成功 | 1.0x | 500MB | ❌ 完全移行 | ⭐⭐⭐ |
+| **Red-Green CST** | 6-12ヶ月 | ✅ 成功 | 1.0x | 500MB | ❌ 完全移行 | ⭐⭐⭐ |
 | **手続き的マクロ** | 4-8ヶ月 | ✅ 成功 | 1.0x | 200MB | ⚠️ DSL化 | ⭐⭐ |
 | **Bytecode VM** | 12-18ヶ月 | ✅ 成功 | 1.1x | 100MB | ❌ 完全移行 | ⭐ |
 | **winnow 移行** | 2-3ヶ月 | ✅ 成功 | 0.8x (1.2倍速) | 600MB | ⚠️ 移行必要 | ⭐⭐⭐⭐ |
@@ -908,7 +908,7 @@ let parser = (
 ### 中期 (3-6ヶ月): Visitor パターン または winnow 移行
 
 **選択基準**:
-- **LSP機能を重視** → Rowan CST
+- **LSP機能を重視** → Red-Green CST
 - **パフォーマンス重視** → Arena アロケーター
 - **安定性重視** → Visitor 2パス
 - **エコシステム重視** → winnow 移行
@@ -916,7 +916,7 @@ let parser = (
 ### 長期 (6-12ヶ月): アーキテクチャ刷新
 
 **候補**:
-- Rowan CST (rust-analyzer パターン)
+- Red-Green CST (rust-analyzer パターン)
 - Arena + ゼロコピー (rustc パターン)
 
 **判断材料**:

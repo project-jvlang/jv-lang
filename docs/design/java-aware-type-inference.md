@@ -77,13 +77,13 @@ Java 固有のロジックを `jv_checker::java` モジュールへ集約し、�
 
 この分離により、将来的な Java 仕様変更や JVM バージョン追加時には `jv_checker::java` を中心に更新すればよく、推論アルゴリズムの汎用性と保守性が向上する。
 
-## Rowanリファレンスローワリングとの連携
+## パーサーローワリングとの連携
 
-Rowan ベースのステートメントローワリング（`jv_parser_rowan::lowering::lower_program`）は、型注釈ノードを `TypeAnnotation::Simple` として `jv_ast` に搬送する。Task 3.5 時点では式ローワラーが未完成のため、Rowan の `Expression` から得たトークン列を文字列化してヒントとして渡す実装になっている。
+Salsa ベースのローワリングは、型注釈ノードを `TypeAnnotation::Simple` として `jv_ast` に搬送する。Task 3.5 時点では式ローワラーが未完成のため、構文木から得たトークン列を文字列化してヒントとして渡す実装になっている。
 
 - `lower_type_annotation_container` が `jv_type_inference_java` のローワラーを経由して `TypeAnnotation` を生成する際、その結果が `TypeKind` 解析の起点になる。Phase 1 で導入したプリミティブ／ボックス型判定は、この構造化された型情報を `PrimitiveType::from_str` で解釈する前提で設計する。
-- Null 許容と generics は未展開だが、Rowan 側で `?` や `<T>` といったトークンが線形に渡されるため、`TypeAnnotation` の再帰構造を活かして段階的に対応できる。
-- Rowan ローワリングは `LoweringDiagnostic` に型注釈欠落や未対応構文を記録する。型推論層ではこれら診断を補助情報として受け取り、推論不能ケースにおけるユーザーフィードバックを強化する計画である。
+- Null 許容と generics は未展開だが、ローワリング側で `?` や `<T>` といったトークンが線形に渡されるため、`TypeAnnotation` の再帰構造を活かして段階的に対応できる。
+- ローワリングは `LoweringDiagnostic` に型注釈欠落や未対応構文を記録する。型推論層ではこれら診断を補助情報として受け取り、推論不能ケースにおけるユーザーフィードバックを強化する計画である。
 
 ## Phase 1: 型表現の拡張
 
@@ -354,10 +354,9 @@ fn detect_boxed_type(fqcn: &str) -> Option<PrimitiveType> {
 ```rust
 #[test]
 fn primitive_vs_boxed_type_mismatch() {
-    use jv_parser_rowan::frontend::RowanPipeline;
+    use jv_parser::Parser;
 
-    let program = RowanPipeline::default()
-        .parse("val x: Int = Integer.valueOf(42)")
+    let program = Parser::parse("val x: Int = Integer.valueOf(42)")
         .unwrap()
         .into_program();
     let mut engine = InferenceEngine::new();
@@ -370,8 +369,7 @@ fn primitive_vs_boxed_type_mismatch() {
 
 #[test]
 fn null_assignment_to_primitive_rejected() {
-    let program = RowanPipeline::default()
-        .parse("val x: Int = null")
+    let program = Parser::parse("val x: Int = null")
         .unwrap()
         .into_program();
     let mut engine = InferenceEngine::new();
@@ -384,8 +382,7 @@ fn null_assignment_to_primitive_rejected() {
 
 #[test]
 fn nullable_int_requires_boxed_type() {
-    let program = RowanPipeline::default()
-        .parse("val x: Int? = 42")
+    let program = Parser::parse("val x: Int? = 42")
         .unwrap()
         .into_program();
     let mut engine = InferenceEngine::new();
@@ -751,10 +748,11 @@ impl ConstraintSolver {
 **ファイル**: `jv/crates/jv_checker/tests/inference_conversions.rs`
 
 ```rust
+use jv_parser::Parser;
+
 #[test]
 fn widening_primitive_conversion_allowed() {
-    let program = RowanPipeline::default()
-        .parse("val x: Long = 42")
+    let program = Parser::parse("val x: Long = 42")
         .unwrap()
         .into_program();
     let mut engine = InferenceEngine::new();
@@ -770,8 +768,7 @@ fn widening_primitive_conversion_allowed() {
 
 #[test]
 fn boxing_conversion_in_collection() {
-    let program = RowanPipeline::default()
-        .parse("val list: List<Int> = listOf(1, 2, 3)")
+    let program = Parser::parse("val list: List<Int> = listOf(1, 2, 3)")
         .unwrap()
         .into_program();
     let mut engine = InferenceEngine::new();
@@ -788,8 +785,7 @@ fn boxing_conversion_in_collection() {
 
 #[test]
 fn narrowing_conversion_rejected() {
-    let program = RowanPipeline::default()
-        .parse("val x: Int = 42L")
+    let program = Parser::parse("val x: Int = 42L")
         .unwrap()
         .into_program();
     let mut engine = InferenceEngine::new();

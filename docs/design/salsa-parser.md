@@ -8,7 +8,7 @@
 - **Lowering**: `lower` モジュールが `Statement`/`Expression` を生成し、診断を付与。
 - **Pipeline**: `SalsaPipeline::execute_with_options` が Preprocess → Parse → Lower → Semantics を流し、`ParseOptions` で CST/Trivia を切り替える。
 - **DSL 拡張**: `dsl::*` が LOG/concurrency/resource/test DSL をパイプラインに統合。
-- **Normalization**: `support::normalize` が診断ソートキーとスパン許容差判定を提供し、Rowan との同等性比較を支える。
+- **Normalization**: `support::normalize` が診断ソートキーとスパン許容差判定を提供し、旧パイプラインとの同等性比較を支える。
 
 ## データフロー
 ```
@@ -21,7 +21,7 @@ source
 ```
 
 ## テスト/ベンチ
-- `tests/stdlib_comparison.rs`: Rowan と Salsa の診断・スパン同等性を検証。
+- `tests/stdlib_comparison.rs`: 旧パイプラインとの診断・スパン同等性を検証。
 - `benches/bench_main.rs`: Criterion ハーネスでフル/インクリメンタル/メモリ/LSP ベンチを実行。
 
 ## 今後の改善

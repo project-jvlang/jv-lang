@@ -1,8 +1,8 @@
-//! Type lowering utilities shared between Rowan and Chumsky parsing routes.
+//! Type lowering utilities shared between CST token streams and parsed annotations.
 //!
 //! このクレートは jv の型推論パイプラインに向けた共通の型ローワリング
-//! エントリーポイントを提供する。Rowan ベースのローワラーはトークン列から、
-//! Chumsky ベースのローワラーは既存の `TypeAnnotation` から同じインターフェースで
+//! エントリーポイントを提供する。CST ベースのローワラーはトークン列から、
+//! パーサーで生成済みの `TypeAnnotation` から同じインターフェースで
 //! 型情報を取得できる。
 
 use jv_ast::{types::UnitSymbol, Span, TypeAnnotation};
@@ -13,7 +13,7 @@ use thiserror::Error;
 /// 型注釈ローワリングの入力ソース。
 #[derive(Debug, Clone)]
 pub enum TypeAnnotationSource<'a> {
-    /// Rowan 構文木から取得したトークン列。
+    /// CST 由来のトークン列。
     Tokens(&'a [Token]),
     /// すでに解析済みの `TypeAnnotation`。
     Parsed(&'a TypeAnnotation),
@@ -90,7 +90,7 @@ pub enum TypeLoweringErrorKind {
     Parse,
 }
 
-/// 型注釈をローワリングする。Rowan/Chumsky 双方で利用可能な共通エントリ。
+/// 型注釈をローワリングする。トークン列経路と既存 AST 経路の両方で利用可能。
 pub fn lower_type_annotation(
     source: TypeAnnotationSource<'_>,
 ) -> Result<LoweredTypeAnnotation, TypeLoweringError> {
@@ -103,7 +103,7 @@ pub fn lower_type_annotation(
     }
 }
 
-/// Rowan ローワラー向け: トークン列から型注釈を解析する。
+/// トークン列から型注釈を解析する。
 pub fn lower_type_annotation_from_tokens(
     tokens: &[Token],
 ) -> Result<LoweredTypeAnnotation, TypeLoweringError> {

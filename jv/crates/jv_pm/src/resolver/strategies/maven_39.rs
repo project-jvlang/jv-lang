@@ -1672,7 +1672,7 @@ mod pom_resolver {
                     queue.push_back((root.clone(), Vec::new(), 0));
                 } else {
                     if let Some((existing_version, existing_depth)) = ga_versions.get(&key) {
-                        if existing_version == &root.version && *existing_depth <= 0 {
+                        if existing_version == &root.version && *existing_depth == 0 {
                             continue;
                         }
                     }
