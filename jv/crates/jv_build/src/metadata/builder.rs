@@ -612,7 +612,7 @@ fn read_jimage_entries(path: &Path) -> Result<Vec<JimageEntry>, IndexError> {
 }
 
 fn decode_hex(input: &str) -> Result<Vec<u8>, String> {
-    if input.len() % 2 != 0 {
+    if !input.len().is_multiple_of(2) {
         return Err("hex payload has odd length".into());
     }
     let mut bytes = Vec::with_capacity(input.len() / 2);

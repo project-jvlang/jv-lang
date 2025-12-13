@@ -288,8 +288,8 @@ fn check_annotations(
     errors: &mut Vec<CheckError>,
 ) {
     for annotation in annotations {
-        if let Some(rule) = lookup_rule(&annotation.name) {
-            if !rule.allows(site) {
+        if let Some(rule) = lookup_rule(&annotation.name)
+            && !rule.allows(site) {
                 let allowed = rule
                     .allowed_sites()
                     .map(|s| s.display_name())
@@ -306,7 +306,6 @@ fn check_annotations(
                     span: Some(annotation.span.clone()),
                 });
             }
-        }
     }
 
     for conflict in detect_reserved_conflicts(annotations) {

@@ -265,12 +265,11 @@ fn run_fixture_case(path: &Path, javac_version: Option<u32>) -> Result<()> {
     };
     compare_output(&actual_diag, &expected_diag, stem, "diagnostics")?;
 
-    if let Some((ref expected_java25, ref expected_java21)) = expected_pair {
-        if let Some(version) = javac_version {
+    if let Some((ref expected_java25, ref expected_java21)) = expected_pair
+        && let Some(version) = javac_version {
             compile_with_javac(expected_java25, 25, version, stem, "Java25")?;
             compile_with_javac(expected_java21, 21, version, stem, "Java21")?;
         }
-    }
 
     Ok(())
 }
@@ -323,13 +322,11 @@ fn detect_javac_version() -> Option<u32> {
 
 fn parse_javac_major(text: &str) -> Option<u32> {
     for token in text.split_whitespace() {
-        if let Some(stripped) = token.split('.').next() {
-            if let Ok(value) = stripped.parse::<u32>() {
-                if value >= 8 {
+        if let Some(stripped) = token.split('.').next()
+            && let Ok(value) = stripped.parse::<u32>()
+                && value >= 8 {
                     return Some(value);
                 }
-            }
-        }
     }
     None
 }
@@ -563,15 +560,12 @@ fn example1_program() -> IrProgram {
 fn example2_program() -> IrProgram {
     let discriminant = Box::new(ir_identifier("score", &int_type()));
 
-    let mut cases = Vec::new();
-    cases.push(range_case("0", "60", false, "Fail"));
-    cases.push(range_case("60", "80", false, "Pass"));
-    cases.push(range_case("80", "100", true, "Excellent"));
-    cases.push(switch_case(
-        vec![IrCaseLabel::Default],
-        None,
-        string_literal("Invalid"),
-    ));
+    let cases = vec![
+        range_case("0", "60", false, "Fail"),
+        range_case("60", "80", false, "Pass"),
+        range_case("80", "100", true, "Excellent"),
+        switch_case(vec![IrCaseLabel::Default], None, string_literal("Invalid")),
+    ];
 
     let switch_expr = IrExpression::Switch {
         discriminant,

@@ -444,17 +444,7 @@ fn collect_endpoint_warnings(
     }
 
     let port = endpoint.explicit_port.or_else(|| endpoint.url.port());
-    if port.is_none() {
-        let recommendation = recommended_port(protocol);
-        issues.push(ValidationIssue {
-            severity: IssueSeverity::Warning,
-            message: format!(
-                "エンドポイントにポートが指定されていません。推奨ポート {} を明示することをおすすめします。",
-                recommendation
-            ),
-        });
-    } else {
-        let port_value = port.unwrap();
+    if let Some(port_value) = port {
         match protocol {
             OtelProtocol::Grpc if port_value == 4318 => {
                 issues.push(ValidationIssue {
@@ -474,6 +464,15 @@ fn collect_endpoint_warnings(
             }
             _ => {}
         }
+    } else {
+        let recommendation = recommended_port(protocol);
+        issues.push(ValidationIssue {
+            severity: IssueSeverity::Warning,
+            message: format!(
+                "エンドポイントにポートが指定されていません。推奨ポート {} を明示することをおすすめします。",
+                recommendation
+            ),
+        });
     }
 
     if protocol == OtelProtocol::Http {
@@ -621,15 +620,17 @@ mod tests {
     fn determine_port_uses_override_layer() {
         let mut config = base_logging_config();
         config.opentelemetry.enabled = true;
-        let mut layer = LoggingConfigLayer::default();
-        layer.opentelemetry = Some(OpenTelemetryLayer {
-            enabled: Some(true),
-            endpoint: Some(Some("collector.local:5522".to_string())),
-            protocol: Some(OtelProtocol::Grpc),
-            trace_context: None,
-            resource: None,
-            attributes: None,
-        });
+        let layer = LoggingConfigLayer {
+            opentelemetry: Some(OpenTelemetryLayer {
+                enabled: Some(true),
+                endpoint: Some(Some("collector.local:5522".to_string())),
+                protocol: Some(OtelProtocol::Grpc),
+                trace_context: None,
+                resource: None,
+                attributes: None,
+            }),
+            ..LoggingConfigLayer::default()
+        };
         let effective = config.with_layers(&[layer]);
         let summary = validate_effective_config(&effective);
         assert!(summary.endpoint.is_some());

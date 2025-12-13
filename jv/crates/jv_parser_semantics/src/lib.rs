@@ -122,14 +122,20 @@ impl SemanticsPipeline {
 impl Default for SemanticsPipeline {
     fn default() -> Self {
         SemanticsPipelineBuilder::new()
-            .with_pass(PrimitiveReturnPass::default())
-            .with_pass(GenericDirectivePass::default())
+            .with_pass(PrimitiveReturnPass)
+            .with_pass(GenericDirectivePass)
             .build()
     }
 }
 
 pub struct SemanticsPipelineBuilder {
     passes: Vec<Box<dyn SemanticsPass>>,
+}
+
+impl Default for SemanticsPipelineBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SemanticsPipelineBuilder {

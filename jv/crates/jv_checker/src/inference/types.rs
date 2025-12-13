@@ -33,6 +33,7 @@ pub type PrimitiveType = JavaPrimitive;
 
 /// 型推論で用いる主な型表現。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum TypeKind {
     Primitive(PrimitiveType),
     Boxed(PrimitiveType),
@@ -41,14 +42,10 @@ pub enum TypeKind {
     Variable(TypeId),
     Function(Vec<TypeKind>, Box<TypeKind>),
     Tuple(Vec<TypeKind>),
+    #[default]
     Unknown,
 }
 
-impl Default for TypeKind {
-    fn default() -> Self {
-        TypeKind::Unknown
-    }
-}
 
 impl TypeKind {
     /// ヘルパー: 関数型を生成する。
@@ -219,16 +216,13 @@ impl TypeError {
 
 /// 型変数に関する現在の状態を示す。
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub enum TypeVariableKind {
+    #[default]
     Unbound,
     Bound(TypeKind),
 }
 
-impl Default for TypeVariableKind {
-    fn default() -> Self {
-        TypeVariableKind::Unbound
-    }
-}
 
 /// 型変数を表し、推論過程での束縛状態を保持する。
 #[derive(Debug, Clone, PartialEq)]

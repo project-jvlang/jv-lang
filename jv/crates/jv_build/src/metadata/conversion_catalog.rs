@@ -325,6 +325,12 @@ pub struct ConversionCatalogCache {
     misses: u64,
 }
 
+impl Default for ConversionCatalogCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConversionCatalogCache {
     pub fn with_capacity(capacity: usize) -> Self {
         let size = capacity.max(1);
@@ -366,11 +372,10 @@ impl ConversionCatalogCache {
     }
 
     fn insert(&mut self, key: CatalogCacheKey, catalog: Arc<ConversionCatalog>) {
-        if self.entries.len() >= self.capacity {
-            if let Some(oldest) = self.order.pop_front() {
+        if self.entries.len() >= self.capacity
+            && let Some(oldest) = self.order.pop_front() {
                 self.entries.remove(&oldest);
             }
-        }
         self.order.push_back(key.clone());
         self.entries.insert(key, catalog);
     }

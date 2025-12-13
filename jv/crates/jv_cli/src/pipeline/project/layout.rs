@@ -20,6 +20,7 @@ pub struct ProjectLayout {
 }
 
 impl ProjectLayout {
+    #[allow(clippy::result_large_err)]
     pub fn from_settings(
         root: &ProjectRoot,
         settings: &ProjectSettings,
@@ -86,6 +87,7 @@ impl ProjectLayout {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn resolve_entrypoint(
     root: &ProjectRoot,
     settings: &ProjectSettings,
@@ -115,12 +117,14 @@ fn resolve_entrypoint(
     Err(entrypoint_inference_failed())
 }
 
+#[allow(clippy::result_large_err)]
 fn enumerate_sources(root: &Path) -> Result<Vec<PathBuf>, EnhancedDiagnostic> {
     let mut results = Vec::new();
     visit_directory(root, root, &mut results)?;
     Ok(results)
 }
 
+#[allow(clippy::result_large_err)]
 fn visit_directory(
     root: &Path,
     directory: &Path,
@@ -139,11 +143,10 @@ fn visit_directory(
 
         if file_type.is_dir() {
             visit_directory(root, &path, results)?;
-        } else if file_type.is_file() {
-            if path.extension() == Some(OsStr::new("jv")) {
+        } else if file_type.is_file()
+            && path.extension() == Some(OsStr::new("jv")) {
                 results.push(path);
             }
-        }
     }
 
     Ok(())

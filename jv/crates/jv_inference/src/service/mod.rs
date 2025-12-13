@@ -85,6 +85,7 @@ impl fmt::Display for TypeLevelValue {
 
 /// Telemetry counters emitted by the TypeFacts service for `--telemetry`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub struct TypeFactsTelemetry {
     /// Number of kind checks performed during the inference pass.
     pub kind_checks_count: u64,
@@ -113,16 +114,6 @@ impl TypeFactsTelemetry {
     }
 }
 
-impl Default for TypeFactsTelemetry {
-    fn default() -> Self {
-        Self {
-            kind_checks_count: 0,
-            kind_cache_hit_rate: None,
-            const_evaluations: 0,
-            type_level_cache_size: 0,
-        }
-    }
-}
 
 /// Describes the read-only facts that the inference engine exposes once analysis completes.
 ///
@@ -372,6 +363,7 @@ impl FunctionSignature {
 }
 
 impl TypeFactsSnapshot {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         environment: Arc<TypeEnvironmentSnapshot>,
         bindings: Arc<Vec<TypeBinding>>,
@@ -807,7 +799,7 @@ impl TypeFactsBuilder {
         let entry = self
             .java_annotations
             .entry(symbol.into())
-            .or_insert_with(Vec::new);
+            .or_default();
         entry.push(annotation.into());
         self
     }

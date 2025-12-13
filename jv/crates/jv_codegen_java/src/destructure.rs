@@ -32,17 +32,15 @@ impl JavaCodeGenerator {
             return Ok(Some(component));
         }
 
-        if let IrExpression::Assignment { target, value, .. } = expr {
-            if let Some(component) = self.try_render_destructure_component(value)? {
-                if let IrExpression::Identifier { name, .. } = target.as_ref() {
-                    if self.is_mutable_capture(name) {
+        if let IrExpression::Assignment { target, value, .. } = expr
+            && let Some(component) = self.try_render_destructure_component(value)? {
+                if let IrExpression::Identifier { name, .. } = target.as_ref()
+                    && self.is_mutable_capture(name) {
                         return Ok(Some(format!("{}.set({})", name, component)));
                     }
-                }
                 let lhs = self.generate_expression(target)?;
                 return Ok(Some(format!("{lhs} = {component}")));
             }
-        }
 
         Ok(None)
     }

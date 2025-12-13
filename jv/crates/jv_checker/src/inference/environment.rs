@@ -220,7 +220,7 @@ fn substitute_type(ty: &TypeKind, subs: &HashMap<TypeId, TypeKind>) -> TypeKind 
         TypeKind::Variable(id) => subs
             .get(id)
             .cloned()
-            .unwrap_or_else(|| TypeKind::Variable(*id)),
+            .unwrap_or(TypeKind::Variable(*id)),
         TypeKind::Function(params, ret) => TypeKind::Function(
             params
                 .iter()

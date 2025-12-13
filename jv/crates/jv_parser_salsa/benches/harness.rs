@@ -88,6 +88,7 @@ impl PipelineSwitcher {
 
 #[derive(Clone)]
 pub struct CorpusEntry {
+    #[allow(dead_code)]
     pub name: String,
     pub source: String,
 }
@@ -118,6 +119,7 @@ impl BenchCorpus {
         &self.stdlib
     }
 
+    #[allow(dead_code)]
     pub fn synthetic(&self) -> &[CorpusEntry] {
         &self.synthetic
     }

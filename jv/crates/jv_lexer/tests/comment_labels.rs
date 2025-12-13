@@ -40,7 +40,7 @@ fn 行コメントからラベルを抽出する() {
     );
     assert_eq!(ラベルトークン.line, 主スパン.line);
     assert_eq!(ラベルトークン.column, 主スパン.column);
-    assert_eq!(ラベルトークン.lexeme, "result");
+    assert_eq!(ラベルトークン.lexeme.as_ref(), "result");
 }
 
 #[test]

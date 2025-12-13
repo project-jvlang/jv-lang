@@ -87,7 +87,7 @@ impl FakeMavenRepo {
     fn write_metadata(base_dir: &Path, dep: &DependencySpec) -> Result<()> {
         let mut path = base_dir.join(dep.group_path());
         fs::create_dir_all(&path).with_context(|| format!("{} の作成に失敗しました", path.display()))?;
-        path.push(&dep.artifact);
+        path.push(dep.artifact);
         fs::create_dir_all(&path).with_context(|| format!("{} の作成に失敗しました", path.display()))?;
         let metadata_path = path.join("maven-metadata.xml");
         let metadata = format!(
@@ -106,8 +106,8 @@ impl FakeMavenRepo {
 
     fn write_artifacts(base_dir: &Path, dep: &DependencySpec) -> Result<()> {
         let mut version_dir = base_dir.join(dep.group_path());
-        version_dir.push(&dep.artifact);
-        version_dir.push(&dep.version);
+        version_dir.push(dep.artifact);
+        version_dir.push(dep.version);
         fs::create_dir_all(&version_dir)
             .with_context(|| format!("{} の作成に失敗しました", version_dir.display()))?;
 
@@ -168,7 +168,7 @@ impl FakeMavenRepo {
 
 #[derive(Clone, Debug)]
 struct RequestLog {
-    method: String,
+    _method: String,
     path: String,
 }
 
@@ -255,7 +255,7 @@ impl FakeMavenServer {
         logs.lock()
             .expect("request log poisoned")
             .push(RequestLog {
-                method: method.clone(),
+                _method: method.clone(),
                 path: path.to_string(),
             });
 
@@ -311,7 +311,7 @@ struct TestEnvironment {
     project: PathBuf,
     secondary_project: PathBuf,
     server: FakeMavenServer,
-    dependencies: Vec<DependencySpec>,
+    _dependencies: Vec<DependencySpec>,
 }
 
 impl TestEnvironment {
@@ -336,7 +336,7 @@ impl TestEnvironment {
             project,
             secondary_project,
             server,
-            dependencies,
+            _dependencies: dependencies,
         })
     }
 
@@ -480,16 +480,16 @@ impl TestEnvironment {
     fn cache_jar_path(&self, dep: &DependencySpec) -> PathBuf {
         let mut path = self.home.path().join(".jv/cache/jars");
         path.push(dep.group_path());
-        path.push(&dep.artifact);
-        path.push(&dep.version);
+        path.push(dep.artifact);
+        path.push(dep.version);
         path.join(dep.jar_name())
     }
 
     fn local_repo_jar_path(&self, project: &Path, dep: &DependencySpec) -> PathBuf {
         let mut path = project.join(".jv/repository");
         path.push(dep.group_path());
-        path.push(&dep.artifact);
-        path.push(&dep.version);
+        path.push(dep.artifact);
+        path.push(dep.version);
         path.join(dep.jar_name())
     }
 
@@ -632,7 +632,7 @@ impl TestEnvironment {
         for dep in dependencies {
             let mut path = m2_repo.clone();
             path.push(dep.group_path());
-            path.push(&dep.artifact);
+            path.push(dep.artifact);
             if path.exists() {
                 anyhow::bail!(
                     "Mavenローカルリポジトリに {} が生成されています ({})",
@@ -923,16 +923,14 @@ exit 0
     fs::write(&log_path, "")
         .with_context(|| format!("{} の初期化に失敗しました", log_path.display()))?;
 
-    let env_pairs = vec![
-        (
+    let env_pairs = [(
             OsString::from("JVPM_MAVEN_BIN"),
             script_path.as_os_str().to_os_string(),
         ),
         (
             OsString::from("JVPM_MAVEN_LOG"),
             log_path.as_os_str().to_os_string(),
-        ),
-    ];
+        )];
     let env_refs: Vec<(&OsStr, &OsStr)> = env_pairs
         .iter()
         .map(|(key, value)| (key.as_os_str(), value.as_os_str()))

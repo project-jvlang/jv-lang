@@ -1339,7 +1339,7 @@ fn apply_type_facts_records_nested_metadata() {
         panic!("expected inner class");
     };
     assert_eq!(
-        type_parameters.get(0).and_then(|param| param.kind.clone()),
+        type_parameters.first().and_then(|param| param.kind.clone()),
         Some(Kind::Star)
     );
 
@@ -1525,8 +1525,8 @@ fn apply_type_facts_sets_sequence_specialization_hint() {
     let generics = scheme.generics();
     let mut primitive_bound_present = false;
     for type_id in generics {
-        if let Some(bounds) = scheme.bounds_for(*type_id) {
-            if bounds
+        if let Some(bounds) = scheme.bounds_for(*type_id)
+            && bounds
                 .constraints()
                 .iter()
                 .any(|constraint| matches!(constraint.predicate, BoundPredicate::Primitive(_)))
@@ -1534,7 +1534,6 @@ fn apply_type_facts_sets_sequence_specialization_hint() {
                 primitive_bound_present = true;
                 break;
             }
-        }
     }
     assert!(
         primitive_bound_present,

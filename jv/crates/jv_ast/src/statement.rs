@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 
 /// Origin of a `val` binding indicating how the declaration was introduced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ValBindingOrigin {
     /// Declaration explicitly used the `val` keyword.
+    #[default]
     ExplicitKeyword,
     /// Declaration was inferred without a type annotation.
     Implicit,
@@ -17,11 +19,6 @@ pub enum ValBindingOrigin {
     ImplicitTyped,
 }
 
-impl Default for ValBindingOrigin {
-    fn default() -> Self {
-        ValBindingOrigin::ExplicitKeyword
-    }
-}
 
 /// Class/interface property
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -87,6 +84,7 @@ pub struct NumericRangeLoop {
 
 /// Loop strategy describing how the iterable expression should be interpreted.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum LoopStrategy {
     NumericRange(NumericRangeLoop),
     Iterable,
@@ -218,6 +216,7 @@ pub struct UnitConversionBlock {
 
 /// 単位定義ブロックに格納されるメンバー列挙体。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum UnitTypeMember {
     Dependency(UnitDependency),
     Conversion(UnitConversionBlock),
@@ -242,6 +241,7 @@ pub struct UnitTypeDefinition {
 
 /// Statements in jv language
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum Statement {
     // Comments
     Comment(CommentStatement),

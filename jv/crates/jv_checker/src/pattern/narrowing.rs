@@ -103,8 +103,5 @@ fn fallback_span(
     else_expr
         .and_then(expression_span)
         .cloned()
-        .or_else(|| match implicit_end {
-            Some(ImplicitWhenEnd::Unit { span }) => Some(span.clone()),
-            None => None,
-        })
+        .or_else(|| implicit_end.as_ref().map(|ImplicitWhenEnd::Unit { span }| span.clone()))
 }

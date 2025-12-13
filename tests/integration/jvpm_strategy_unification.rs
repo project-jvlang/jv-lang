@@ -519,11 +519,10 @@ fn collect_relative_jars(root: &Path) -> Result<Vec<String>> {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if path.extension().and_then(|ext| ext.to_str()) == Some("jar") {
-                if let Ok(relative) = path.strip_prefix(root) {
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("jar")
+                && let Ok(relative) = path.strip_prefix(root) {
                     entries.push(relative.to_string_lossy().replace('\\', "/"));
                 }
-            }
         }
     }
     entries.sort();

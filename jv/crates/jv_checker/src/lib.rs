@@ -168,7 +168,7 @@ impl WhenBranchNullability {
                     .on_match()
                     .iter()
                     .find(|binding| binding.variable == subject)
-                    .map(|binding| (*arm_id as usize, to_nullability_flag(binding.nullability)))
+                    .map(|binding| ((*arm_id), to_nullability_flag(binding.nullability)))
             })
             .collect();
         branch_flags.sort_by_key(|(index, _)| *index);
@@ -182,17 +182,14 @@ impl WhenBranchNullability {
             }
         }
 
-        if let Some(snapshot) = facts.fallback_narrowing() {
-            if let Some(binding) = snapshot
+        if let Some(snapshot) = facts.fallback_narrowing()
+            && let Some(binding) = snapshot
                 .on_match()
                 .iter()
                 .find(|binding| binding.variable == subject)
-            {
-                if let Some(fallback) = self.fallback_nullability.as_mut() {
+                && let Some(fallback) = self.fallback_nullability.as_mut() {
                     *fallback = to_nullability_flag(binding.nullability);
                 }
-            }
-        }
     }
 }
 
@@ -453,8 +450,6 @@ impl TypeChecker {
         self.engine.telemetry()
     }
 
-    /// 型推論と整合性検証を実行する。
-
     pub fn normalized_program(&self) -> Option<&Program> {
         self.normalized_program.as_ref()
     }
@@ -666,10 +661,10 @@ impl TypeChecker {
 
     /// Check for forbidden Java syntax or patterns.
     pub fn check_forbidden_syntax(&self, _program: &Program) -> Vec<String> {
-        let violations = Vec::new();
+        
         // This would check for patterns that shouldn't appear in jv code
         // For example: raw Java generics syntax, null checks without ?. operator, etc.
-        violations
+        Vec::new()
     }
 
     fn record_pattern_cache_metrics(&mut self, metrics: PatternCacheMetrics) {

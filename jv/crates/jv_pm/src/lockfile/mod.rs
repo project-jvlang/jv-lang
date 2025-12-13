@@ -133,18 +133,15 @@ pub struct LockedDependency {
 /// パッケージが取得されたソース。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum LockedSource {
     Manifest,
     Lockfile,
     Registry,
+    #[default]
     Unknown,
 }
 
-impl Default for LockedSource {
-    fn default() -> Self {
-        LockedSource::Unknown
-    }
-}
 
 impl From<&ResolutionSource> for LockedSource {
     fn from(value: &ResolutionSource) -> Self {
@@ -208,6 +205,7 @@ pub struct DependencyRequirementChange {
 
 /// マニフェストとLockfileの差分。
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub struct LockfileDiff {
     pub hash_mismatch: bool,
     pub previous_hash: String,
@@ -218,19 +216,6 @@ pub struct LockfileDiff {
     pub updated_dependencies: Vec<DependencyRequirementChange>,
 }
 
-impl Default for LockfileDiff {
-    fn default() -> Self {
-        Self {
-            hash_mismatch: false,
-            previous_hash: String::new(),
-            current_hash: String::new(),
-            version_changed: None,
-            added_dependencies: Vec::new(),
-            removed_dependencies: Vec::new(),
-            updated_dependencies: Vec::new(),
-        }
-    }
-}
 
 impl LockfileDiff {
     pub fn is_empty(&self) -> bool {
@@ -456,11 +441,10 @@ impl LockfileService {
         Self::validate(lockfile)?;
         let toml = toml::to_string_pretty(lockfile)?;
         let path = path.as_ref();
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty() {
                 fs::create_dir_all(parent)?;
             }
-        }
         fs::write(path, toml)?;
         Ok(())
     }

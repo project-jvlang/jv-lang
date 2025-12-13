@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use md5;
 use sha1::Sha1;
 use std::error::Error as StdError;
@@ -207,10 +209,10 @@ impl RetryConfig {
 
     fn delay_for_attempt(&self, attempt: u32) -> Duration {
         let exp = attempt.saturating_sub(1).min(20);
-        let base_ms = self.base_delay.as_millis() as u128;
+        let base_ms = self.base_delay.as_millis();
         let multiplier = 1u128 << exp;
         let delay_ms = base_ms.saturating_mul(multiplier);
-        let capped_ms = delay_ms.min(self.max_delay.as_millis() as u128);
+        let capped_ms = delay_ms.min(self.max_delay.as_millis());
         Duration::from_millis(capped_ms as u64)
     }
 }

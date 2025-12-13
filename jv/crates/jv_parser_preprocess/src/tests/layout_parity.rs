@@ -91,7 +91,7 @@ fn comments_inside_call_sequences_are_preserved() {
 
     let literal_two = tokens
         .iter()
-        .find(|token| token.lexeme == "2")
+        .find(|token| token.lexeme.as_ref() == "2")
         .expect("リテラル'2'トークンが存在すること");
 
     assert!(

@@ -36,8 +36,8 @@ impl StatementStrategy for ImportStrategy {
 
         // alias: import path as Alias
         if !has_wildcard {
-            if let Some(tok) = ctx.peek(0) {
-                if tok.kind == TokenKind::Identifier && tok.lexeme.eq_ignore_ascii_case("as") {
+            if let Some(tok) = ctx.peek(0)
+                && tok.kind == TokenKind::Identifier && tok.lexeme.eq_ignore_ascii_case("as") {
                     ctx.start_node(SyntaxKind::ImportClause);
                     ctx.bump(); // as
                     ctx.start_node(SyntaxKind::ImportAlias);
@@ -49,9 +49,8 @@ impl StatementStrategy for ImportStrategy {
                     ctx.finish_node(); // ImportAlias
                     ctx.finish_node(); // ImportClause
                 }
-            }
-        } else if let Some(tok) = ctx.peek(0) {
-            if tok.kind == TokenKind::Identifier && tok.lexeme.eq_ignore_ascii_case("as") {
+        } else if let Some(tok) = ctx.peek(0)
+            && tok.kind == TokenKind::Identifier && tok.lexeme.eq_ignore_ascii_case("as") {
                 ctx.error("ワイルドカード import に別名は付けられません");
                 ctx.start_node(SyntaxKind::ImportClause);
                 ctx.start_node(SyntaxKind::ImportAlias);
@@ -59,7 +58,6 @@ impl StatementStrategy for ImportStrategy {
                 ctx.finish_node(); // ImportAlias
                 ctx.finish_node(); // ImportClause
             }
-        }
         ctx.finish_node();
         true
     }

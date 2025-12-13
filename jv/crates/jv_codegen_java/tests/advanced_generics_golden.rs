@@ -59,8 +59,7 @@ fn reflective_metadata_matches_golden_java25() {
         .expect("java generation succeeds");
 
     let actual = unit
-        .type_declarations
-        .get(0)
+        .type_declarations.first()
         .expect("generated class present")
         .trim();
     let expected = include_str!("golden/expected/advanced_generics_metadata__java25.java").trim();

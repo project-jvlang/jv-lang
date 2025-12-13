@@ -1043,7 +1043,7 @@ impl BindingResolver {
             let binding_name = if let Some(alias) = alias {
                 alias.clone()
             } else {
-                path.split('.').last().unwrap_or("").to_string()
+                path.split('.').next_back().unwrap_or("").to_string()
             };
 
             if binding_name.is_empty() {

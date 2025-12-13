@@ -57,6 +57,7 @@ pub fn attach_logger_fields(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn process_declaration(
     stmt: &mut IrStatement,
     package: Option<&str>,
@@ -78,7 +79,15 @@ fn process_declaration(
         } => {
             path.push(name.clone());
             process_class(
-                package, path, fields, methods, span, metadata, spec_index, &framework, used_ids,
+                package,
+                path.as_slice(),
+                fields,
+                methods,
+                span,
+                metadata,
+                spec_index,
+                &framework,
+                used_ids,
                 duplicates,
             )?;
             for nested in nested_classes.iter_mut() {
@@ -106,9 +115,10 @@ fn process_declaration(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::ptr_arg)]
 fn process_class(
     package: Option<&str>,
-    path: &mut Vec<String>,
+    path: &[String],
     fields: &mut Vec<IrStatement>,
     methods: &mut Vec<IrStatement>,
     class_span: &Span,
@@ -120,7 +130,7 @@ fn process_class(
 ) -> Result<(), TransformError> {
     let class_id = ClassId {
         package: package.map(|pkg| pkg.to_string()),
-        local_name: path.clone(),
+        local_name: path.to_vec(),
     };
 
     let mut collector = LoggerPlanCollector::new(class_id.clone(), used_ids);
@@ -197,10 +207,12 @@ fn build_logger_field_statement(
     span: &Span,
 ) -> Result<IrStatement, TransformError> {
     let (java_type, initializer) = build_logger_initializer(framework, class_id, span)?;
-    let mut modifiers = IrModifiers::default();
-    modifiers.visibility = IrVisibility::Private;
-    modifiers.is_static = true;
-    modifiers.is_final = true;
+    let modifiers = IrModifiers {
+        visibility: IrVisibility::Private,
+        is_static: true,
+        is_final: true,
+        ..IrModifiers::default()
+    };
 
     Ok(IrStatement::FieldDeclaration {
         name: field_name.to_string(),
@@ -599,10 +611,8 @@ impl<'a> LoggerPlanCollector<'a> {
                 initializer,
                 ..
             } => {
-                for dim in dimensions {
-                    if let Some(expr) = dim {
-                        self.visit_expression(expr);
-                    }
+                for expr in dimensions.iter_mut().flatten() {
+                    self.visit_expression(expr);
                 }
                 if let Some(values) = initializer {
                     for value in values {
@@ -697,13 +707,12 @@ impl<'a> LoggerPlanCollector<'a> {
         if self.canonical.is_none() {
             self.canonical = Some(plan.logger_field);
             self.primary_span = Some(plan.span.clone());
-        } else if let Some(canonical) = self.canonical {
-            if plan.logger_field != canonical {
+        } else if let Some(canonical) = self.canonical
+            && plan.logger_field != canonical {
                 self.duplicates.push(plan.logger_field);
                 self.used_ids.remove(&plan.logger_field);
                 plan.logger_field = canonical;
             }
-        }
 
         plan.class_id = Some(self.class_id.clone());
         self.used_ids.insert(plan.logger_field);
@@ -903,10 +912,8 @@ fn collect_plan_ids_from_expression(expr: &IrExpression, used: &mut HashSet<Logg
             initializer,
             ..
         } => {
-            for dim in dimensions {
-                if let Some(expr) = dim {
-                    collect_plan_ids_from_expression(expr, used);
-                }
+            for expr in dimensions.iter().flatten() {
+                collect_plan_ids_from_expression(expr, used);
             }
             if let Some(values) = initializer {
                 for value in values {

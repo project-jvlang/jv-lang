@@ -631,6 +631,7 @@ impl JavaCodeGenerator {
         builder.push_line(" */");
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn render_kind(&self, kind: &Kind) -> String {
         match kind {
             Kind::Star => "*".to_string(),

@@ -136,11 +136,7 @@ impl NullabilityAnalyzer {
             }
             Statement::Expression { expr, .. } => Some(self.evaluate_expression(expr)),
             Statement::Return { value, .. } => {
-                if let Some(expr) = value {
-                    Some(self.evaluate_expression(expr))
-                } else {
-                    None
-                }
+                value.as_ref().map(|expr| self.evaluate_expression(expr))
             }
             Statement::Throw { expr, .. } => {
                 self.evaluate_expression(expr);

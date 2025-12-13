@@ -42,13 +42,13 @@ impl ExtensionRegistry {
 
     /// Registers an extension function for the specified receiver type.
     pub fn register(&mut self, receiver: &'static str, method: &'static str, scheme: TypeScheme) {
-        let entry_vec = self.entries.entry(receiver).or_insert_with(Vec::new);
+        let entry_vec = self.entries.entry(receiver).or_default();
         entry_vec.push(ExtensionEntry { method, scheme });
         let entry_index = entry_vec.len().saturating_sub(1);
 
         self.method_index
             .entry(method)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(MethodCandidate {
                 receiver,
                 entry_index,

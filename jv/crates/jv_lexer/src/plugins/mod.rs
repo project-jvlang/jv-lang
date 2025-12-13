@@ -5,7 +5,7 @@ mod legacy_loop;
 use legacy_loop::LegacyLoopPlugin;
 
 pub fn load_static_plugins() -> Vec<Box<dyn TokenPlugin>> {
-    vec![Box::new(LegacyLoopPlugin::default())]
+    vec![Box::new(LegacyLoopPlugin)]
 }
 
 #[cfg(test)]

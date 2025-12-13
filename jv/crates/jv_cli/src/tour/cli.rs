@@ -132,6 +132,12 @@ pub struct TourCli<P: JdkProbe = super::environment::BuildSystemProbe> {
     progress: RefCell<ProgressTracker>,
 }
 
+impl Default for TourCli {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TourCli {
     /// Create a CLI experience using the default environment probe.
     pub fn new() -> Self {
@@ -556,7 +562,7 @@ fn menu_entries() -> Vec<MenuEntry> {
     let mut entries: Vec<MenuEntry> = SECTION_MENU_KEYS
         .iter()
         .map(|(section, key)| MenuEntry {
-            key: *key,
+            key,
             title: section.title(),
             description: section.description(),
             action: MenuAction::Section(*section),

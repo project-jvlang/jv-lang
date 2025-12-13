@@ -73,11 +73,10 @@ impl<'a> PomGenerator<'a> {
             self.write_simple(&mut writer, "description", description)?;
         }
 
-        if let Some(url) = self.manifest.maven.url.as_deref() {
-            if !url.trim().is_empty() {
+        if let Some(url) = self.manifest.maven.url.as_deref()
+            && !url.trim().is_empty() {
                 self.write_simple(&mut writer, "url", url)?;
             }
-        }
 
         if !dependencies.is_empty() {
             writer.write_event(Event::Start(BytesStart::new("dependencies")))?;
@@ -99,11 +98,10 @@ impl<'a> PomGenerator<'a> {
             for repo in self.repositories {
                 writer.write_event(Event::Start(BytesStart::new("repository")))?;
                 self.write_simple(&mut writer, "id", &repo.id)?;
-                if let Some(name) = repo.name.as_deref() {
-                    if !name.trim().is_empty() {
+                if let Some(name) = repo.name.as_deref()
+                    && !name.trim().is_empty() {
                         self.write_simple(&mut writer, "name", name)?;
                     }
-                }
                 self.write_simple(&mut writer, "url", &repo.url)?;
 
                 writer.write_event(Event::Start(BytesStart::new("releases")))?;
@@ -247,17 +245,15 @@ impl<'a> PomGenerator<'a> {
         resolved: Option<&ResolvedDependency>,
         lock_versions: &Option<HashMap<&str, &str>>,
     ) -> Result<String, PomGenerationError> {
-        if let Some(map) = lock_versions.as_ref() {
-            if let Some(version) = map.get(dependency_name) {
+        if let Some(map) = lock_versions.as_ref()
+            && let Some(version) = map.get(dependency_name) {
                 return Ok((*version).to_string());
             }
-        }
 
-        if let Some(resolved) = resolved {
-            if let VersionDecision::Exact(value) = &resolved.decision {
+        if let Some(resolved) = resolved
+            && let VersionDecision::Exact(value) = &resolved.decision {
                 return Ok(value.clone());
             }
-        }
 
         let trimmed = requirement.trim();
         if trimmed.is_empty() {

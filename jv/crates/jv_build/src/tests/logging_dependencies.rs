@@ -6,9 +6,14 @@ const OTEL_INSTRUMENTATION_VERSION: &str = "1.32.0-alpha";
 
 #[test]
 fn otel_disabled_produces_no_dependencies() {
-    let mut config = LoggingConfig::default();
-    config.framework = LoggingFramework::Slf4j;
-    config.opentelemetry.enabled = false;
+    let config = LoggingConfig {
+        framework: LoggingFramework::Slf4j,
+        opentelemetry: OpenTelemetryConfig {
+            enabled: false,
+            ..OpenTelemetryConfig::default()
+        },
+        ..LoggingConfig::default()
+    };
 
     let dependencies = collect_opentelemetry_dependencies(&config);
     assert!(dependencies.is_empty());
@@ -102,15 +107,16 @@ fn custom_framework_uses_base_dependencies_only() {
 }
 
 fn enabled_config(framework: LoggingFramework) -> LoggingConfig {
-    let mut config = LoggingConfig::default();
-    config.framework = framework;
-    config.opentelemetry = OpenTelemetryConfig {
-        enabled: true,
-        endpoint: Some("https://collector.example.com:4317".to_string()),
-        protocol: OtelProtocol::Grpc,
-        trace_context: true,
-        resource: Default::default(),
-        attributes: Default::default(),
-    };
-    config
+    LoggingConfig {
+        framework,
+        opentelemetry: OpenTelemetryConfig {
+            enabled: true,
+            endpoint: Some("https://collector.example.com:4317".to_string()),
+            protocol: OtelProtocol::Grpc,
+            trace_context: true,
+            resource: Default::default(),
+            attributes: Default::default(),
+        },
+        ..LoggingConfig::default()
+    }
 }

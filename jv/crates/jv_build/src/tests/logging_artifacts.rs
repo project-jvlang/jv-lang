@@ -2,25 +2,26 @@ use crate::artifacts::logging::generate_logging_artifacts;
 use jv_pm::{LogLevel, LoggingConfig, LoggingFramework, OpenTelemetryConfig, OtelProtocol};
 
 fn base_logging_config() -> LoggingConfig {
-    let mut config = LoggingConfig::default();
-    config.log_level = LogLevel::Debug;
-    config.default_level = LogLevel::Info;
-    config.opentelemetry = OpenTelemetryConfig {
-        enabled: true,
-        endpoint: Some("https://collector.example.com:4317".to_string()),
-        protocol: OtelProtocol::Grpc,
-        trace_context: true,
-        resource: [("service.name".to_string(), "order-service".to_string())]
+    LoggingConfig {
+        log_level: LogLevel::Debug,
+        default_level: LogLevel::Info,
+        opentelemetry: OpenTelemetryConfig {
+            enabled: true,
+            endpoint: Some("https://collector.example.com:4317".to_string()),
+            protocol: OtelProtocol::Grpc,
+            trace_context: true,
+            resource: [("service.name".to_string(), "order-service".to_string())]
+                .into_iter()
+                .collect(),
+            attributes: [
+                ("deployment.environment".to_string(), "staging".to_string()),
+                ("team".to_string(), "observability".to_string()),
+            ]
             .into_iter()
             .collect(),
-        attributes: [
-            ("deployment.environment".to_string(), "staging".to_string()),
-            ("team".to_string(), "observability".to_string()),
-        ]
-        .into_iter()
-        .collect(),
-    };
-    config
+        },
+        ..LoggingConfig::default()
+    }
 }
 
 #[test]
@@ -62,9 +63,14 @@ fn jul_template_snapshot() {
 
 #[test]
 fn disabled_opentelemetry_produces_no_artifacts() {
-    let mut config = LoggingConfig::default();
-    config.framework = LoggingFramework::Slf4j;
-    config.opentelemetry.enabled = false;
+    let config = LoggingConfig {
+        framework: LoggingFramework::Slf4j,
+        opentelemetry: OpenTelemetryConfig {
+            enabled: false,
+            ..OpenTelemetryConfig::default()
+        },
+        ..LoggingConfig::default()
+    };
 
     let artifacts = generate_logging_artifacts(&config);
     assert!(artifacts.is_empty());

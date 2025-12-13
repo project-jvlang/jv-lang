@@ -587,6 +587,7 @@ impl MavenJarDownloader {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn handle_join_result(
     joined: Result<
         Result<(ArtifactCoordinates, ChecksumVerifiedJar), RegistryError>,
@@ -622,13 +623,14 @@ async fn download_single(
             .await
         {
             Ok(download) => return Ok((coords.clone(), download)),
-            Err(error) => match error {
-                RegistryError::ArtifactNotFound { resource, .. }
-                    if matches!(resource, ArtifactResource::Jar) =>
-                {
-                    last_error = Some(error);
-                    continue;
-                }
+                Err(error) => match error {
+                    RegistryError::ArtifactNotFound {
+                        resource: ArtifactResource::Jar,
+                        ..
+                    } => {
+                        last_error = Some(error);
+                        continue;
+                    }
                 RegistryError::PackageNotFound { .. } | RegistryError::ChecksumMissing { .. } => {
                     last_error = Some(error);
                     continue;
@@ -907,10 +909,7 @@ impl ResolverStrategy for MavenCompat39Strategy {
         let mut download_plan: Vec<ArtifactCoordinates> = Vec::new();
         let mut seen_download = HashSet::new();
         // managed_artifacts (dependencyManagement相当) を download_plan に強制的に含める
-        let managed: Vec<ArtifactCoordinates> = crate::wrapper::plugins::managed_artifacts()
-            .iter()
-            .map(|coord| coord.clone())
-            .collect();
+        let managed: Vec<ArtifactCoordinates> = crate::wrapper::plugins::managed_artifacts().to_vec();
 
         // Deduplicate by full GAV - Maven keeps different versions from different contexts
         for coords in base_closure.iter() {
@@ -1094,7 +1093,7 @@ pub fn hydrate_resolved_dependencies_with_jars(
         ),
     };
     let runtime_ref = runtime
-        .or_else(|| runtime_guard.as_ref())
+        .or(runtime_guard.as_ref())
         .expect("runtime to exist");
 
     let targets = downloader.artifact_targets(&coordinates);
@@ -1485,7 +1484,8 @@ mod pom_resolver {
         let mut aggregated = Vec::new();
         let mut seen = HashSet::new();
         for root in roots {
-            let closure = resolver.resolve_closure_with_options(&[root.clone()], options)?;
+            let closure =
+                resolver.resolve_closure_with_options(std::slice::from_ref(root), options)?;
             append_artifacts(&mut aggregated, &closure, &mut seen);
         }
         Ok(aggregated)
@@ -1659,8 +1659,10 @@ mod pom_resolver {
                 HashMap::new();
             let mut seen_versions: HashSet<(String, String, Option<String>, String)> =
                 HashSet::new();
-            let mut queue: VecDeque<(ArtifactCoordinates, Vec<(String, String)>, usize)> =
-                VecDeque::new();
+            type ExclusionPair = (String, String);
+            type PendingClosureItem = (ArtifactCoordinates, Vec<ExclusionPair>, usize);
+
+            let mut queue: VecDeque<PendingClosureItem> = VecDeque::new();
             for root in roots {
                 let key = (
                     root.group_id.clone(),
@@ -1671,11 +1673,10 @@ mod pom_resolver {
                     ordered.insert(root.clone());
                     queue.push_back((root.clone(), Vec::new(), 0));
                 } else {
-                    if let Some((existing_version, existing_depth)) = ga_versions.get(&key) {
-                        if existing_version == &root.version && *existing_depth == 0 {
+                    if let Some((existing_version, existing_depth)) = ga_versions.get(&key)
+                        && existing_version == &root.version && *existing_depth == 0 {
                             continue;
                         }
-                    }
                     ga_versions.insert(key.clone(), (root.version.clone(), 0));
                     ordered.insert(root.clone());
                     queue.push_back((root.clone(), Vec::new(), 0));
@@ -1699,11 +1700,10 @@ mod pom_resolver {
                     if !seen_versions.insert(version_key) {
                         continue;
                     }
-                } else if let Some((best_version, best_depth)) = ga_versions.get(&key) {
-                    if *best_version != coords.version || *best_depth != current_depth {
+                } else if let Some((best_version, best_depth)) = ga_versions.get(&key)
+                    && (*best_version != coords.version || *best_depth != current_depth) {
                         continue;
                     }
-                }
                 let effective =
                     self.load_effective_pom(coords.clone(), &mut memo, &mut HashSet::new())?;
 
@@ -1739,11 +1739,10 @@ mod pom_resolver {
                     pom_log_emitted += 1;
                 }
 
-                if let Some(limit) = options.max_depth {
-                    if current_depth >= limit {
+                if let Some(limit) = options.max_depth
+                    && current_depth >= limit {
                         continue;
                     }
-                }
                 if options.skip_transitive && current_depth > 0 {
                     continue;
                 }
@@ -1806,11 +1805,10 @@ mod pom_resolver {
                         .dependency_management
                         .get(&(coords.group_id.clone(), coords.artifact_id.clone()))
                         .map(|managed| managed.version.clone());
-                    if let Some(version) = managed_version.as_ref() {
-                        if coords.version != *version {
+                    if let Some(version) = managed_version.as_ref()
+                        && coords.version != *version {
                             coords.version = version.clone();
                         }
-                    }
 
                     if allow_multiple_versions
                         || matches!(conflict_strategy, ConflictStrategy::KeepAll)
@@ -1843,17 +1841,19 @@ mod pom_resolver {
                             edge_log_emitted += 1;
                         }
                     } else {
-                        let mut should_replace = matches!(ga_versions.get(&key), None);
-                        if let Some((existing_version, existing_depth)) = ga_versions.get(&key) {
+                        let existing = ga_versions.get(&key);
+                        let mut should_replace = existing.is_none();
+                        if let Some((existing_version, existing_depth)) = existing {
                             let managed_override = managed_version
                                 .as_ref()
                                 .map(|managed| managed != existing_version)
                                 .unwrap_or(false);
                             match conflict_strategy {
                                 ConflictStrategy::Nearest => {
-                                    if managed_override && candidate_depth <= *existing_depth {
-                                        should_replace = true;
-                                    } else if candidate_depth < *existing_depth {
+                                    if candidate_depth < *existing_depth
+                                        || (managed_override
+                                            && candidate_depth == *existing_depth)
+                                    {
                                         should_replace = true;
                                     } else if candidate_depth == *existing_depth {
                                         if managed_override {
@@ -1866,9 +1866,10 @@ mod pom_resolver {
                                     }
                                 }
                                 ConflictStrategy::Farthest => {
-                                    if managed_override && candidate_depth >= *existing_depth {
-                                        should_replace = true;
-                                    } else if candidate_depth > *existing_depth {
+                                    if candidate_depth > *existing_depth
+                                        || (managed_override
+                                            && candidate_depth == *existing_depth)
+                                    {
                                         should_replace = true;
                                     } else if candidate_depth == *existing_depth {
                                         if managed_override {
@@ -1883,11 +1884,10 @@ mod pom_resolver {
                                 ConflictStrategy::Newest => {
                                     let cmp =
                                         compare_maven_versions(&coords.version, existing_version);
-                                    if managed_override {
-                                        should_replace = true;
-                                    } else if cmp.is_gt() {
-                                        should_replace = true;
-                                    } else if cmp.is_eq() && candidate_depth < *existing_depth {
+                                    if managed_override
+                                        || cmp.is_gt()
+                                        || (cmp.is_eq() && candidate_depth < *existing_depth)
+                                    {
                                         should_replace = true;
                                     } else {
                                         continue;
@@ -1896,11 +1896,10 @@ mod pom_resolver {
                                 ConflictStrategy::Oldest => {
                                     let cmp =
                                         compare_maven_versions(&coords.version, existing_version);
-                                    if managed_override {
-                                        should_replace = true;
-                                    } else if cmp.is_lt() {
-                                        should_replace = true;
-                                    } else if cmp.is_eq() && candidate_depth < *existing_depth {
+                                    if managed_override
+                                        || cmp.is_lt()
+                                        || (cmp.is_eq() && candidate_depth < *existing_depth)
+                                    {
                                         should_replace = true;
                                     } else {
                                         continue;
@@ -2561,7 +2560,7 @@ mod pom_resolver {
             let mut properties = parent
                 .map(|parent| parent.properties.clone())
                 .unwrap_or_default();
-            properties.extend(model.properties.into_iter());
+            properties.extend(model.properties);
 
             properties.insert("project.groupId".to_string(), coords.group_id.clone());
             properties.insert("project.artifactId".to_string(), coords.artifact_id.clone());

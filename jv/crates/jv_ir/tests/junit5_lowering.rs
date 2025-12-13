@@ -12,14 +12,14 @@ fn lower_program(source: &str) -> Result<IrProgram, TransformError> {
     transform_program_with_context(program, &mut context)
 }
 
-fn extract_class<'a>(program: &'a IrProgram) -> &'a IrStatement {
+fn extract_class(program: &IrProgram) -> &IrStatement {
     program
         .type_declarations
         .first()
         .expect("expected at least one type declaration")
 }
 
-fn collect_methods<'a>(class: &'a IrStatement) -> Vec<&'a IrStatement> {
+fn collect_methods(class: &IrStatement) -> Vec<&IrStatement> {
     match class {
         IrStatement::ClassDeclaration { methods, .. } => methods.iter().collect(),
         other => panic!("expected class declaration, got {other:?}"),

@@ -322,17 +322,14 @@ pub enum PrimitiveTypeName {
 
 /// Origin of a primitive reference in source code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum PrimitiveTypeSource {
+    #[default]
     PrimitiveKeyword,
     BoxedIdentifier,
     QualifiedBoxedIdentifier,
 }
 
-impl Default for PrimitiveTypeSource {
-    fn default() -> Self {
-        PrimitiveTypeSource::PrimitiveKeyword
-    }
-}
 
 /// Reference to a primitive family captured from source.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

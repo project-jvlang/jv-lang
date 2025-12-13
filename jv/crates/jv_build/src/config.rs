@@ -160,16 +160,13 @@ impl Default for SampleConfig {
 
 /// Network access policy for @Sample data sources.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum NetworkPolicy {
     Allow,
+    #[default]
     Deny,
 }
 
-impl Default for NetworkPolicy {
-    fn default() -> Self {
-        NetworkPolicy::Deny
-    }
-}
 
 /// Protocol classification for @Sample sources.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -375,8 +372,10 @@ mod tests {
 
     #[test]
     fn sample_config_validates_cli_override() {
-        let mut config = SampleConfig::default();
-        config.network_policy = NetworkPolicy::Allow;
+        let mut config = SampleConfig {
+            network_policy: NetworkPolicy::Allow,
+            ..SampleConfig::default()
+        };
 
         let temp_dir = std::env::temp_dir();
         let override_path = temp_dir.join(format!(
@@ -399,8 +398,10 @@ mod tests {
 
     #[test]
     fn sample_config_reports_missing_cli() {
-        let mut config = SampleConfig::default();
-        config.network_policy = NetworkPolicy::Allow;
+        let mut config = SampleConfig {
+            network_policy: NetworkPolicy::Allow,
+            ..SampleConfig::default()
+        };
         config.cli.aws.override_path = Some(PathBuf::from("/non/existent/aws"));
 
         let error = config

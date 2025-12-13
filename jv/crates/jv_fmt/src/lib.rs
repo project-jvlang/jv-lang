@@ -38,7 +38,7 @@ impl JavaFormatter {
     pub fn format_java_code(&self, source: &str) -> Result<String, FormatError> {
         let lines: Vec<&str> = source.lines().collect();
         let mut formatted_lines = Vec::new();
-        let mut indent_level = 0;
+        let mut indent_level: usize = 0;
         let mut in_string = false;
         let mut escape_next = false;
 
@@ -53,9 +53,7 @@ impl JavaFormatter {
 
             // Handle closing braces - decrease indent before the line
             if trimmed.starts_with('}') && !in_string {
-                if indent_level > 0 {
-                    indent_level -= 1;
-                }
+                indent_level = indent_level.saturating_sub(1);
             }
 
             // Apply indentation
@@ -91,8 +89,6 @@ impl JavaFormatter {
     pub fn format_expression(&self, expr: &str) -> String {
         expr.trim()
             .replace("  ", " ") // Remove double spaces
-            .replace(" =", " =") // Ensure space around equals
-            .replace("= ", "= ") // Ensure space around equals
             .replace("(", "( ") // Space after opening paren
             .replace(")", " )") // Space before closing paren
             .replace("( ", "(") // Remove space after opening paren

@@ -41,6 +41,12 @@ pub struct PatternMatchService {
     catalog: PatternTypeCatalog,
 }
 
+impl Default for PatternMatchService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PatternMatchService {
     pub fn new() -> Self {
         Self {
@@ -167,11 +173,10 @@ impl PatternFactsCache {
     }
 
     fn insert(&mut self, key: PatternCacheKey, facts: PatternMatchFacts) {
-        if self.entries.len() >= self.capacity {
-            if let Some(first_key) = self.entries.keys().next().cloned() {
+        if self.entries.len() >= self.capacity
+            && let Some(first_key) = self.entries.keys().next().cloned() {
                 self.entries.remove(&first_key);
             }
-        }
         self.entries.insert(key, facts);
     }
 

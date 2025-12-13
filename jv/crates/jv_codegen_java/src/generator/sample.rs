@@ -3,7 +3,7 @@ use csv::StringRecord;
 use jv_ast::Span;
 use jv_ir::{DataFormat, PrimitiveType, SampleMode, SampleRecordDescriptor, Schema};
 use serde_json::{Map, Number, Value};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::io::Cursor;
 use std::str::FromStr;
 
@@ -913,7 +913,7 @@ impl JavaCodeGenerator {
         result
     }
 
-    fn unwrap_optional_java_type<'a>(java_type: &'a JavaType) -> (&'a JavaType, bool) {
+    fn unwrap_optional_java_type(java_type: &JavaType) -> (&JavaType, bool) {
         match java_type {
             JavaType::Reference { name, generic_args }
                 if name == "java.util.Optional" && generic_args.len() == 1 =>
@@ -924,7 +924,7 @@ impl JavaCodeGenerator {
         }
     }
 
-    fn list_element_type<'a>(java_type: &'a JavaType) -> Option<&'a JavaType> {
+    fn list_element_type(java_type: &JavaType) -> Option<&JavaType> {
         match java_type {
             JavaType::Reference { name, generic_args }
                 if name == "java.util.List" && generic_args.len() == 1 =>
@@ -956,13 +956,12 @@ impl JavaCodeGenerator {
         let (core_type, _) = Self::unwrap_optional_java_type(java_type);
 
         match (core_schema, core_type) {
-            (Schema::Object { fields, required }, JavaType::Reference { name, .. }) => {
+            (Schema::Object { fields, required: _ }, JavaType::Reference { name, .. }) => {
                 if !map.contains_key(name) {
                     map.insert(
                         name.clone(),
                         ObjectSchemaInfo {
                             fields: fields.clone(),
-                            required: required.clone(),
                         },
                     );
 
@@ -1067,7 +1066,6 @@ impl JavaCodeGenerator {
 #[derive(Clone)]
 struct ObjectSchemaInfo {
     fields: BTreeMap<String, Schema>,
-    required: BTreeSet<String>,
 }
 
 #[derive(Clone)]
@@ -2778,7 +2776,7 @@ impl<'a> LoadHelperGenerator<'a> {
     }
 }
 
-fn unwrap_schema_optional<'a>(schema: &'a Schema) -> (&'a Schema, bool) {
+fn unwrap_schema_optional(schema: &Schema) -> (&Schema, bool) {
     match schema {
         Schema::Optional(inner) => (inner, true),
         Schema::Union(variants) => {

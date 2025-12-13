@@ -41,6 +41,41 @@ impl<'ctx> BoundaryChecker<'ctx> {
     }
 }
 
+fn aggregate_states(outcome: &FlowAnalysisOutcome) -> HashMap<String, NullabilityKind> {
+    let mut aggregated = HashMap::new();
+
+    for snapshot in outcome.states.values() {
+        for (name, state) in snapshot.states.iter() {
+            aggregated
+                .entry(name.clone())
+                .and_modify(|existing: &mut NullabilityKind| {
+                    *existing = existing.join(*state);
+                })
+                .or_insert(*state);
+        }
+    }
+
+    aggregated
+}
+
+fn boundary_warning(symbol: &str, kind: BoundaryKind, state: NullabilityKind) -> CheckError {
+    let (kind_ja, kind_en) = match kind {
+        BoundaryKind::Jni => ("JNI", "JNI"),
+        BoundaryKind::Foreign => ("FFM", "FFM"),
+    };
+
+    let (state_ja, state_en) = match state {
+        NullabilityKind::Nullable => ("Nullable", "nullable"),
+        NullabilityKind::Platform => ("Platform", "platform"),
+        NullabilityKind::Unknown => ("Unknown", "unknown"),
+        NullabilityKind::NonNull => ("NonNull", "non-null"),
+    };
+
+    CheckError::NullSafetyError(format!(
+        "JV3006: {kind_ja} 境界 `{symbol}` の null 契約を確認できません ({state_ja})。境界で引数と戻り値を手動で安全に検証するか、安全ラッパーを導入してください。\nJV3006: Unable to verify the {kind_en} boundary `{symbol}` (observed {state_en} state). Add explicit null checks or wrap the boundary defensively."
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,39 +111,4 @@ mod tests {
                 .any(|warning| warning.to_string().contains("JV3006"))
         );
     }
-}
-
-fn aggregate_states(outcome: &FlowAnalysisOutcome) -> HashMap<String, NullabilityKind> {
-    let mut aggregated = HashMap::new();
-
-    for snapshot in outcome.states.values() {
-        for (name, state) in snapshot.states.iter() {
-            aggregated
-                .entry(name.clone())
-                .and_modify(|existing: &mut NullabilityKind| {
-                    *existing = existing.join(*state);
-                })
-                .or_insert(*state);
-        }
-    }
-
-    aggregated
-}
-
-fn boundary_warning(symbol: &str, kind: BoundaryKind, state: NullabilityKind) -> CheckError {
-    let (kind_ja, kind_en) = match kind {
-        BoundaryKind::Jni => ("JNI", "JNI"),
-        BoundaryKind::Foreign => ("FFM", "FFM"),
-    };
-
-    let (state_ja, state_en) = match state {
-        NullabilityKind::Nullable => ("Nullable", "nullable"),
-        NullabilityKind::Platform => ("Platform", "platform"),
-        NullabilityKind::Unknown => ("Unknown", "unknown"),
-        NullabilityKind::NonNull => ("NonNull", "non-null"),
-    };
-
-    CheckError::NullSafetyError(format!(
-        "JV3006: {kind_ja} 境界 `{symbol}` の null 契約を確認できません ({state_ja})。境界で引数と戻り値を手動で安全に検証するか、安全ラッパーを導入してください。\nJV3006: Unable to verify the {kind_en} boundary `{symbol}` (observed {state_en} state). Add explicit null checks or wrap the boundary defensively."
-    ))
 }

@@ -452,7 +452,7 @@ mod tests {
         let package = fqcn
             .rsplit_once('.')
             .map(|(pkg, _)| pkg.to_string())
-            .unwrap_or_else(|| "".to_string());
+            .unwrap_or_default();
 
         let mut type_entry = TypeEntry::new(
             fqcn.to_string(),

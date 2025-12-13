@@ -167,8 +167,8 @@ impl MethodRegistry {
 
         for call in &self.calls {
             let group_key = GroupKey::new(call.owner.clone(), call.method_name.clone());
-            if let Some(candidate_indices) = groups.get(&group_key) {
-                if let Some(idx) = self.select_candidate(candidate_indices, call) {
+            if let Some(candidate_indices) = groups.get(&group_key)
+                && let Some(idx) = self.select_candidate(candidate_indices, call) {
                     let decl = &self.declarations[idx];
                     let rename = MethodRename {
                         java_name: decl.final_java_name.clone(),
@@ -182,7 +182,6 @@ impl MethodRegistry {
                         .insert(SpanKey::from(&call.span), rename);
                     continue;
                 }
-            }
 
             let rename = MethodRename {
                 java_name: call.method_name.clone(),
@@ -574,10 +573,8 @@ fn apply_expression(expr: &mut IrExpression, resolution: &MethodResolution) {
             initializer,
             ..
         } => {
-            for dimension in dimensions {
-                if let Some(expr) = dimension {
-                    apply_expression(expr, resolution);
-                }
+            for expr in dimensions.iter_mut().flatten() {
+                apply_expression(expr, resolution);
             }
             if let Some(items) = initializer {
                 for item in items {
@@ -711,7 +708,7 @@ fn feed_type(hasher: &mut Sha256, java_type: &JavaType) {
         JavaType::Reference { name, generic_args } => {
             hasher.update(b"R");
             hasher.update(name.as_bytes());
-            hasher.update(&(generic_args.len() as u32).to_le_bytes());
+            hasher.update((generic_args.len() as u32).to_le_bytes());
             for arg in generic_args {
                 feed_type(hasher, arg);
             }
@@ -721,7 +718,7 @@ fn feed_type(hasher: &mut Sha256, java_type: &JavaType) {
             dimensions,
         } => {
             hasher.update(b"A");
-            hasher.update(&(*dimensions as u32).to_le_bytes());
+            hasher.update((*dimensions as u32).to_le_bytes());
             feed_type(hasher, element_type);
         }
         JavaType::Functional {
@@ -731,7 +728,7 @@ fn feed_type(hasher: &mut Sha256, java_type: &JavaType) {
         } => {
             hasher.update(b"F");
             hasher.update(interface_name.as_bytes());
-            hasher.update(&(param_types.len() as u32).to_le_bytes());
+            hasher.update((param_types.len() as u32).to_le_bytes());
             for param in param_types {
                 feed_type(hasher, param);
             }

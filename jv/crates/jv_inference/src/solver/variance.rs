@@ -4,18 +4,15 @@ use std::collections::HashMap;
 
 /// Variance annotation associated with a type parameter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum Variance {
     Covariant,
     Contravariant,
     Invariant,
+    #[default]
     Bivariant,
 }
 
-impl Default for Variance {
-    fn default() -> Self {
-        Variance::Bivariant
-    }
-}
 
 /// Individual usage position encountered during analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

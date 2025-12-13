@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn StdError + Sync + Send>> {
     let stdin = stdin();
     let stdout = stdout();
 
-    let (service, socket) = LspService::build(|client| Backend::new(client))
+    let (service, socket) = LspService::build(Backend::new)
         .custom_method("jv/imports", Backend::handle_imports)
         .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
@@ -296,7 +296,7 @@ impl Backend {
 
         let lsp_diagnostics = diagnostics
             .into_iter()
-            .map(|diag| map_diagnostic(diag))
+            .map(map_diagnostic)
             .collect::<Vec<_>>();
 
         if let Ok(url) = Url::parse(&uri) {

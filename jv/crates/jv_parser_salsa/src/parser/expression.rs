@@ -14,11 +14,7 @@ pub fn parse_expression_bp(ctx: &mut ParserContext, min_bp: u8) -> bool {
         recover_statement(ctx);
     }
 
-    loop {
-        let op_tok = match ctx.peek(0) {
-            Some(tok) => tok.clone(),
-            None => break,
-        };
+    while let Some(op_tok) = ctx.peek(0).cloned() {
 
         if op_tok.kind == TokenKind::Less && should_parse_type_args(ctx) {
             consume_type_args(ctx);

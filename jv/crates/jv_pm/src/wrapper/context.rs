@@ -186,8 +186,8 @@ impl WrapperContext {
     }
 
     fn write_text(path: &Path, contents: &str) -> Result<(), WrapperError> {
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
+        if let Some(parent) = path.parent()
+            && !parent.exists() {
                 fs::create_dir_all(parent).map_err(|error| {
                     WrapperError::OperationFailed(format!(
                         "{} の作成に失敗しました: {error}",
@@ -195,7 +195,6 @@ impl WrapperContext {
                     ))
                 })?;
             }
-        }
 
         fs::write(path, contents).map_err(|error| {
             WrapperError::OperationFailed(format!(
@@ -265,8 +264,6 @@ impl WrapperContext {
 
         if collapsed.is_empty() {
             "com.example".to_string()
-        } else if collapsed.contains('.') {
-            format!("com.{collapsed}")
         } else {
             format!("com.{collapsed}")
         }

@@ -24,7 +24,7 @@ fn parses_spawn_and_async_blocks() {
     let lowered = lower_source("spawn { x }\nasync { y }");
     assert!(
         matches!(
-            lowered.statements.get(0),
+            lowered.statements.first(),
             Some(Statement::Concurrency(ConcurrencyConstruct::Spawn { .. }))
         ),
         "expected spawn construct"

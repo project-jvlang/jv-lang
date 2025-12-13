@@ -74,7 +74,7 @@ impl<'ctx> FlowSolver<'ctx> {
         while let Some(node_id) = worklist.pop_front() {
             let state_in = in_states
                 .remove(&node_id)
-                .unwrap_or_else(FlowStateSnapshot::new);
+                .unwrap_or_default();
 
             let mut state_out = state_in.clone();
             self.apply_constraints(node_id, &mut state_out);
@@ -104,7 +104,7 @@ impl<'ctx> FlowSolver<'ctx> {
                 apply_edge_kind(&edge.kind, &mut next_state);
                 let entry = in_states
                     .entry(edge.to)
-                    .or_insert_with(FlowStateSnapshot::new);
+                    .or_default();
                 let merged = entry.merge_with(&next_state);
                 if merged || changed {
                     worklist.push_back(edge.to);
@@ -182,7 +182,7 @@ impl<'g, 'ctx, 'facts> FlowGraphBuilder<'g, 'ctx, 'facts> {
                 modifiers,
                 ..
             } => {
-                self.register_late_init_annotation(&name, modifiers);
+                self.register_late_init_annotation(name, modifiers);
                 let state = initializer
                     .as_ref()
                     .map(|expr| classify_expression(self, expr).state)
@@ -715,19 +715,12 @@ fn binding_to_assumption(
     Some(assumption)
 }
 
+#[derive(Default)]
 struct ConditionAssumptions {
     true_assumption: Option<BranchAssumption>,
     false_assumption: Option<BranchAssumption>,
 }
 
-impl Default for ConditionAssumptions {
-    fn default() -> Self {
-        Self {
-            true_assumption: None,
-            false_assumption: None,
-        }
-    }
-}
 
 fn detect_null_comparison(condition: &Expression) -> ConditionAssumptions {
     let mut assumptions = ConditionAssumptions::default();
@@ -764,8 +757,8 @@ fn detect_null_comparison(condition: &Expression) -> ConditionAssumptions {
                             _ => {}
                         }
                     }
-                } else if let Some(identifier) = extract_identifier(right) {
-                    if is_null_literal(left) {
+                } else if let Some(identifier) = extract_identifier(right)
+                    && is_null_literal(left) {
                         match op {
                             BinaryOp::Equal => {
                                 assumptions.true_assumption = Some(BranchAssumption::Equals {
@@ -790,7 +783,6 @@ fn detect_null_comparison(condition: &Expression) -> ConditionAssumptions {
                             _ => {}
                         }
                     }
-                }
             }
             BinaryOp::Is => {
                 if let Some(identifier) = extract_identifier(left) {
@@ -815,10 +807,7 @@ fn extract_identifier(expr: &Expression) -> Option<String> {
 }
 
 fn is_null_literal(expr: &Expression) -> bool {
-    match expr {
-        Expression::Literal(Literal::Null, _) => true,
-        _ => false,
-    }
+    matches!(expr, Expression::Literal(Literal::Null, _))
 }
 
 fn extract_assignment_target(expr: &Expression) -> Option<String> {
@@ -850,7 +839,7 @@ impl ExpressionInfo {
         ExpressionInfo::new(self.state.join(other.state))
     }
 
-    fn into_operand(&self) -> OperatorOperand {
+    fn to_operand(&self) -> OperatorOperand {
         OperatorOperand::new(self.state, self.symbol.clone())
     }
 }
@@ -886,7 +875,7 @@ fn classify_expression(
         Expression::NullSafeMemberAccess { object, span, .. } => {
             let object_info = classify_expression(builder, object);
             let outcome = OperatorSemantics::null_safe_member_access(
-                object_info.into_operand(),
+                object_info.to_operand(),
                 span.clone(),
             );
             ExpressionInfo::new(apply_operator_outcome(builder, outcome))
@@ -899,7 +888,7 @@ fn classify_expression(
             let object_info = classify_expression(builder, object);
             let _ = classify_expression(builder, index);
             let outcome =
-                OperatorSemantics::null_safe_index_access(object_info.into_operand(), span.clone());
+                OperatorSemantics::null_safe_index_access(object_info.to_operand(), span.clone());
             ExpressionInfo::new(apply_operator_outcome(builder, outcome))
         }
         Expression::TypeCast { expr, .. } => classify_expression(builder, expr),
@@ -1085,7 +1074,7 @@ mod tests {
 
         let mut context = NullSafetyContext::hydrate(None);
         let graph = build_graph(&program, &mut context);
-        assert!(graph.adjacency(graph.entry()).len() > 0);
+        assert!(!graph.adjacency(graph.entry()).is_empty());
     }
 
     #[test]
@@ -1394,13 +1383,9 @@ mod tests {
 
         assert_eq!(assigned_states.len(), 1);
         assert_eq!(assigned_states[0], NullabilityKind::Nullable);
-        assert!(matches!(
-            graph
-                .hints()
-                .iter()
-                .find(|hint| matches!(hint.strategy, JavaLoweringStrategy::NullSafeMemberAccess)),
-            Some(_)
-        ));
+        assert!(graph.hints().iter().any(|hint| {
+            matches!(hint.strategy, JavaLoweringStrategy::NullSafeMemberAccess)
+        }));
     }
 
     #[test]
@@ -1447,13 +1432,10 @@ mod tests {
 
         assert_eq!(assigned_states.len(), 1);
         assert_eq!(assigned_states[0], NullabilityKind::NonNull);
-        assert!(matches!(
-            graph
-                .hints()
-                .iter()
-                .find(|hint| matches!(hint.strategy, JavaLoweringStrategy::ElvisOperator)),
-            Some(_)
-        ));
+        assert!(graph
+            .hints()
+            .iter()
+            .any(|hint| matches!(hint.strategy, JavaLoweringStrategy::ElvisOperator)));
     }
 
     #[test]

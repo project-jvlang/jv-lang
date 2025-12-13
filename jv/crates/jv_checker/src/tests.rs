@@ -905,10 +905,11 @@ label = when (maybe) {
                 Statement::ValDeclaration {
                     name, initializer, ..
                 } => (name.as_str(), initializer),
-                Statement::Assignment { target, value, .. } => match target {
-                    Expression::Identifier(name, _) => (name.as_str(), value),
-                    _ => return None,
-                },
+                Statement::Assignment {
+                    target: Expression::Identifier(name, _),
+                    value,
+                    ..
+                } => (name.as_str(), value),
                 _ => return None,
             };
             if label_name != "label" {

@@ -9,13 +9,14 @@ use jv_ast::{
 use std::path::Path;
 
 pub(crate) fn convert_modifiers(modifiers: &Modifiers) -> IrModifiers {
-    let mut ir_modifiers = IrModifiers::default();
-
-    ir_modifiers.visibility = match modifiers.visibility {
-        Visibility::Public => IrVisibility::Public,
-        Visibility::Protected => IrVisibility::Protected,
-        Visibility::Private => IrVisibility::Private,
-        Visibility::Internal => IrVisibility::Package,
+    let mut ir_modifiers = IrModifiers {
+        visibility: match modifiers.visibility {
+            Visibility::Public => IrVisibility::Public,
+            Visibility::Protected => IrVisibility::Protected,
+            Visibility::Private => IrVisibility::Private,
+            Visibility::Internal => IrVisibility::Package,
+        },
+        ..IrModifiers::default()
     };
 
     ir_modifiers.is_static = modifiers.is_static;

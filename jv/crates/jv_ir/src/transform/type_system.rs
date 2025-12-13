@@ -162,11 +162,10 @@ fn validate_sequence_styles(
             span,
             ..
         } => {
-            if *delimiter == SequenceDelimiter::Whitespace {
-                if let Some(elements) = initializer {
+            if *delimiter == SequenceDelimiter::Whitespace
+                && let Some(elements) = initializer {
                     validate_whitespace_array(elements, span, context)?;
                 }
-            }
 
             if let Some(elements) = initializer {
                 for element in elements {
@@ -215,11 +214,10 @@ fn validate_whitespace_array(
 
     if let Some(element_type) = canonical {
         let cache = context.sequence_style_cache_mut();
-        if let Some(existing) = cache.lookup_or_insert_array(span, element_type.clone()) {
-            if existing != element_type {
+        if let Some(existing) = cache.lookup_or_insert_array(span, element_type.clone())
+            && existing != element_type {
                 return Err(sequence_type_mismatch(&existing, &element_type, span));
             }
-        }
     }
 
     Ok(())
@@ -252,11 +250,10 @@ fn validate_whitespace_call(
 
     if let Some(arg_type) = canonical {
         let cache = context.sequence_style_cache_mut();
-        if let Some(existing) = cache.lookup_or_insert_call(span, arg_type.clone()) {
-            if existing != arg_type {
+        if let Some(existing) = cache.lookup_or_insert_call(span, arg_type.clone())
+            && existing != arg_type {
                 return Err(sequence_type_mismatch(&existing, &arg_type, span));
             }
-        }
     }
 
     Ok(())

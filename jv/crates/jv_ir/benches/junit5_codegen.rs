@@ -2,9 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::{JavaCodeGenConfig, JavaTarget, generate_java_source_with_config};
 use jv_ir::transform::transform_program_with_context_profiled;
 use jv_ir::{TransformContext, TransformProfiler};
+use jv_codegen_java::{generate_java_source_with_config, JavaCodeGenConfig, JavaTarget};
 use jv_parser::Parser;
 
 const ITERATIONS: usize = 6;
@@ -86,7 +86,8 @@ fn measure_single_iteration(
         transform_program_with_context_profiled(program, &mut context, &mut profiler)
             .expect("AST から IR への変換に失敗しました");
     let lowering_ms = metrics
-        .stage_millis(LOWERING_STAGE)
+        .stage(LOWERING_STAGE)
+        .map(|stage| stage.elapsed_millis())
         .unwrap_or_else(|| metrics.total_millis());
 
     let codegen_start = Instant::now();
@@ -111,7 +112,7 @@ fn aggregate_metrics(samples: &[PipelineRunMetrics]) -> AggregateMetrics {
     }
 }
 
-fn trim_samples<'a>(samples: &'a [PipelineRunMetrics]) -> &'a [PipelineRunMetrics] {
+fn trim_samples(samples: &[PipelineRunMetrics]) -> &[PipelineRunMetrics] {
     if samples.len() > WARMUP_SKIP {
         &samples[WARMUP_SKIP..]
     } else {

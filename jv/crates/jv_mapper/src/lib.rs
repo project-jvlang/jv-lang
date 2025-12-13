@@ -107,7 +107,7 @@ const CATEGORY_VARIANTS: &[&str] = &[
     "custom",
 ];
 
-fn parse_tagged_category<'de, E>(
+fn parse_tagged_category<E>(
     category: &str,
     detail: Option<&Value>,
 ) -> Result<MappingCategory, E>
@@ -132,7 +132,7 @@ where
     }
 }
 
-fn parse_simple_category<'de, E>(value: &str) -> Result<MappingCategory, E>
+fn parse_simple_category<E>(value: &str) -> Result<MappingCategory, E>
 where
     E: de::Error,
 {
@@ -351,7 +351,7 @@ impl Mapper {
         }
     }
 
-    fn sort_entries(entries: &mut Vec<MappingEntry>) {
+    fn sort_entries(entries: &mut [MappingEntry]) {
         entries.sort_by(|a, b| {
             a.java_span
                 .start

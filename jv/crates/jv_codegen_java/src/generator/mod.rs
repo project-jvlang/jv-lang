@@ -65,6 +65,12 @@ pub struct JavaCodeGenerator {
     local_tuple_types: HashMap<String, JavaType>,
 }
 
+impl Default for JavaCodeGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JavaCodeGenerator {
     pub fn new() -> Self {
         Self::with_config(JavaCodeGenConfig::default())
@@ -174,7 +180,7 @@ impl JavaCodeGenerator {
             }
         }
         script_statements = retained_statements;
-        let mut hoisted_variable_fields =
+        let hoisted_variable_fields =
             Self::hoist_script_variable_fields(&mut script_statements);
 
         let has_entry_method = script_methods.iter().any(Self::is_entry_point_method);
@@ -448,14 +454,13 @@ impl JavaCodeGenerator {
         if self.record_components.contains_key(name) {
             return true;
         }
-        if let Some(pkg) = &self.package {
-            if !pkg.is_empty() {
+        if let Some(pkg) = &self.package
+            && !pkg.is_empty() {
                 let fq = format!("{pkg}.{name}");
                 if self.record_components.contains_key(&fq) {
                     return true;
                 }
             }
-        }
         false
     }
 
@@ -482,21 +487,19 @@ impl JavaCodeGenerator {
                 .collect();
             self.tuple_record_component_types
                 .insert(record_name.clone(), component_pairs.clone());
-            if let Some(pkg) = &self.package {
-                if !pkg.is_empty() {
+            if let Some(pkg) = &self.package
+                && !pkg.is_empty() {
                     let fq = format!("{pkg}.{}", record_name);
                     self.tuple_record_component_types
                         .insert(fq, component_pairs.clone());
                 }
-            }
             let source_positions = Self::tuple_source_positions(plan);
             for usage in &plan.usage_sites {
-                if usage.kind == TupleUsageKind::FunctionReturn && plan.specific_name.is_some() {
-                    if let Some(owner) = &usage.owner {
+                if usage.kind == TupleUsageKind::FunctionReturn && plan.specific_name.is_some()
+                    && let Some(owner) = &usage.owner {
                         self.tuple_return_records
                             .insert(owner.clone(), record_name.clone());
                     }
-                }
                 self.tuple_usages.insert(
                     SpanKey::from(&usage.span),
                     TuplePlanUsage {
@@ -512,12 +515,12 @@ impl JavaCodeGenerator {
     fn tuple_source_positions(plan: &TupleRecordPlan) -> Vec<usize> {
         (0..plan.arity)
             .map(|index| {
-                let preferred = plan
+                
+                plan
                     .fields
                     .get(index)
                     .map(|meta| Self::normalized_fallback_index(meta, index))
-                    .unwrap_or(index);
-                preferred
+                    .unwrap_or(index)
             })
             .collect()
     }
@@ -560,23 +563,22 @@ impl JavaCodeGenerator {
 
         self.record_components
             .entry(record.name.clone())
-            .or_insert_with(HashSet::new)
+            .or_default()
             .extend(component_names.iter().cloned());
         self.tuple_record_component_types
             .insert(record.name.clone(), component_types.clone());
 
-        if let Some(pkg) = &self.package {
-            if !pkg.is_empty() {
+        if let Some(pkg) = &self.package
+            && !pkg.is_empty() {
                 let fq = format!("{pkg}.{}", record.name);
                 self.record_components
                     .entry(fq)
-                    .or_insert_with(HashSet::new)
+                    .or_default()
                     .extend(component_names.iter().cloned());
                 let fq_components = format!("{pkg}.{}", record.name);
                 self.tuple_record_component_types
                     .insert(fq_components, component_types);
             }
-        }
     }
 
     fn java_type_from_hint(hint: &str) -> JavaType {
@@ -625,8 +627,8 @@ impl JavaCodeGenerator {
             keys.push(nested);
         }
 
-        if let Some(pkg) = &self.package {
-            if !pkg.is_empty() {
+        if let Some(pkg) = &self.package
+            && !pkg.is_empty() {
                 keys.push(format!("{pkg}.{name}"));
                 if !enclosing.is_empty() {
                     let dotted = format!("{pkg}.{}.{name}", enclosing.join("."));
@@ -635,7 +637,6 @@ impl JavaCodeGenerator {
                     keys.push(nested);
                 }
             }
-        }
 
         let component_names: HashSet<String> = components
             .iter()
@@ -648,7 +649,7 @@ impl JavaCodeGenerator {
             }
             self.record_components
                 .entry(key)
-                .or_insert_with(HashSet::new)
+                .or_default()
                 .extend(component_names.iter().cloned());
         }
     }
@@ -811,11 +812,12 @@ impl JavaCodeGenerator {
             IrStatement::Expression { expr, .. } => {
                 self.collect_method_locals_from_expression(expr, locals);
             }
-            IrStatement::Return { value, .. } => {
-                if let Some(expr) = value {
-                    self.collect_method_locals_from_expression(expr, locals);
-                }
+            IrStatement::Return {
+                value: Some(expr), ..
+            } => {
+                self.collect_method_locals_from_expression(expr, locals);
             }
+            IrStatement::Return { .. } => {}
             IrStatement::Switch {
                 discriminant,
                 cases,
@@ -875,11 +877,10 @@ impl JavaCodeGenerator {
     ) {
         match expr {
             IrExpression::Assignment { target, value, .. } => {
-                if let IrExpression::Identifier { name, .. } = target.as_ref() {
-                    if method_locals.contains(name) && !scope_locals.contains(name) {
+                if let IrExpression::Identifier { name, .. } = target.as_ref()
+                    && method_locals.contains(name) && !scope_locals.contains(name) {
                         captures.insert(name.clone());
                     }
-                }
                 self.collect_mutable_captures_in_expression(
                     value,
                     method_locals,
@@ -1301,13 +1302,10 @@ impl JavaCodeGenerator {
             .as_ref()
             .map(|ty| matches!(ty, JavaType::Reference { name, generic_args } if generic_args.is_empty() && (name == "Object" || name == "java.lang.Object")))
             .unwrap_or(true)
-        {
-            if let IrExpression::Identifier { name, .. } = receiver {
-                if let Some(local_type) = self.local_tuple_types.get(name) {
+            && let IrExpression::Identifier { name, .. } = receiver
+                && let Some(local_type) = self.local_tuple_types.get(name) {
                     resolved_type = Some(local_type.clone());
                 }
-            }
-        }
 
         let Some(java_type) = resolved_type else {
             return false;
@@ -1327,16 +1325,14 @@ impl JavaCodeGenerator {
         }
 
         for candidate in candidates {
-            if let Some(components) = self.record_components.get(candidate) {
-                if components.contains(field_name) {
+            if let Some(components) = self.record_components.get(candidate)
+                && components.contains(field_name) {
                     return true;
                 }
-            }
-            if let Some(components) = self.tuple_record_component_types.get(candidate) {
-                if components.iter().any(|(name, _)| name == field_name) {
+            if let Some(components) = self.tuple_record_component_types.get(candidate)
+                && components.iter().any(|(name, _)| name == field_name) {
                     return true;
                 }
-            }
         }
 
         false
@@ -1670,11 +1666,10 @@ impl JavaCodeGenerator {
         }
 
         let mut segments: Vec<String> = Vec::new();
-        if let Some(pkg) = &self.package {
-            if !pkg.is_empty() {
+        if let Some(pkg) = &self.package
+            && !pkg.is_empty() {
                 segments.extend(pkg.split('.').map(|segment| segment.to_string()));
             }
-        }
         segments.extend(self.metadata_path.iter().cloned());
         Some(segments.join("::"))
     }
@@ -1745,11 +1740,10 @@ impl JavaCodeGenerator {
 
     fn is_shadowed_type_parameter(&self, param: &IrTypeParameter) -> bool {
         for scope in self.type_parameter_stack.iter().rev() {
-            if let Some(existing) = scope.get(&param.name) {
-                if Self::equivalent_type_parameters(existing, param) {
+            if let Some(existing) = scope.get(&param.name)
+                && Self::equivalent_type_parameters(existing, param) {
                     return true;
                 }
-            }
         }
         false
     }
@@ -1770,7 +1764,7 @@ impl JavaCodeGenerator {
         None
     }
 
-    fn base_statement<'a>(statement: &'a IrStatement) -> &'a IrStatement {
+    fn base_statement(statement: &IrStatement) -> &IrStatement {
         match statement {
             IrStatement::Commented { statement, .. } => Self::base_statement(statement),
             other => other,
@@ -1867,13 +1861,13 @@ impl JavaCodeGenerator {
                 let mut field_modifiers = modifiers.clone();
                 field_modifiers.is_static = true;
                 field_modifiers.is_final = *is_final;
-                return Some(IrStatement::FieldDeclaration {
+                Some(IrStatement::FieldDeclaration {
                     name: name.clone(),
                     java_type: java_type.clone(),
                     initializer: initializer.clone(),
                     modifiers: field_modifiers,
                     span: span.clone(),
-                });
+                })
             }
             IrStatement::FieldDeclaration { .. } => Some(statement.clone()),
             _ => None,

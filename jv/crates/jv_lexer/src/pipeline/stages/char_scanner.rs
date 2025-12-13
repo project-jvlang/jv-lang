@@ -195,7 +195,7 @@ impl CharScanner {
         ch == '_' || ch.is_ascii_digit() || is_xid_continue(ch)
     }
 
-    fn peek_char_offset<'source>(&self, source: &'source str, offset: usize) -> Option<char> {
+    fn peek_char_offset(&self, source: &str, offset: usize) -> Option<char> {
         self.remaining(source).chars().nth(offset)
     }
 
@@ -207,7 +207,7 @@ impl CharScanner {
         }
     }
 
-    fn peek_char_from<'source>(&self, source: &'source str) -> Option<char> {
+    fn peek_char_from(&self, source: &str) -> Option<char> {
         self.remaining(source).chars().next()
     }
 
@@ -227,7 +227,7 @@ impl CharScanner {
         &source[self.cursor..end]
     }
 
-    fn advance_char<'source>(&mut self, ch: char, source: &'source str) -> Result<(), LexError> {
+    fn advance_char(&mut self, ch: char, source: &str) -> Result<(), LexError> {
         let len = ch.len_utf8();
         let end = self.cursor + len;
         let bytes = &source.as_bytes()[self.cursor..end];
@@ -241,9 +241,9 @@ impl CharScanner {
         Ok(())
     }
 
-    fn consume_radix_digits<'source>(
+    fn consume_radix_digits(
         &mut self,
-        source: &'source str,
+        source: &str,
         radix: u32,
     ) -> Result<bool, LexError> {
         let mut consumed_digit = false;
@@ -251,13 +251,12 @@ impl CharScanner {
 
         while let Some(ch) = self.peek_char_from(source) {
             if ch == '_' {
-                if let Some(next) = self.peek_char_offset(source, 1) {
-                    if next.to_digit(radix).is_some() {
+                if let Some(next) = self.peek_char_offset(source, 1)
+                    && next.is_digit(radix) {
                         self.advance_char(ch, source)?;
                         last_was_underscore = true;
                         continue;
                     }
-                }
                 return Err(LexError::UnexpectedChar(
                     '_',
                     self.position.line,
@@ -265,7 +264,7 @@ impl CharScanner {
                 ));
             }
 
-            if ch.to_digit(radix).is_some() {
+            if ch.is_digit(radix) {
                 self.advance_char(ch, source)?;
                 consumed_digit = true;
                 last_was_underscore = false;
@@ -393,13 +392,12 @@ impl CharScanner {
                     }
                 }
                 '_' => {
-                    if let Some(next) = self.peek_char_offset(source, 1) {
-                        if next.is_ascii_digit() {
+                    if let Some(next) = self.peek_char_offset(source, 1)
+                        && next.is_ascii_digit() {
                             self.advance_char(ch, source)?;
                             trailing_separator = Some('_');
                             continue;
                         }
-                    }
                     return Err(LexError::UnexpectedChar(
                         '_',
                         self.position.line,
@@ -431,11 +429,10 @@ impl CharScanner {
                         break;
                     }
                     let mut lookahead = 1;
-                    if let Some(sign) = self.peek_char_offset(source, 1) {
-                        if matches!(sign, '+' | '-') {
+                    if let Some(sign) = self.peek_char_offset(source, 1)
+                        && matches!(sign, '+' | '-') {
                             lookahead += 1;
                         }
-                    }
                     if self
                         .peek_char_offset(source, lookahead)
                         .map(|c| c.is_ascii_digit())
@@ -487,8 +484,8 @@ impl CharScanner {
     }
 
     fn consume_numeric_suffix(&mut self, source: &str) -> Result<(), LexError> {
-        if let Some(suffix) = self.peek_char_from(source) {
-            if matches!(suffix, 'f' | 'F' | 'd' | 'D' | 'l' | 'L' | 's' | 'S') {
+        if let Some(suffix) = self.peek_char_from(source)
+            && matches!(suffix, 'f' | 'F' | 'd' | 'D' | 'l' | 'L' | 's' | 'S') {
                 let next_is_ident = self
                     .peek_char_offset(source, 1)
                     .map(Self::is_identifier_continue)
@@ -497,7 +494,6 @@ impl CharScanner {
                     self.advance_char(suffix, source)?;
                 }
             }
-        }
         Ok(())
     }
 
@@ -924,8 +920,10 @@ impl CharScanner {
         column: usize,
         is_jv_only: bool,
     ) -> TokenTrivia {
-        let mut trivia = TokenTrivia::default();
-        trivia.comments = true;
+        let mut trivia = TokenTrivia {
+            comments: true,
+            ..TokenTrivia::default()
+        };
         if is_jv_only {
             trivia.jv_comments.push(SourceCommentTrivia {
                 kind: SourceCommentKind::Line,
@@ -954,8 +952,10 @@ impl CharScanner {
     }
 
     fn build_hash_comment_trivia(&self, text: &str, line: usize, column: usize) -> TokenTrivia {
-        let mut trivia = TokenTrivia::default();
-        trivia.comments = true;
+        let mut trivia = TokenTrivia {
+            comments: true,
+            ..TokenTrivia::default()
+        };
         let sanitized = text.trim_start_matches('#').trim().to_string();
         if !sanitized.is_empty() {
             trivia.json_comments.push(JsonCommentTrivia {
@@ -975,8 +975,10 @@ impl CharScanner {
         column: usize,
         is_javadoc: bool,
     ) -> TokenTrivia {
-        let mut trivia = TokenTrivia::default();
-        trivia.comments = true;
+        let mut trivia = TokenTrivia {
+            comments: true,
+            ..TokenTrivia::default()
+        };
         if is_javadoc {
             let doc = text.trim_start_matches('/').to_string();
             trivia.doc_comment = Some(doc);
@@ -1001,8 +1003,10 @@ impl CharScanner {
     }
 
     fn build_jv_block_comment_trivia(&self, text: &str, line: usize, column: usize) -> TokenTrivia {
-        let mut trivia = TokenTrivia::default();
-        trivia.comments = true;
+        let mut trivia = TokenTrivia {
+            comments: true,
+            ..TokenTrivia::default()
+        };
         trivia.jv_comments.push(SourceCommentTrivia {
             kind: SourceCommentKind::Block,
             text: text.to_string(),
@@ -1030,9 +1034,9 @@ impl CharScanner {
         Ok(self.take_slice(source, start, self.cursor))
     }
 
-    fn consume_trivia<'source>(
+    fn consume_trivia(
         &mut self,
-        source: &'source str,
+        source: &str,
     ) -> Result<Option<TokenTrivia>, LexError> {
         let mut saw_trivia = false;
         while let Some(ch) = self.peek_char_from(source) {
@@ -1242,8 +1246,7 @@ impl CharScannerStage for CharScanner {
         let start_position = self.position;
         let remaining = self.remaining(source);
 
-        if remaining.starts_with("//") {
-            let rest = &remaining[2..];
+        if let Some(rest) = remaining.strip_prefix("//") {
             let line = start_position.line;
             let column = start_position.column;
             let is_jv_block = Self::is_jv_block_comment(rest);

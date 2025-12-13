@@ -71,12 +71,9 @@ impl SequencePipeline {
             return;
         }
 
-        match hint.canonical {
-            PrimitiveTypeName::Int => {
-                let adapter = build_int_canonical_adapter(&hint.span, &hint.aliases);
-                terminal.canonical_adapter = Some(Box::new(adapter));
-            }
-            _ => {}
+        if hint.canonical == PrimitiveTypeName::Int {
+            let adapter = build_int_canonical_adapter(&hint.span, &hint.aliases);
+            terminal.canonical_adapter = Some(Box::new(adapter));
         }
     }
 
@@ -141,7 +138,7 @@ impl SequencePipeline {
 
                     let element_type = container_type
                         .as_ref()
-                        .and_then(|ty| extract_iterable_element_type(ty))
+                        .and_then(extract_iterable_element_type)
                         .unwrap_or_else(JavaType::object);
                     current = Some(element_type);
                 }
@@ -176,7 +173,7 @@ impl SequencePipeline {
             .iter()
             .rev()
             .find_map(|entry| entry.as_ref())
-            .or_else(|| self.source_element_type.as_ref())
+            .or(self.source_element_type.as_ref())
     }
 
     pub fn element_type_before_stage(&self, index: usize) -> Option<&JavaType> {
@@ -575,7 +572,7 @@ fn lower_sequence_source(
 
             if inferred_type
                 .as_ref()
-                .is_some_and(|ty| is_java_stream_type(ty))
+                .is_some_and(is_java_stream_type)
             {
                 let element_hint = inferred_type.as_ref().and_then(stream_element_hint);
 
@@ -624,7 +621,7 @@ fn is_java_stream_name(name: &str) -> bool {
 fn is_disallowed_sequence_source(source: &SequenceSource) -> bool {
     match source {
         SequenceSource::Collection { expr, .. } => {
-            extract_java_type(expr.as_ref()).map_or(false, is_disallowed_sequence_source_type)
+            extract_java_type(expr.as_ref()).is_some_and(is_disallowed_sequence_source_type)
         }
         _ => false,
     }
@@ -933,11 +930,10 @@ fn is_number_like_type(name: &str) -> bool {
 }
 
 fn infer_iterable_like_type(expr: &IrExpression) -> Option<JavaType> {
-    if let Some(java_type) = extract_java_type(expr) {
-        if is_iterable_like_java_type(&java_type) {
+    if let Some(java_type) = extract_java_type(expr)
+        && is_iterable_like_java_type(&java_type) {
             return Some(java_type);
         }
-    }
 
     match expr {
         IrExpression::Conditional {
@@ -994,7 +990,7 @@ fn infer_iterable_like_type(expr: &IrExpression) -> Option<JavaType> {
 
             receiver
                 .as_deref()
-                .and_then(|recv| extract_java_type(recv))
+                .and_then(extract_java_type)
                 .filter(is_iterable_like_java_type)
         }
         IrExpression::ObjectCreation {
@@ -1056,25 +1052,19 @@ fn infer_iterable_like_from_method_call(
         return None;
     }
 
-    if let Some(target) = resolved_target {
-        if let Some(owner) = target.owner.as_deref() {
-            if is_iterable_like_name(owner) && is_iterable_factory_method(owner, method_name) {
+    if let Some(target) = resolved_target
+        && let Some(owner) = target.owner.as_deref()
+            && is_iterable_like_name(owner) && is_iterable_factory_method(owner, method_name) {
                 return Some(build_iterable_type_hint(owner, java_type, args));
             }
-        }
-    }
 
-    if let Some(receiver_expr) = receiver {
-        if let Some(receiver_type) = extract_java_type(receiver_expr) {
-            if is_iterable_like_java_type(&receiver_type) {
-                if let Some(owner) = iterable_type_name(&receiver_type) {
-                    if is_iterable_factory_method(owner, method_name) {
+    if let Some(receiver_expr) = receiver
+        && let Some(receiver_type) = extract_java_type(receiver_expr)
+            && is_iterable_like_java_type(&receiver_type)
+                && let Some(owner) = iterable_type_name(&receiver_type)
+                    && is_iterable_factory_method(owner, method_name) {
                         return Some(build_iterable_type_hint(owner, java_type, args));
                     }
-                }
-            }
-        }
-    }
 
     None
 }
@@ -1112,18 +1102,16 @@ fn build_iterable_type_hint(owner: &str, java_type: &JavaType, args: &[IrExpress
         generic_args: existing,
         ..
     } = java_type
-    {
-        if !existing.is_empty() {
+        && !existing.is_empty() {
             return JavaType::Reference {
                 name: owner.to_string(),
                 generic_args: existing.clone(),
             };
         }
-    }
 
     let element_type = args
         .iter()
-        .find_map(|arg| extract_java_type(arg))
+        .find_map(extract_java_type)
         .map(|ty| boxed_type(&ty))
         .unwrap_or_else(JavaType::object);
 
@@ -1272,7 +1260,7 @@ fn update_single_param_lambda(
             return_type: Box::new(return_type.clone()),
         };
 
-        if let Some(name) = param_names.get(0) {
+        if let Some(name) = param_names.first() {
             update_identifier_usage(body.as_mut(), name, &param_type);
         }
     }
@@ -1311,7 +1299,7 @@ fn update_bi_param_lambda(
             return_type: Box::new(return_type.clone()),
         };
 
-        if let Some(name) = param_names.get(0) {
+        if let Some(name) = param_names.first() {
             update_identifier_usage(body.as_mut(), name, first_param);
         }
         if let Some(name) = param_names.get(1) {
@@ -1689,12 +1677,9 @@ fn update_case_label_identifiers(
     target: &str,
     java_type: &JavaType,
 ) {
-    match label {
-        crate::types::IrCaseLabel::Range { lower, upper, .. } => {
-            update_identifier_usage(lower, target, java_type);
-            update_identifier_usage(upper, target, java_type);
-        }
-        _ => {}
+    if let crate::types::IrCaseLabel::Range { lower, upper, .. } = label {
+        update_identifier_usage(lower, target, java_type);
+        update_identifier_usage(upper, target, java_type);
     }
 }
 
@@ -1824,7 +1809,7 @@ fn source_element_type(source: &SequenceSource) -> Option<JavaType> {
             if let Some(hint) = element_hint {
                 Some(hint.clone())
             } else {
-                elements.first().and_then(|expr| extract_java_type(expr))
+                elements.first().and_then(extract_java_type)
             }
         }
         SequenceSource::JavaStream { element_hint, .. } => element_hint.clone(),
@@ -2002,7 +1987,7 @@ fn determine_java_type(pipeline: &SequencePipeline) -> JavaType {
 
     match &pipeline.source {
         SequenceSource::JavaStream { expr, .. } => extract_java_type(expr.as_ref())
-            .filter(|ty| is_java_stream_type(ty))
+            .filter(is_java_stream_type)
             .unwrap_or_else(default_java_stream_type),
         _ => JavaType::stream(),
     }
@@ -2189,7 +2174,7 @@ fn has_repeated_transform(stages: &[SequenceStage]) -> bool {
 
     for stage in stages {
         let discriminant = mem::discriminant(stage);
-        if fingerprints.iter().any(|seen| *seen == discriminant) {
+        if fingerprints.contains(&discriminant) {
             return true;
         }
         fingerprints.push(discriminant);
@@ -2232,13 +2217,14 @@ impl ListTerminalEnforcer {
                     self.visit_expression(expr, Some(java_type));
                 }
             }
-            IrStatement::Return { value, .. } => {
-                if let Some(expr) = value {
-                    let expected_type = self.return_type_stack.last().and_then(|ty| ty.clone());
-                    let expected_ref = expected_type.as_ref();
-                    self.visit_expression(expr, expected_ref);
-                }
+            IrStatement::Return {
+                value: Some(expr), ..
+            } => {
+                let expected_type = self.return_type_stack.last().and_then(|ty| ty.clone());
+                let expected_ref = expected_type.as_ref();
+                self.visit_expression(expr, expected_ref);
             }
+            IrStatement::Return { .. } => {}
             IrStatement::Expression { expr, .. } => {
                 self.visit_expression(expr, None);
             }
@@ -2384,9 +2370,9 @@ impl ListTerminalEnforcer {
     }
 
     fn visit_expression(&mut self, expr: &mut IrExpression, expected: Option<&JavaType>) {
-        if let Some(expected_type) = expected {
-            if Self::is_list_type(expected_type) {
-                if let IrExpression::SequencePipeline {
+        if let Some(expected_type) = expected
+            && Self::is_list_type(expected_type)
+                && let IrExpression::SequencePipeline {
                     pipeline,
                     java_type,
                     ..
@@ -2407,8 +2393,6 @@ impl ListTerminalEnforcer {
                     }
                     *java_type = expected_type.clone();
                 }
-            }
-        }
 
         match expr {
             IrExpression::SequencePipeline { .. }

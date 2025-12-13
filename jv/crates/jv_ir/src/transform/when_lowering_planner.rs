@@ -193,8 +193,8 @@ impl WhenLoweringPlanner {
 
         let resolved_result_type = result_type.clone().unwrap_or_else(JavaType::object);
         let exhaustive = describe_exhaustiveness(&analysis);
-        if requires_boolean_if_chain(&discriminant_type, &cases) {
-            if let Some(ir) = build_boolean_if_chain(
+        if requires_boolean_if_chain(&discriminant_type, &cases)
+            && let Some(ir) = build_boolean_if_chain(
                 discriminant.clone(),
                 cases.clone(),
                 implicit_ir_end.clone(),
@@ -207,7 +207,6 @@ impl WhenLoweringPlanner {
                 );
                 return Ok(WhenLoweringPlan { description, ir });
             }
-        }
 
         let java_type = resolved_result_type;
         let strategy_label = if guard_count > 0 { "Hybrid" } else { "Switch" };

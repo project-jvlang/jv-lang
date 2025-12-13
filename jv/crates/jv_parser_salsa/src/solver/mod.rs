@@ -7,7 +7,9 @@ pub mod solution;
 pub use solution::TypeSolution;
 
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub enum SolverState {
+    #[default]
     Collecting,
     Propagating,
     Checking,
@@ -15,11 +17,6 @@ pub enum SolverState {
     Error(String),
 }
 
-impl Default for SolverState {
-    fn default() -> Self {
-        SolverState::Collecting
-    }
-}
 
 #[derive(Debug, Default)]
 pub struct Solver {

@@ -641,39 +641,6 @@ fn auto_export_maven_outputs(prepared_output: &PreparedOutput) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn build_ephemeral_settings_detects_script_root() {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        let base = std::env::temp_dir().join(format!("jv-ephemeral-run-{timestamp}"));
-        fs::create_dir_all(&base).expect("create temp script dir");
-        let script_path = base.join("script.jv");
-        fs::write(&script_path, "fun main() {}\n").expect("write script");
-
-        let (project_root, settings) =
-            build_ephemeral_run_settings(&script_path).expect("ephemeral project to be created");
-
-        let canonical_base = fs::canonicalize(&base).expect("canonicalise base dir");
-        assert_eq!(project_root.root_dir(), canonical_base);
-        assert_eq!(settings.entrypoint.as_deref(), Some(Path::new("script.jv")));
-        assert!(
-            settings.manifest.package.name.is_empty(),
-            "ephemeral manifest package name should be empty"
-        );
-        assert_eq!(settings.output.directory, PathBuf::from("target"));
-
-        fs::remove_dir_all(&base).expect("cleanup temp dir");
-    }
-}
-
 fn format_jv_files(files: Vec<String>) -> Result<()> {
     println!("Formatting {} file(s)...", files.len());
 
@@ -744,4 +711,37 @@ fn format_jv_files(files: Vec<String>) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn build_ephemeral_settings_detects_script_root() {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let base = std::env::temp_dir().join(format!("jv-ephemeral-run-{timestamp}"));
+        fs::create_dir_all(&base).expect("create temp script dir");
+        let script_path = base.join("script.jv");
+        fs::write(&script_path, "fun main() {}\n").expect("write script");
+
+        let (project_root, settings) =
+            build_ephemeral_run_settings(&script_path).expect("ephemeral project to be created");
+
+        let canonical_base = fs::canonicalize(&base).expect("canonicalise base dir");
+        assert_eq!(project_root.root_dir(), canonical_base);
+        assert_eq!(settings.entrypoint.as_deref(), Some(Path::new("script.jv")));
+        assert!(
+            settings.manifest.package.name.is_empty(),
+            "ephemeral manifest package name should be empty"
+        );
+        assert_eq!(settings.output.directory, PathBuf::from("target"));
+
+        fs::remove_dir_all(&base).expect("cleanup temp dir");
+    }
 }

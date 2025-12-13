@@ -87,8 +87,10 @@ fn base_method_modifiers(user_annotations: &[Annotation]) -> IrModifiers {
         return IrModifiers::default();
     }
 
-    let mut modifiers = Modifiers::default();
-    modifiers.annotations = user_annotations.to_vec();
+    let modifiers = Modifiers {
+        annotations: user_annotations.to_vec(),
+        ..Modifiers::default()
+    };
     convert_modifiers(&modifiers)
 }
 

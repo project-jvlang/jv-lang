@@ -7,9 +7,11 @@ use jv_lexer::{
 use std::sync::Arc;
 
 /// 既存の単一ステージ実装をパイプライン互換でラップする。
+#[allow(dead_code)]
 pub struct LegacyPreprocessStage;
 
 impl LegacyPreprocessStage {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self
     }
@@ -113,11 +115,10 @@ fn is_sequence_layout_candidate(
     token_type: &TokenType,
     next_token: Option<&Token>,
 ) -> bool {
-    if let Some(prev) = prev_token {
-        if requires_right_operand(prev) {
+    if let Some(prev) = prev_token
+        && requires_right_operand(prev) {
             return false;
         }
-    }
 
     match token_type {
         TokenType::Plus | TokenType::Minus => {
@@ -232,8 +233,8 @@ pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
         }
         let mut next_call_state = allows_call_suffix(token_type_ref);
 
-        if !in_interpolation_expr {
-            if let Some(ctx) = stack.last_mut() {
+        if !in_interpolation_expr
+            && let Some(ctx) = stack.last_mut() {
                 let eligible = match ctx.kind {
                     SequenceContextKind::Array => {
                         !matches!(token.token_type, TokenType::Comma | TokenType::RightBracket)
@@ -286,7 +287,6 @@ pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
                     ctx.pending_layout = false;
                 }
             }
-        }
 
         match token.token_type {
             TokenType::LeftBracket => {
@@ -374,11 +374,10 @@ pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
 
                 if starts_when_block {
                     stack.push(SequenceContext::new(SequenceContextKind::When));
-                } else if let Some(ctx) = stack.last_mut() {
-                    if let SequenceContextKind::When = ctx.kind {
+                } else if let Some(ctx) = stack.last_mut()
+                    && let SequenceContextKind::When = ctx.kind {
                         ctx.when_brace_depth = ctx.when_brace_depth.saturating_add(1);
                     }
-                }
 
                 next_call_state = false;
                 result.push(token);
@@ -387,8 +386,8 @@ pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
                 let mut handled_when = false;
                 let mut popped_when = false;
 
-                if let Some(ctx) = stack.last_mut() {
-                    if let SequenceContextKind::When = ctx.kind {
+                if let Some(ctx) = stack.last_mut()
+                    && let SequenceContextKind::When = ctx.kind {
                         handled_when = true;
                         if ctx.when_brace_depth > 1 {
                             ctx.when_brace_depth -= 1;
@@ -399,14 +398,12 @@ pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
                             popped_when = true;
                         }
                     }
-                }
 
-                if popped_when || !handled_when {
-                    if let Some(ctx) = stack.last_mut() {
+                if (popped_when || !handled_when)
+                    && let Some(ctx) = stack.last_mut() {
                         ctx.prev_was_separator = false;
                         ctx.last_explicit_separator = None;
                     }
-                }
 
                 result.push(token);
             }

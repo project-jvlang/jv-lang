@@ -240,8 +240,10 @@ pub fn desugar_extension_function(
 
         context.add_variable(param.name.clone(), java_type.clone());
 
-        let mut param_modifiers = IrModifiers::default();
-        param_modifiers.is_final = true;
+        let param_modifiers = IrModifiers {
+            is_final: true,
+            ..IrModifiers::default()
+        };
 
         ir_parameters.push(IrParameter {
             name: param.name,
@@ -320,12 +322,11 @@ pub fn desugar_data_class(
                 Some(annotation) => convert_type_annotation(annotation)?,
                 None => {
                     let mut hint = context.record_component_type(&name, &param.name);
-                    if hint.is_none() {
-                        if let Some(package) = context.current_package.as_deref() {
+                    if hint.is_none()
+                        && let Some(package) = context.current_package.as_deref() {
                             let fq = format!("{package}.{name}");
                             hint = context.record_component_type(&fq, &param.name);
                         }
-                    }
                     if hint.is_some() {
                         debug!(
                             target: "jv::transform::facts",
@@ -384,12 +385,11 @@ pub fn desugar_data_class(
             Some(annotation) => convert_type_annotation(annotation)?,
             None => {
                 let mut hint = context.record_component_type(&name, &param.name);
-                if hint.is_none() {
-                    if let Some(package) = context.current_package.as_deref() {
+                if hint.is_none()
+                    && let Some(package) = context.current_package.as_deref() {
                         let fq = format!("{package}.{name}");
                         hint = context.record_component_type(&fq, &param.name);
                     }
-                }
                 if let Some(ref ty) = hint {
                     debug!(
                         target: "jv::transform::facts",
@@ -401,20 +401,17 @@ pub fn desugar_data_class(
                 } else {
                     initializer_ir
                         .as_ref()
-                        .and_then(|expr| extract_java_type(expr))
+                        .and_then(extract_java_type)
                         .unwrap_or_else(JavaType::object)
                 }
             }
         };
 
-        let mut field_modifiers = IrModifiers::default();
-        field_modifiers.is_final = false;
-
         fields.push(IrStatement::FieldDeclaration {
             name: param.name,
             java_type,
             initializer: initializer_ir,
-            modifiers: field_modifiers,
+            modifiers: IrModifiers::default(),
             span: param.span,
         });
     }

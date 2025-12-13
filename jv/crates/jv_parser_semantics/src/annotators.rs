@@ -50,11 +50,10 @@ fn annotate_statement_for_primitives(statement: &mut Statement, tokens: &[Token]
             span,
             ..
         } => {
-            if primitive_return.is_none() && return_type.is_none() {
-                if let Some(metadata) = detect_primitive_return(tokens, span) {
+            if primitive_return.is_none() && return_type.is_none()
+                && let Some(metadata) = detect_primitive_return(tokens, span) {
                     *primitive_return = Some(metadata);
                 }
-            }
         }
         Statement::ClassDeclaration { methods, .. } => {
             for method in methods {

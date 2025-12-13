@@ -103,7 +103,7 @@ fn rewrite_assertion_statement(
                 let java_type = extract_java_type(&other_expr);
                 let bool_like = java_type
                     .as_ref()
-                    .map(|java_type| is_boolean_type(java_type))
+                    .map(is_boolean_type)
                     .unwrap_or(false);
 
                 if bool_like {
@@ -117,7 +117,7 @@ fn rewrite_assertion_statement(
                     })
                 } else if java_type
                     .as_ref()
-                    .map(|java_type| is_void_type(java_type))
+                    .map(is_void_type)
                     .unwrap_or(true)
                 {
                     Ok(IrStatement::Expression {

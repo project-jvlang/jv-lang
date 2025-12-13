@@ -37,6 +37,7 @@ impl Default for ReconstructionOptions {
 
 /// Summary statistics describing a reconstruction run.
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub struct ReconstructionStats {
     pub total_nodes: usize,
     pub reconstructed_nodes: usize,
@@ -44,16 +45,6 @@ pub struct ReconstructionStats {
     pub elapsed: Duration,
 }
 
-impl Default for ReconstructionStats {
-    fn default() -> Self {
-        Self {
-            total_nodes: 0,
-            reconstructed_nodes: 0,
-            placeholder_nodes: 0,
-            elapsed: Duration::default(),
-        }
-    }
-}
 
 /// Enumerates the warning categories emitted while rebuilding the AST.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

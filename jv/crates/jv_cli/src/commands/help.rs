@@ -13,8 +13,10 @@ pub struct HelpArgs {
 }
 
 #[derive(Debug, Clone, ValueEnum)]
+#[derive(Default)]
 pub enum HelpTopic {
     #[value(alias = "pm")]
+    #[default]
     Overview,
     Resolver,
     Repo,
@@ -22,11 +24,6 @@ pub enum HelpTopic {
     Export,
 }
 
-impl Default for HelpTopic {
-    fn default() -> Self {
-        HelpTopic::Overview
-    }
-}
 
 impl HelpTopic {
     fn possible_name(&self) -> &'static str {

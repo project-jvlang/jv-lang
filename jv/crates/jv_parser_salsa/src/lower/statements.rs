@@ -211,8 +211,8 @@ fn lower_import(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Stateme
     let mut path_parts = Vec::new();
     let mut is_wildcard = false;
     for child in &node.children {
-        if let CstElement::Node(child_node) = child {
-            if child_node.kind == SyntaxKind::ImportPath {
+        if let CstElement::Node(child_node) = child
+            && child_node.kind == SyntaxKind::ImportPath {
                 for tok in collect_tokens(child_node) {
                     match tok.kind {
                         crate::lexer::TokenKind::Identifier => path_parts.push(tok.lexeme),
@@ -221,21 +221,18 @@ fn lower_import(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Stateme
                     }
                 }
             }
-        }
     }
 
     let mut alias = None;
     for child in &node.children {
-        if let CstElement::Node(child_node) = child {
-            if matches!(
+        if let CstElement::Node(child_node) = child
+            && matches!(
                 child_node.kind,
                 SyntaxKind::ImportClause | SyntaxKind::ImportAlias
-            ) {
-                if let Some(first_ident) = collect_identifiers(child_node).first() {
+            )
+                && let Some(first_ident) = collect_identifiers(child_node).first() {
                     alias = Some(first_ident.clone());
                 }
-            }
-        }
     }
 
     Some(Statement::Import {
@@ -520,11 +517,11 @@ fn lower_class_like(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Sta
         .map(|(i, _)| i);
     let mut superclass = None;
     let mut interfaces = Vec::new();
-    if let Some(colon) = colon_idx {
-        if colon + 1 < inherit_end {
+    if let Some(colon) = colon_idx
+        && colon + 1 < inherit_end {
             let inheritance_slice = &tokens[colon + 1..inherit_end];
             let mut type_slices = split_types(inheritance_slice);
-            if let Some(first) = type_slices.get(0) {
+            if let Some(first) = type_slices.first() {
                 if !first.is_empty() {
                     superclass = lower_type_annotation(ctx, first);
                 }
@@ -536,7 +533,6 @@ fn lower_class_like(ctx: &mut LoweringContext<'_>, node: &CstNode) -> Option<Sta
                 }
             }
         }
-    }
 
     // クラスボディのメンバーをローワリング。
     let mut properties = Vec::new();
@@ -1128,7 +1124,7 @@ fn span_for_node(ctx: &LoweringContext<'_>, node: &CstNode) -> jv_ast::Span {
     ctx.span_for_range(&start, &end)
 }
 
-fn find_child<'a>(node: &'a CstNode, kind: SyntaxKind) -> Option<&'a CstNode> {
+fn find_child(node: &CstNode, kind: SyntaxKind) -> Option<&CstNode> {
     node.children.iter().find_map(|child| match child {
         CstElement::Node(n) if n.kind == kind => Some(n),
         _ => None,

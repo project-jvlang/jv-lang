@@ -324,11 +324,10 @@ impl BoundSatisfactionChecker {
     }
 
     fn satisfies_primitive(candidate: &TypeKind, bound: &PrimitiveBoundConstraint) -> bool {
-        if let Some(bounds) = candidate.bounds() {
-            if bounds.contains_predicate(&BoundPredicate::Primitive(bound.clone())) {
+        if let Some(bounds) = candidate.bounds()
+            && bounds.contains_predicate(&BoundPredicate::Primitive(bound.clone())) {
                 return true;
             }
-        }
 
         match candidate.variant() {
             TypeVariant::Primitive(name) => bound.accepts_label(name),

@@ -105,8 +105,8 @@ fn split_tuple_elements(value: &str) -> Result<Vec<String>, String> {
     let mut angle_depth = 0;
     let mut square_depth = 0;
 
-    let mut chars = value.chars().peekable();
-    while let Some(ch) = chars.next() {
+    let chars = value.chars().peekable();
+    for ch in chars {
         match ch {
             '(' => {
                 paren_depth += 1;
@@ -197,11 +197,7 @@ fn lower_tuple_element(tuple_source: &str, segment: &str) -> Result<TypeAnnotati
     lower_type_annotation(TypeAnnotationSource::Tokens(&tokens))
         .map(|lowered| lowered.into_annotation())
         .map_err(|error| match error.message() {
-            message if message.is_empty() => {
-                format!(
-                    "要素 `{segment}` を型として解釈できませんでした (注釈 `{tuple_source}`)"
-                )
-            }
+            "" => format!("要素 `{segment}` を型として解釈できませんでした (注釈 `{tuple_source}`)"),
             message => format!(
                 "要素 `{segment}` を型として解釈できませんでした (注釈 `{tuple_source}`): {message}",
             ),

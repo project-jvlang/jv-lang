@@ -253,7 +253,7 @@ fn init_followed_by_wrapper_context_detect() {
     initializer.generate().expect("generate");
 
     // WrapperContext should detect the initialized project
-    let context = run_in_directory(&project_dir, || WrapperContext::detect()).expect("detect");
+    let context = run_in_directory(&project_dir, WrapperContext::detect).expect("detect");
     assert!(!context.template_generated); // pom.xml already exists from init
     assert!(context.pom_path.exists());
 }

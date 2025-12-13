@@ -262,7 +262,7 @@ pub(crate) fn find_primitive_specialization_hint(
             }
 
             if let BoundPredicate::Primitive(bound) = &constraint.predicate {
-                let aliases = bound.alias_families().iter().copied().collect();
+                let aliases = bound.alias_families().to_vec();
                 return Some(PrimitiveSpecializationHint {
                     type_param: param.name.clone(),
                     canonical: bound.canonical(),
@@ -399,12 +399,12 @@ fn apply_hint_to_case_label(label: &mut jv_ir::types::IrCaseLabel, hint: &Primit
 
 fn apply_hint_to_deconstruction_pattern(
     pattern: &mut jv_ir::types::IrDeconstructionPattern,
-    hint: &PrimitiveSpecializationHint,
+    _hint: &PrimitiveSpecializationHint,
 ) {
     use jv_ir::types::IrDeconstructionComponent;
     for component in pattern.components.iter_mut() {
         if let IrDeconstructionComponent::Type { pattern: Some(inner), .. } = component {
-            apply_hint_to_deconstruction_pattern(inner, hint);
+            apply_hint_to_deconstruction_pattern(inner, _hint);
         }
     }
 }
@@ -412,11 +412,10 @@ fn apply_hint_to_deconstruction_pattern(
 fn apply_hint_to_expression(expr: &mut IrExpression, hint: &PrimitiveSpecializationHint) {
     match expr {
         IrExpression::SequencePipeline { pipeline, .. } => {
-            if let Some(terminal) = pipeline.terminal.as_mut() {
-                if terminal.specialization_hint.is_none() {
+            if let Some(terminal) = pipeline.terminal.as_mut()
+                && terminal.specialization_hint.is_none() {
                     terminal.specialization_hint = Some(hint.clone());
                 }
-            }
             pipeline.apply_specialization_hint();
             apply_hint_to_sequence_pipeline(pipeline, hint);
         }
@@ -689,8 +688,8 @@ fn symbol_candidates(package: Option<&str>, path: &[String]) -> Vec<String> {
         push_candidate(&mut candidates, path.join("$"));
     }
 
-    if let Some(pkg) = package {
-        if !pkg.is_empty() {
+    if let Some(pkg) = package
+        && !pkg.is_empty() {
             let pkg_colon = pkg.replace('.', "::");
             let pkg_dot = pkg;
             push_candidate(&mut candidates, format!("{}::{}", pkg_colon, colon_join));
@@ -700,7 +699,6 @@ fn symbol_candidates(package: Option<&str>, path: &[String]) -> Vec<String> {
             let pkg_dollar = pkg.replace('.', "$");
             push_candidate(&mut candidates, format!("{}${}", pkg_dollar, dollar_join));
         }
-    }
 
     candidates
 }
@@ -713,11 +711,10 @@ fn push_candidate(candidates: &mut Vec<String>, candidate: String) {
 
 fn metadata_key(package: Option<&str>, path: &[String]) -> String {
     let mut segments: Vec<String> = Vec::new();
-    if let Some(pkg) = package {
-        if !pkg.is_empty() {
+    if let Some(pkg) = package
+        && !pkg.is_empty() {
             segments.extend(pkg.split('.').map(|segment| segment.to_string()));
         }
-    }
     segments.extend(path.iter().cloned());
     segments.join("::")
 }

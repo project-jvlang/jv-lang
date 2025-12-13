@@ -97,6 +97,7 @@ impl BuildPlan {
 pub struct BuildOptionsFactory;
 
 impl BuildOptionsFactory {
+    #[allow(clippy::result_large_err)]
     pub fn compose(
         root: ProjectRoot,
         settings: ProjectSettings,
@@ -223,6 +224,7 @@ impl BuildOptionsFactory {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn resolve_entrypoint(
     root: &ProjectRoot,
     layout: &ProjectLayout,
@@ -241,6 +243,7 @@ fn resolve_entrypoint(
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn resolve_output_dir(
     root: &ProjectRoot,
     output: &OutputConfig,
@@ -257,6 +260,7 @@ fn resolve_output_dir(
     Ok(candidate)
 }
 
+#[allow(clippy::result_large_err)]
 fn guard_within_root(root: &Path, candidate: &Path) -> Result<(), EnhancedDiagnostic> {
     if !path_within(root, candidate) {
         return Err(root_diagnostic(format!(
@@ -268,6 +272,7 @@ fn guard_within_root(root: &Path, candidate: &Path) -> Result<(), EnhancedDiagno
     Ok(())
 }
 
+#[allow(clippy::result_large_err)]
 fn guard_exists(path: &Path) -> Result<(), EnhancedDiagnostic> {
     if path.is_file() {
         return Ok(());
@@ -279,6 +284,7 @@ fn guard_exists(path: &Path) -> Result<(), EnhancedDiagnostic> {
     )))
 }
 
+#[allow(clippy::result_large_err)]
 fn guard_extension(path: &Path, expected: &str) -> Result<(), EnhancedDiagnostic> {
     if path
         .extension()
@@ -296,6 +302,7 @@ fn guard_extension(path: &Path, expected: &str) -> Result<(), EnhancedDiagnostic
     )))
 }
 
+#[allow(clippy::result_large_err)]
 fn guard_listed_in_layout(
     layout: &ProjectLayout,
     entrypoint: &Path,
@@ -315,6 +322,7 @@ fn guard_listed_in_layout(
     )))
 }
 
+#[allow(clippy::result_large_err)]
 fn absolutize(path: &Path) -> Result<PathBuf, EnhancedDiagnostic> {
     if path.is_absolute() {
         Ok(path.to_path_buf())

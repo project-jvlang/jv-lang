@@ -114,13 +114,13 @@ pub fn manifest_logging_completions(content: &str, position: &Position) -> Vec<C
         let candidates = if section == "logging" {
             LOGGING_TOP_LEVEL_KEYS
                 .iter()
-                .filter(|key| !existing_keys.contains(&key.to_string()))
+                .filter(|key| !existing_keys.contains::<str>(key.as_ref()))
                 .copied()
                 .collect::<Vec<_>>()
         } else if section == "logging.opentelemetry" {
             LOGGING_OTEL_KEYS
                 .iter()
-                .filter(|key| !existing_keys.contains(&key.to_string()))
+                .filter(|key| !existing_keys.contains::<str>(key.as_ref()))
                 .copied()
                 .collect::<Vec<_>>()
         } else {
@@ -218,7 +218,7 @@ fn gather_section_keys(content: &str, section: &str) -> HashSet<String> {
 fn value_completions_for(section: &str, key: &str, value_prefix: &str) -> Vec<CompletionItemData> {
     let mut completions = Vec::new();
     let mut normalized = value_prefix.trim_start_matches(|c: char| c.is_whitespace());
-    normalized = normalized.trim_start_matches(|c| c == '"' || c == '\'');
+    normalized = normalized.trim_start_matches(['"', '\'']);
     match (section, key) {
         ("logging", "framework") => {
             completions.extend(build_value_items(LOGGING_FRAMEWORK_VALUES, normalized));

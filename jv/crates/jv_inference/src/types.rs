@@ -136,8 +136,10 @@ impl From<String> for SymbolId {
 
 /// Nullability metadata threaded through the inference pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum NullabilityFlag {
     /// Nullability is currently unknown.
+    #[default]
     Unknown,
     /// The type is known to be non-null.
     NonNull,
@@ -145,11 +147,6 @@ pub enum NullabilityFlag {
     Nullable,
 }
 
-impl Default for NullabilityFlag {
-    fn default() -> Self {
-        NullabilityFlag::Unknown
-    }
-}
 
 impl NullabilityFlag {
     /// Combines two flags, favouring `Nullable` over `Unknown`, and `Unknown` over `NonNull`.
@@ -186,6 +183,7 @@ impl FieldType {
 
 /// Core variant selector for [`TypeKind`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub enum TypeVariant {
     Primitive(&'static str),
     Optional(Box<TypeKind>),
@@ -193,14 +191,10 @@ pub enum TypeVariant {
     Record { fields: Vec<FieldType> },
     Union { arms: Vec<TypeKind> },
     Variable(TypeId),
+    #[default]
     Unknown,
 }
 
-impl Default for TypeVariant {
-    fn default() -> Self {
-        TypeVariant::Unknown
-    }
-}
 
 /// Constraint bound predicate.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -344,9 +338,7 @@ pub struct CapabilityHints {
 impl CapabilityHints {
     fn key(&self) -> String {
         let preferred = self
-            .preferred_impl
-            .as_ref()
-            .map(String::as_str)
+            .preferred_impl.as_deref()
             .unwrap_or("_");
         format!("pref={preferred}:inline={}", self.inline_only)
     }
@@ -704,6 +696,7 @@ impl GenericWhereClause {
 
 /// Full generic signature metadata threaded through the inference pipeline.
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub struct GenericSignature {
     pub parameters: Vec<GenericParameterInfo>,
     pub where_clause: Option<GenericWhereClause>,
@@ -749,16 +742,6 @@ impl GenericSignature {
     }
 }
 
-impl Default for GenericSignature {
-    fn default() -> Self {
-        Self {
-            parameters: Vec::new(),
-            where_clause: None,
-            raw_directives: Vec::new(),
-            span: Span::default(),
-        }
-    }
-}
 
 /// Individual constraint between a type parameter and a predicate.
 #[derive(Debug, Clone, PartialEq, Eq)]

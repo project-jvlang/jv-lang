@@ -36,15 +36,14 @@ pub(super) fn emit_log_plan(
         None
     };
 
-    if let Some(kind) = plan.guard_kind {
-        if let Some(condition) =
+    if let Some(kind) = plan.guard_kind
+        && let Some(condition) =
             strategy.guard_condition(generator, &logger_name, plan.level, kind)?
         {
             builder.push_line(&format!("if ({condition}) {{"));
             builder.indent();
             has_guard = true;
         }
-    }
 
     if let Some(accessor) = trace_accessor {
         builder.push_line("{");
@@ -450,11 +449,10 @@ fn build_concatenation(
         let rendered = generator.generate_expression(arg)?;
         parts.push(ensure_string_value(generator, arg, rendered));
     }
-    if let Some(last) = segments.last() {
-        if !last.is_empty() {
+    if let Some(last) = segments.last()
+        && !last.is_empty() {
             parts.push(format!("\"{}\"", JavaCodeGenerator::escape_string(last)));
         }
-    }
     if parts.is_empty() {
         parts.push("\"\"".to_string());
     }

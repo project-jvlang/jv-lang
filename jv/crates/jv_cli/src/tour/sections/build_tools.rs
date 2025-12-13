@@ -68,11 +68,10 @@ pub fn render<W: Write>(writer: &mut W) -> Result<()> {
     writeln!(writer, "```jv")?;
     writeln!(
         writer,
-        "{}",
-        r#"@test fun greets_user() {
-    val message = buildGreeting("Tour")
-    assertEquals("Hello, Tour!", message)
-}"#
+        "@test fun greets_user() {{
+    val message = buildGreeting(\"Tour\")
+    assertEquals(\"Hello, Tour!\", message)
+}}"
     )?;
     writeln!(writer, "```")?;
 

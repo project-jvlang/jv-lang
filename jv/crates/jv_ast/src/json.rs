@@ -8,8 +8,10 @@ pub struct SchemaId(pub String);
 
 /// Numeric grouping metadata propagated from the lexer into JSON number literals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum NumberGrouping {
     /// No explicit grouping characters were present.
+    #[default]
     None,
     /// Digits were grouped using commas (1,234 style).
     Comma,
@@ -19,11 +21,6 @@ pub enum NumberGrouping {
     Mixed,
 }
 
-impl Default for NumberGrouping {
-    fn default() -> Self {
-        NumberGrouping::None
-    }
-}
 
 /// Classification for JSON comments that are preserved as trivia.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

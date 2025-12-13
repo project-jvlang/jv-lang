@@ -101,7 +101,7 @@ fn interpolation_literal_value(token: &Token) -> String {
 fn default_pipeline() -> ProcessingPipeline {
     let shared_state = Rc::new(RefCell::new(shared::StageSharedState::default()));
     ProcessingPipeline::builder()
-        .with_stage(json::JsonStage::default())
+        .with_stage(json::JsonStage)
         .with_stage(call::CallStage::new(Rc::clone(&shared_state)))
         .with_stage(comments::CommentsStage::new(Rc::clone(&shared_state)))
         .with_stage(layout::LayoutStage::new(shared_state))
@@ -121,9 +121,9 @@ mod tests {
             .expect("lex interpolation source")
     }
 
-    fn interpolation_metadata<'a>(
-        tokens: &'a [Token],
-    ) -> Option<&'a Vec<StringInterpolationSegment>> {
+    fn interpolation_metadata(
+        tokens: &[Token],
+    ) -> Option<&Vec<StringInterpolationSegment>> {
         tokens.iter().find_map(|token| {
             token.metadata.iter().find_map(|metadata| match metadata {
                 TokenMetadata::StringInterpolation { segments } => Some(segments),

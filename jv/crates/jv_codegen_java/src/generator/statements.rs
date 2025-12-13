@@ -33,16 +33,15 @@ impl JavaCodeGenerator {
             } => {
                 let mut effective_type = java_type.clone();
                 if let Some(init_expr) = initializer.as_ref() {
-                    if let IrExpression::TupleLiteral { span, .. } = init_expr {
-                        if let Some(usage) = self.tuple_usages.get(&SpanKey::from(span)) {
+                    if let IrExpression::TupleLiteral { span, .. } = init_expr
+                        && let Some(usage) = self.tuple_usages.get(&SpanKey::from(span)) {
                             effective_type = JavaType::Reference {
                                 name: usage.record_name.clone(),
                                 generic_args: vec![],
                             };
                         }
-                    }
-                    if let IrExpression::ObjectCreation { class_name, .. } = init_expr {
-                        if self
+                    if let IrExpression::ObjectCreation { class_name, .. } = init_expr
+                        && self
                             .tuple_record_component_types
                             .contains_key(class_name.as_str())
                         {
@@ -51,15 +50,13 @@ impl JavaCodeGenerator {
                                 generic_args: vec![],
                             };
                         }
-                    }
                     if let IrExpression::FieldAccess {
                         receiver,
                         field_name,
                         is_record_component,
                         ..
                     } = init_expr
-                    {
-                        if *is_record_component {
+                        && *is_record_component {
                             let receiver_type =
                                 if let IrExpression::Identifier { name, .. } = receiver.as_ref() {
                                     self.local_tuple_types
@@ -69,15 +66,13 @@ impl JavaCodeGenerator {
                                 } else {
                                     Self::expression_java_type(receiver).cloned()
                                 };
-                            if let Some(JavaType::Reference { name, .. }) = receiver_type {
-                                if let Some(component_type) =
+                            if let Some(JavaType::Reference { name, .. }) = receiver_type
+                                && let Some(component_type) =
                                     self.tuple_component_type(&name, field_name)
                                 {
                                     effective_type = component_type;
                                 }
-                            }
                         }
-                    }
 
                     let mut tuple_type = if let IrExpression::MethodCall {
                         method_name,
@@ -113,7 +108,9 @@ impl JavaCodeGenerator {
                             })
                         });
 
-                        let tuple_type = tuple_type.or_else(|| {
+                        
+
+                        tuple_type.or_else(|| {
                             candidates.iter().find_map(|name| {
                                 let fallback = format!("{}_Result", pascalize(name));
                                 let known_record = self
@@ -129,38 +126,30 @@ impl JavaCodeGenerator {
                                     None
                                 }
                             })
-                        });
-
-                        tuple_type
+                        })
                     } else {
                         None
                     };
 
-                    if tuple_type.is_none() {
-                        if let IrExpression::Identifier {
+                    if tuple_type.is_none()
+                        && let IrExpression::Identifier {
                             name: init_name, ..
                         } = init_expr
-                        {
-                            if let Some(record_type) = self.local_tuple_types.get(init_name) {
+                            && let Some(record_type) = self.local_tuple_types.get(init_name) {
                                 tuple_type = Some(record_type.clone());
                             }
-                        }
-                    }
 
                     if let Some(record_type) = tuple_type {
                         effective_type = record_type;
-                    } else if effective_type == JavaType::object() {
-                        if let Some(JavaType::Reference { name, .. }) =
+                    } else if effective_type == JavaType::object()
+                        && let Some(JavaType::Reference { name, .. }) =
                             Self::expression_java_type(init_expr)
-                        {
-                            if self.tuple_record_component_types.contains_key(name) {
+                            && self.tuple_record_component_types.contains_key(name) {
                                 effective_type = JavaType::Reference {
                                     name: name.clone(),
                                     generic_args: vec![],
                                 };
                             }
-                        }
-                    }
                 }
                 if effective_type != JavaType::object() {
                     self.local_tuple_types
@@ -522,11 +511,10 @@ impl JavaCodeGenerator {
             return declared_type.clone();
         }
 
-        if let Some(iterable_type) = Self::expression_java_type(iterable) {
-            if let Some(element) = Self::iterable_element_type(iterable_type) {
+        if let Some(iterable_type) = Self::expression_java_type(iterable)
+            && let Some(element) = Self::iterable_element_type(iterable_type) {
                 return element;
             }
-        }
 
         declared_type.clone()
     }
@@ -605,11 +593,10 @@ impl JavaCodeGenerator {
         update: &IrExpression,
         metadata: &Option<IrForLoopMetadata>,
     ) -> Result<String, CodeGenError> {
-        if let Some(IrForLoopMetadata::NumericRange(meta)) = metadata {
-            if let Some(compact) = self.try_render_numeric_update(update, meta) {
+        if let Some(IrForLoopMetadata::NumericRange(meta)) = metadata
+            && let Some(compact) = self.try_render_numeric_update(update, meta) {
                 return Ok(compact);
             }
-        }
         self.generate_expression(update)
     }
 
@@ -618,36 +605,24 @@ impl JavaCodeGenerator {
         update: &IrExpression,
         metadata: &IrNumericRangeLoop,
     ) -> Option<String> {
-        if let IrExpression::Assignment { target, value, .. } = update {
-            if let IrExpression::Identifier {
+        if let IrExpression::Assignment { target, value, .. } = update
+            && let IrExpression::Identifier {
                 name: target_name, ..
             } = target.as_ref()
-            {
-                if target_name == &metadata.binding {
-                    if let IrExpression::Binary {
+                && target_name == &metadata.binding
+                    && let IrExpression::Binary {
                         left, op, right, ..
                     } = value.as_ref()
-                    {
-                        if matches!(op, BinaryOp::Add) {
-                            if let IrExpression::Identifier {
+                        && matches!(op, BinaryOp::Add)
+                            && let IrExpression::Identifier {
                                 name: left_name, ..
                             } = left.as_ref()
-                            {
-                                if left_name == target_name {
-                                    if let IrExpression::Literal(literal, _) = right.as_ref() {
-                                        if let Literal::Number(number) = literal {
-                                            if number == "1" {
+                                && left_name == target_name
+                                    && let IrExpression::Literal(literal, _) = right.as_ref()
+                                        && let Literal::Number(number) = literal
+                                            && number == "1" {
                                                 return Some(format!("{}++", target_name));
                                             }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
         None
     }
 
@@ -869,13 +844,12 @@ impl JavaCodeGenerator {
             }
             IrStatement::Expression { expr, .. } => {
                 if let IrExpression::Assignment { target, value, .. } = expr {
-                    if let IrExpression::Identifier { name, .. } = target.as_ref() {
-                        if self.mutable_captures.contains(name) {
+                    if let IrExpression::Identifier { name, .. } = target.as_ref()
+                        && self.mutable_captures.contains(name) {
                             let rhs = self.generate_expression(value)?;
                             let guarded_rhs = self.wrap_with_null_guard(rhs, owner);
                             return Ok(format!("{}.set({});", name, guarded_rhs));
                         }
-                    }
                     let lhs = self.generate_expression(target)?;
                     let rhs = self.generate_expression(value)?;
                     let guarded_rhs = self.wrap_with_null_guard(rhs, owner);

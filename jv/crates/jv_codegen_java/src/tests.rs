@@ -829,9 +829,11 @@ fn record_extension_method_is_emitted_as_instance_method() {
         span: span.clone(),
     };
 
-    let mut extension_modifiers = IrModifiers::default();
-    extension_modifiers.visibility = IrVisibility::Public;
-    extension_modifiers.is_static = true;
+    let extension_modifiers = IrModifiers {
+        visibility: IrVisibility::Public,
+        is_static: true,
+        ..IrModifiers::default()
+    };
 
     let extension_method = IrStatement::MethodDeclaration {
         name: "identity".to_string(),
@@ -911,8 +913,10 @@ fn record_extension_method_is_emitted_as_instance_method() {
 fn top_level_records_drop_private_visibility() {
     let mut generator = JavaCodeGenerator::new();
     let span = dummy_span();
-    let mut private_modifiers = IrModifiers::default();
-    private_modifiers.visibility = IrVisibility::Private;
+    let private_modifiers = IrModifiers {
+        visibility: IrVisibility::Private,
+        ..IrModifiers::default()
+    };
 
     let record_declaration = IrStatement::RecordDeclaration {
         name: "Event".to_string(),
@@ -1125,9 +1129,11 @@ fn class_extension_method_is_emitted_as_instance_method() {
         span: span.clone(),
     };
 
-    let mut extension_modifiers = IrModifiers::default();
-    extension_modifiers.visibility = IrVisibility::Public;
-    extension_modifiers.is_static = true;
+    let extension_modifiers = IrModifiers {
+        visibility: IrVisibility::Public,
+        is_static: true,
+        ..IrModifiers::default()
+    };
 
     let extension_method = IrStatement::MethodDeclaration {
         name: "self".to_string(),
@@ -1258,9 +1264,11 @@ fn primitive_specialized_pipeline_renders_character_casts() {
         span: span.clone(),
     };
 
-    let mut method_modifiers = IrModifiers::default();
-    method_modifiers.visibility = IrVisibility::Public;
-    method_modifiers.is_static = true;
+    let method_modifiers = IrModifiers {
+        visibility: IrVisibility::Public,
+        is_static: true,
+        ..IrModifiers::default()
+    };
 
     let method = IrStatement::MethodDeclaration {
         name: "sumCharsAsInt".to_string(),
@@ -1288,9 +1296,11 @@ fn primitive_specialized_pipeline_renders_character_casts() {
         span: span.clone(),
     };
 
-    let mut class_modifiers = IrModifiers::default();
-    class_modifiers.visibility = IrVisibility::Public;
-    class_modifiers.is_final = true;
+    let class_modifiers = IrModifiers {
+        visibility: IrVisibility::Public,
+        is_final: true,
+        ..IrModifiers::default()
+    };
 
     let class = IrStatement::ClassDeclaration {
         name: "PrimitiveAdapters".to_string(),
@@ -1354,7 +1364,7 @@ fn primitive_specialized_pipeline_renders_character_casts() {
 
 #[test]
 fn analyze_mutable_captures_detects_assignments_in_lambda() {
-    let mut generator = JavaCodeGenerator::new();
+    let generator = JavaCodeGenerator::new();
 
     let accumulator_decl = IrStatement::VariableDeclaration {
         name: "accumulator".to_string(),
@@ -1482,9 +1492,11 @@ fn external_extension_method_remains_static_utility() {
         generic_args: vec![],
     };
 
-    let mut modifiers = IrModifiers::default();
-    modifiers.visibility = IrVisibility::Public;
-    modifiers.is_static = true;
+    let modifiers = IrModifiers {
+        visibility: IrVisibility::Public,
+        is_static: true,
+        ..IrModifiers::default()
+    };
 
     let method = IrStatement::MethodDeclaration {
         name: "size".to_string(),

@@ -1066,11 +1066,10 @@ fn prompt_user_selection(count: usize) -> Result<usize> {
             return Err(anyhow!("選択がキャンセルされました"));
         }
 
-        if let Ok(value) = input.parse::<usize>() {
-            if (1..=count).contains(&value) {
+        if let Ok(value) = input.parse::<usize>()
+            && (1..=count).contains(&value) {
                 return Ok(value - 1);
             }
-        }
 
         println!(
             "無効な入力です。1 から {} の数値を入力してください。",
@@ -1096,11 +1095,10 @@ fn resolve_version_for_coordinate(
 
     let coords = MavenCoordinates::new(&coordinate.group_id, &coordinate.artifact_id);
 
-    if let Some(cached) = cache.get_metadata(&coords)? {
-        if let Some(version) = select_preferred_version(&cached.metadata) {
+    if let Some(cached) = cache.get_metadata(&coords)?
+        && let Some(version) = select_preferred_version(&cached.metadata) {
             return Ok(version);
         }
-    }
 
     let handles = manager.get_repositories_for_dependency(&coordinate.group_id);
     if handles.is_empty() {
@@ -1364,17 +1362,15 @@ fn remove_local_artifact(jar_path: &Path) -> Result<()> {
 
 fn cleanup_empty_directories(dir: &Path) -> Result<()> {
     // ディレクトリが空の場合のみ削除
-    if dir.is_dir() {
-        if let Ok(mut entries) = fs::read_dir(dir) {
-            if entries.next().is_none() {
+    if dir.is_dir()
+        && let Ok(mut entries) = fs::read_dir(dir)
+            && entries.next().is_none() {
                 fs::remove_dir(dir)?;
                 // 親ディレクトリも再帰的にチェック
                 if let Some(parent) = dir.parent() {
                     let _ = cleanup_empty_directories(parent);
                 }
             }
-        }
-    }
     Ok(())
 }
 
@@ -1431,7 +1427,7 @@ fn collect_effective_mirrors(manifest: &Manifest) -> Result<Vec<MavenMirrorConfi
     combined.extend(manifest.mirrors.iter().cloned());
 
     let global_state = load_global_config_state()?;
-    combined.extend(global_state.data.mirrors.into_iter());
+    combined.extend(global_state.data.mirrors);
 
     let mirrors = combined
         .into_iter()
@@ -1539,7 +1535,7 @@ fn gather_dependency_candidates(manifest: &Manifest, query: &str) -> Vec<Depende
         } else if lower_name.contains(&lower_query) {
             0.9
         } else {
-            let artifact = name.split(':').last().unwrap_or(name);
+            let artifact = name.split(':').next_back().unwrap_or(name);
             let artifact_lower = artifact.to_ascii_lowercase();
             if artifact_lower == lower_query {
                 0.95
@@ -2113,9 +2109,7 @@ fn load_repository_context(include_global: bool) -> Result<RepositoryContext> {
                 RepoOrigin::Local
             } else if project_names.contains(&config.name) {
                 RepoOrigin::Project
-            } else if global_names.contains(&config.name) {
-                RepoOrigin::Global
-            } else if include_global_effective {
+            } else if global_names.contains(&config.name) || include_global_effective {
                 RepoOrigin::Global
             } else {
                 RepoOrigin::Project
@@ -2462,15 +2456,14 @@ fn matches_pattern(text: &str, pattern: &str) -> bool {
     let mut remaining = text;
     let mut parts = pattern.split('*').peekable();
 
-    if let Some(first) = parts.peek().copied() {
-        if !pattern.starts_with('*') {
+    if let Some(first) = parts.peek().copied()
+        && !pattern.starts_with('*') {
             if !remaining.starts_with(first) {
                 return false;
             }
             remaining = &remaining[first.len()..];
             parts.next();
         }
-    }
 
     while let Some(part) = parts.next() {
         if parts.peek().is_none() && !pattern.ends_with('*') {
@@ -2705,11 +2698,10 @@ fn candidate_roots() -> Vec<PathBuf> {
     if let Ok(dir) = env::current_dir() {
         roots.push(dir);
     }
-    if let Ok(exe) = env::current_exe() {
-        if let Some(parent) = exe.parent() {
+    if let Ok(exe) = env::current_exe()
+        && let Some(parent) = exe.parent() {
             roots.push(parent.to_path_buf());
         }
-    }
     roots.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
     roots
 }

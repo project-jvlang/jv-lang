@@ -2,8 +2,10 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum LocaleCode {
     En,
+    #[default]
     Ja,
 }
 
@@ -16,11 +18,6 @@ impl LocaleCode {
     }
 }
 
-impl Default for LocaleCode {
-    fn default() -> Self {
-        LocaleCode::Ja
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct TemplateCatalog {

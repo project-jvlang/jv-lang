@@ -407,7 +407,9 @@ impl LogGuardKind {
 
 /// 利用するロギングフレームワーク種別。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum LoggingFrameworkKind {
+    #[default]
     Slf4j,
     Log4j2,
     JbossLogging,
@@ -416,11 +418,6 @@ pub enum LoggingFrameworkKind {
     Custom { identifier: Option<String> },
 }
 
-impl Default for LoggingFrameworkKind {
-    fn default() -> Self {
-        LoggingFrameworkKind::Slf4j
-    }
-}
 
 /// ロガーフィールドを識別するID。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -452,6 +449,7 @@ pub struct LogMessage {
 
 /// ログ呼び出し内の要素を列挙する。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum LogInvocationItem {
     Statement(IrStatement),
     Message(LogMessage),
@@ -1025,6 +1023,7 @@ pub enum AssertionPattern {
 
 /// Desugared statements
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum IrStatement {
     // Comments propagated from AST
     Comment {
@@ -1544,10 +1543,7 @@ impl JavaType {
     }
 
     pub fn is_nullable(&self) -> bool {
-        match self {
-            JavaType::Primitive(_) => false,
-            _ => true,
-        }
+        !matches!(self, JavaType::Primitive(_))
     }
 }
 

@@ -35,11 +35,10 @@ fn infer_json_schema(data: &[u8]) -> Result<Schema, SchemaError> {
         message: err.to_string(),
     })?;
 
-    if let Some(array) = value.as_array() {
-        if array.is_empty() {
+    if let Some(array) = value.as_array()
+        && array.is_empty() {
             return Err(SchemaError::EmptyDataset);
         }
-    }
 
     Ok(infer_json_value_schema(&value))
 }
@@ -107,7 +106,7 @@ fn infer_json_array_schema(values: &[Value]) -> Schema {
 
     Schema::Array {
         element_type: Box::new(
-            element_schema.unwrap_or_else(|| Schema::Primitive(PrimitiveType::Null)),
+            element_schema.unwrap_or(Schema::Primitive(PrimitiveType::Null)),
         ),
     }
 }
@@ -186,7 +185,7 @@ fn infer_tabular_schema(
         let schema = accumulator
             .schema
             .clone()
-            .unwrap_or_else(|| Schema::Primitive(PrimitiveType::Null));
+            .unwrap_or(Schema::Primitive(PrimitiveType::Null));
         fields.insert(header.clone(), schema);
         if accumulator.present_count == record_count {
             required.insert(header.clone());
@@ -314,7 +313,7 @@ fn merge_schema(left: Schema, right: Schema) -> Schema {
             make_union(left_variants.into_iter().chain(std::iter::once(right)))
         }
         (left, Schema::Union(right_variants)) => {
-            make_union(std::iter::once(left).chain(right_variants.into_iter()))
+            make_union(std::iter::once(left).chain(right_variants))
         }
         (left, right) => make_union(vec![left, right]),
     }
@@ -918,7 +917,7 @@ fn optional_type(inner: JavaType) -> JavaType {
     }
 }
 
-fn unwrap_optional_schema<'a>(schema: &'a Schema) -> (&'a Schema, bool) {
+fn unwrap_optional_schema(schema: &Schema) -> (&Schema, bool) {
     match schema {
         Schema::Optional(inner) => (inner, true),
         Schema::Union(variants) => {
@@ -1282,7 +1281,7 @@ fn fetch_http(url: &Url, request: &SampleFetchRequest) -> Result<Vec<u8>, Sample
     let response = agent.get(url.as_str()).call().map_err(|err| match err {
         ureq::Error::Status(status, _) => SampleFetchError::HttpResponse {
             uri: url.to_string(),
-            status: status as u16,
+            status,
         },
         ureq::Error::Transport(transport) => SampleFetchError::HttpRequest {
             uri: url.to_string(),
@@ -1441,11 +1440,10 @@ fn compute_sha256(bytes: &[u8]) -> String {
 }
 
 fn enforce_limit(request: &SampleFetchRequest, actual: u64) -> Result<(), SampleFetchError> {
-    if let Some(limit) = request.max_bytes {
-        if actual > limit {
+    if let Some(limit) = request.max_bytes
+        && actual > limit {
             return Err(SampleFetchError::SizeLimitExceeded { limit, actual });
         }
-    }
     Ok(())
 }
 

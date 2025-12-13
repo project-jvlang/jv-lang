@@ -401,8 +401,8 @@ fn symbol_candidates(package: Option<&str>, path: &[String]) -> Vec<String> {
         push_candidate(&mut candidates, path.join("$"));
     }
 
-    if let Some(pkg) = package {
-        if !pkg.is_empty() {
+    if let Some(pkg) = package
+        && !pkg.is_empty() {
             if !colon_join.is_empty() {
                 push_candidate(&mut candidates, format!("{pkg}::{colon_join}"));
             }
@@ -411,7 +411,6 @@ fn symbol_candidates(package: Option<&str>, path: &[String]) -> Vec<String> {
                 push_candidate(&mut candidates, format!("{pkg}::{dot}"));
             }
         }
-    }
 
     candidates
 }
@@ -805,13 +804,12 @@ impl JvLanguageServer {
                 regex_analyses = validator.take_analyses();
             }
 
-            if regex_analyses.is_empty() && has_regex_literals {
-                if let Some(regex_program) = Self::regex_program_from_tokens(&tokens) {
+            if regex_analyses.is_empty() && has_regex_literals
+                && let Some(regex_program) = Self::regex_program_from_tokens(&tokens) {
                     let mut validator = RegexValidator::new();
                     let _ = validator.validate_program(&regex_program);
                     regex_analyses = validator.take_analyses();
                 }
-            }
         }
 
         match check_result {
@@ -1169,11 +1167,10 @@ fn build_generic_hover(
         info.kind.label(),
         info.name
     ));
-    if let Some(pkg) = package {
-        if !pkg.is_empty() {
+    if let Some(pkg) = package
+        && !pkg.is_empty() {
             lines.push(format!("パッケージ: {}", pkg));
         }
-    }
 
     if !summary.type_params.is_empty() {
         lines.push("型パラメータ:".to_string());
@@ -1352,11 +1349,10 @@ fn summarize_symbol(
                 attributes.push(format!("宣言境界: {}", bounds));
             }
             if let Some(type_id) = type_ids.get(idx) {
-                if let Some(facts) = facts {
-                    if let Some(kind) = facts.kind_for(*type_id) {
+                if let Some(facts) = facts
+                    && let Some(kind) = facts.kind_for(*type_id) {
                         attributes.push(format!("推論kind: {:?}", kind));
                     }
-                }
                 if let Some(variance) = variance_map.get(type_id) {
                     attributes.push(format!("変位: {:?}", variance));
                 }
@@ -2140,11 +2136,10 @@ fn format_hover_contents(analysis: &RegexAnalysis) -> String {
             for suggestion in &diagnostic.suggestions {
                 lines.push(format!("  Suggestion: {}", suggestion));
             }
-            if let Some(hint) = &diagnostic.learning_hints {
-                if !hint.trim().is_empty() {
+            if let Some(hint) = &diagnostic.learning_hints
+                && !hint.trim().is_empty() {
                     lines.push(format!("  Hint: {}", hint.trim()));
                 }
-            }
         }
     }
 
@@ -2348,13 +2343,11 @@ fn sequence_lambda_issue_ranges(content: &str) -> Vec<(usize, usize)> {
     let mut search_index = 0usize;
     while let Some(relative) = content[search_index..].find('{') {
         let brace_index = search_index + relative;
-        if let Some(identifier) = preceding_identifier(content, brace_index) {
-            if SEQUENCE_LAMBDA_OPERATIONS.contains(&identifier.as_str()) {
-                if let Some((start, end)) = detect_implicit_it(content, brace_index) {
+        if let Some(identifier) = preceding_identifier(content, brace_index)
+            && SEQUENCE_LAMBDA_OPERATIONS.contains(&identifier.as_str())
+                && let Some((start, end)) = detect_implicit_it(content, brace_index) {
                     issues.push((start, end));
                 }
-            }
-        }
         search_index = brace_index + 1;
     }
     issues
@@ -2465,10 +2458,10 @@ fn statement_contains_regex_features(statement: &Statement) -> bool {
                     .initializer
                     .as_ref()
                     .is_some_and(expression_contains_regex_features)
-                    || property.getter.as_ref().map_or(false, |expr| {
+                    || property.getter.as_ref().is_some_and(|expr| {
                         expression_contains_regex_features(expr.as_ref())
                     })
-                    || property.setter.as_ref().map_or(false, |expr| {
+                    || property.setter.as_ref().is_some_and(|expr| {
                         expression_contains_regex_features(expr.as_ref())
                     })
             });
@@ -2628,14 +2621,14 @@ fn expression_contains_regex_features(expression: &Expression) -> bool {
             else_arm,
             ..
         } => {
-            expr.as_ref().map_or(false, |expr| {
+            expr.as_ref().is_some_and(|expr| {
                 expression_contains_regex_features(expr.as_ref())
             }) || arms.iter().any(|arm| {
                 arm.guard
                     .as_ref()
                     .is_some_and(expression_contains_regex_features)
                     || expression_contains_regex_features(&arm.body)
-            }) || else_arm.as_ref().map_or(false, |expr| {
+            }) || else_arm.as_ref().is_some_and(|expr| {
                 expression_contains_regex_features(expr.as_ref())
             })
         }
@@ -2647,7 +2640,7 @@ fn expression_contains_regex_features(expression: &Expression) -> bool {
         } => {
             expression_contains_regex_features(condition)
                 || expression_contains_regex_features(then_branch)
-                || else_branch.as_ref().map_or(false, |expr| {
+                || else_branch.as_ref().is_some_and(|expr| {
                     expression_contains_regex_features(expr.as_ref())
                 })
         }
@@ -2665,7 +2658,7 @@ fn expression_contains_regex_features(expression: &Expression) -> bool {
                 || catch_clauses
                     .iter()
                     .any(catch_clause_contains_regex_features)
-                || finally_block.as_ref().map_or(false, |expr| {
+                || finally_block.as_ref().is_some_and(|expr| {
                     expression_contains_regex_features(expr.as_ref())
                 })
         }

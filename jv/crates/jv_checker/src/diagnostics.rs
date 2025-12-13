@@ -382,13 +382,12 @@ fn frontend_diagnostic_to_tooling(diagnostic: &FrontendDiagnostic) -> EnhancedDi
     let span = diagnostic.span().cloned();
     let severity = map_frontend_severity(diagnostic.severity());
 
-    if let Some(code) = diagnostic.code() {
-        if let Some(descriptor) = descriptor(code) {
+    if let Some(code) = diagnostic.code()
+        && let Some(descriptor) = descriptor(code) {
             let mut tooling = EnhancedDiagnostic::new(descriptor, message, span);
             tooling.severity = severity;
             return tooling;
         }
-    }
 
     let fallback_message = if let Some(code) = diagnostic.code() {
         format!("{code}: {message}")
@@ -560,13 +559,12 @@ fn collect_statement_raw_diagnostics(
             comment_span,
             ..
         } => {
-            if let Some((mode, owner)) = parse_raw_type_comment(comment) {
-                if let Some(diagnostic) =
+            if let Some((mode, owner)) = parse_raw_type_comment(comment)
+                && let Some(diagnostic) =
                     build_raw_type_diagnostic(mode, owner, comment_span.clone())
                 {
                     diagnostics.push(diagnostic);
                 }
-            }
             collect_statement_raw_diagnostics(inner, diagnostics);
         }
         IrStatement::ClassDeclaration {
@@ -732,6 +730,16 @@ fn build_raw_type_diagnostic(
     Some(diagnostic)
 }
 
+pub fn from_check_error(error: &CheckError) -> Option<EnhancedDiagnostic> {
+    match error {
+        CheckError::TypeError(message)
+        | CheckError::NullSafetyError(message)
+        | CheckError::UndefinedVariable(message)
+        | CheckError::SyntaxError(message) => detect_in_message(message, None),
+        CheckError::ValidationError { message, span } => detect_in_message(message, span.clone()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{DiagnosticSeverity, collect_raw_type_diagnostics, extract_tooling_metadata};
@@ -817,15 +825,5 @@ mod tests {
         let diagnostic = &diagnostics[0];
         assert_eq!(diagnostic.code, "JV3203");
         assert_eq!(diagnostic.severity, DiagnosticSeverity::Information);
-    }
-}
-
-pub fn from_check_error(error: &CheckError) -> Option<EnhancedDiagnostic> {
-    match error {
-        CheckError::TypeError(message)
-        | CheckError::NullSafetyError(message)
-        | CheckError::UndefinedVariable(message)
-        | CheckError::SyntaxError(message) => detect_in_message(message, None),
-        CheckError::ValidationError { message, span } => detect_in_message(message, span.clone()),
     }
 }

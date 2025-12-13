@@ -235,11 +235,10 @@ pub fn preload_tuple_plans_into_context(
                 type_hints.clone(),
             );
 
-            if usage.kind == TupleUsageKind::FunctionReturn {
-                if let Some(owner) = &usage.owner {
+            if usage.kind == TupleUsageKind::FunctionReturn
+                && let Some(owner) = &usage.owner {
                     context.register_tuple_return(owner, &record_name, component_names.clone());
                 }
-            }
         }
     }
 }
@@ -323,11 +322,10 @@ pub fn apply_tuple_return_types(program: &mut IrProgram) {
             .cloned()
             .unwrap_or_else(|| plan.generic_name.clone());
         for usage in &plan.usage_sites {
-            if usage.kind == TupleUsageKind::FunctionReturn {
-                if let Some(owner) = &usage.owner {
+            if usage.kind == TupleUsageKind::FunctionReturn
+                && let Some(owner) = &usage.owner {
                     mapping.insert(owner.clone(), record_name.clone());
                 }
-            }
         }
     }
 

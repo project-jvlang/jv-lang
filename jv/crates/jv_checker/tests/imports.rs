@@ -22,7 +22,7 @@ fn with_type(
     let package = fqcn
         .rsplit_once('.')
         .map(|(pkg, _)| pkg.to_string())
-        .unwrap_or_else(|| "".to_string());
+        .unwrap_or_default();
 
     if let Some(module_name) = module {
         index

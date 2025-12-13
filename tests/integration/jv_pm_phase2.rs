@@ -419,9 +419,11 @@ async fn download_manager_emits_concurrency_warnings() {
 
     let registry_client = Arc::new(registry.clone());
 
-    let mut build = BuildInfo::default();
-    build.max_concurrent_downloads = Some(128);
-    build.max_concurrent_warning = Some(8);
+    let build = BuildInfo {
+        max_concurrent_downloads: Some(128),
+        max_concurrent_warning: Some(8),
+        ..BuildInfo::default()
+    };
 
     let manager = DownloadManager::new(registry_client, cache).apply_manifest(Some(&build));
     let expected_limit = DownloadSettings::default().hard_limit;

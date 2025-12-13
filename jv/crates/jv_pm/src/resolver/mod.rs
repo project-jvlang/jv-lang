@@ -65,9 +65,7 @@ impl ResolverDispatcher {
             self.aliases.insert(alias.clone(), canonical.clone());
         }
 
-        if info.is_default {
-            self.default_strategy = canonical;
-        } else if self.default_strategy.is_empty() {
+        if info.is_default || self.default_strategy.is_empty() {
             self.default_strategy = canonical;
         }
     }

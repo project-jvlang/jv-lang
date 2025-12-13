@@ -49,6 +49,7 @@ impl DependencySpec {
         self
     }
 
+    #[allow(dead_code)]
     fn coordinate(&self) -> String {
         format!("{}:{}", self.group, self.artifact)
     }
@@ -84,6 +85,7 @@ impl DependencyCoordinate {
         }
     }
 
+    #[allow(dead_code)]
     fn optional(mut self) -> Self {
         self.optional = true;
         self

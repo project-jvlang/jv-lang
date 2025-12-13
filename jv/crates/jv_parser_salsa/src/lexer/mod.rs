@@ -28,7 +28,7 @@ impl<'src> Lexer<'src> {
         let mut base = jv_lexer::Lexer::new(source);
         let raw_tokens = base.tokenize()?;
 
-        let tokens = build_zero_copy_tokens(&source, &raw_tokens);
+        let tokens = build_zero_copy_tokens(source, &raw_tokens);
 
         Ok(Self {
             source,
@@ -85,7 +85,7 @@ fn build_zero_copy_tokens<'src>(
         let line_end = line_starts
             .get(line_idx + 1)
             .copied()
-            .unwrap_or_else(|| source.len());
+            .unwrap_or(source.len());
         let line_slice = &source[line_start..line_end];
 
         let column_offset = raw.column.saturating_sub(1);

@@ -303,8 +303,8 @@ fn split_tuple_elements(value: &str) -> Result<Vec<String>, ()> {
     let mut angle_depth = 0usize;
     let mut square_depth = 0usize;
 
-    let mut chars = value.chars().peekable();
-    while let Some(ch) = chars.next() {
+    let chars = value.chars().peekable();
+    for ch in chars {
         match ch {
             '(' => {
                 paren_depth += 1;
@@ -742,7 +742,7 @@ mod tests {
     fn token(token_type: TokenType, lexeme: &str) -> Token {
         Token {
             token_type,
-            lexeme: lexeme.to_string(),
+            lexeme: lexeme.into(),
             line: 0,
             column: 0,
             leading_trivia: Default::default(),

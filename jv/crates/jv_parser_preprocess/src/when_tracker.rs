@@ -41,17 +41,14 @@ impl PendingWhenTracker {
                 }
                 _ => {}
             },
-            TokenType::RightParen => match self.state {
-                Some(PendingWhenState::InSubject {
+            TokenType::RightParen => if let Some(PendingWhenState::InSubject {
                     ref mut paren_depth,
-                }) => {
-                    if *paren_depth > 1 {
-                        *paren_depth -= 1;
-                    } else {
-                        self.state = Some(PendingWhenState::AwaitingBrace);
-                    }
+                }) = self.state {
+                if *paren_depth > 1 {
+                    *paren_depth -= 1;
+                } else {
+                    self.state = Some(PendingWhenState::AwaitingBrace);
                 }
-                _ => {}
             },
             TokenType::LeftBrace => {
                 let should_enter = matches!(
@@ -189,13 +186,12 @@ fun demo(candidate: Any, stream: Stream<Any>): Int {
         let when_commas = processed
             .iter()
             .filter(|token| {
-                token.metadata.iter().any(|metadata| match metadata {
-                    TokenMetadata::LayoutComma(info)
-                        if matches!(info.sequence, LayoutSequenceKind::When) =>
-                    {
-                        true
-                    }
-                    _ => false,
+                token.metadata.iter().any(|metadata| {
+                    matches!(
+                        metadata,
+                        TokenMetadata::LayoutComma(info)
+                            if matches!(info.sequence, LayoutSequenceKind::When)
+                    )
                 })
             })
             .count();
@@ -221,13 +217,12 @@ fun demo(candidate: Any, stream: Stream<Any>): Int {
         let when_commas = processed
             .iter()
             .filter(|token| {
-                token.metadata.iter().any(|metadata| match metadata {
-                    TokenMetadata::LayoutComma(info)
-                        if matches!(info.sequence, LayoutSequenceKind::When) =>
-                    {
-                        true
-                    }
-                    _ => false,
+                token.metadata.iter().any(|metadata| {
+                    matches!(
+                        metadata,
+                        TokenMetadata::LayoutComma(info)
+                            if matches!(info.sequence, LayoutSequenceKind::When)
+                    )
                 })
             })
             .count();

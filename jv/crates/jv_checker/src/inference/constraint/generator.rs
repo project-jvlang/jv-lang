@@ -126,11 +126,12 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             Statement::ForIn(for_in) => {
                 self.handle_for_in(for_in);
             }
-            Statement::Return { value, .. } => {
-                if let Some(expr) = value {
-                    self.infer_expression(expr);
-                }
+            Statement::Return {
+                value: Some(expr), ..
+            } => {
+                self.infer_expression(expr);
             }
+            Statement::Return { .. } => {}
             Statement::FunctionDeclaration {
                 name,
                 parameters,
@@ -300,7 +301,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         initializer_ty: Option<TypeKind>,
     ) {
         let symbol_ty = self.env.fresh_type_variable();
-        let mut representative = initializer_ty.clone().unwrap_or_else(|| TypeKind::Unknown);
+        let mut representative = initializer_ty.clone().unwrap_or(TypeKind::Unknown);
 
         if let Some(ann) = annotation {
             let annotated = self.type_from_annotation(ann);
@@ -596,11 +597,10 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
             }
 
             let mut usage_count = *self.type_var_usage.get(id).unwrap_or(&0);
-            if usage_count == 0 {
-                if let Some(origin) = self.env.type_origin(*id) {
+            if usage_count == 0
+                && let Some(origin) = self.env.type_origin(*id) {
                     usage_count = *self.type_var_usage.get(&origin).unwrap_or(&0);
                 }
-            }
             if usage_count == 0 {
                 let candidate_names: Vec<&'static str> =
                     candidates.iter().map(|(recv, _)| *recv).collect();
@@ -655,7 +655,7 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
         TypeKind::function(param_types, body_ty)
     }
 
-    fn receiver_name<'a>(ty: &'a TypeKind) -> Option<&'a str> {
+    fn receiver_name(ty: &TypeKind) -> Option<&str> {
         match ty {
             TypeKind::Primitive(primitive) => Some(primitive.java_name()),
             TypeKind::Boxed(primitive) => Some(primitive.boxed_fqcn()),

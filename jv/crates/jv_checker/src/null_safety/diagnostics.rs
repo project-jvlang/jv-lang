@@ -148,13 +148,11 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
                 .or_else(|| aggregated.get(name.as_str()).copied())
                 .unwrap_or(NullabilityKind::Unknown);
 
-            if matches!(observed, NullabilityKind::Unknown) {
-                if let Some(lattice_state) = self.context.lattice().get(name.as_str()) {
-                    if !matches!(lattice_state, NullabilityKind::Unknown) {
+            if matches!(observed, NullabilityKind::Unknown)
+                && let Some(lattice_state) = self.context.lattice().get(name.as_str())
+                    && !matches!(lattice_state, NullabilityKind::Unknown) {
                         observed = lattice_state;
                     }
-                }
-            }
 
             self.evaluate_exit_state(name.as_str(), observed, &mut diagnostics);
             processed.insert(name.clone());
@@ -172,13 +170,11 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
                 .or_else(|| aggregated.get(name.as_str()).copied())
                 .unwrap_or(NullabilityKind::Unknown);
 
-            if matches!(observed, NullabilityKind::Unknown) {
-                if let Some(lattice_state) = self.context.lattice().get(name.as_str()) {
-                    if !matches!(lattice_state, NullabilityKind::Unknown) {
+            if matches!(observed, NullabilityKind::Unknown)
+                && let Some(lattice_state) = self.context.lattice().get(name.as_str())
+                    && !matches!(lattice_state, NullabilityKind::Unknown) {
                         observed = lattice_state;
                     }
-                }
-            }
 
             self.evaluate_exit_state(name.as_str(), observed, &mut diagnostics);
             processed.insert(name.clone());
@@ -892,8 +888,10 @@ mod tests {
         let facts = builder.build();
         let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
-        let mut outcome = FlowAnalysisOutcome::default();
-        outcome.exit_state = Some(FlowStateSnapshot::new());
+        let outcome = FlowAnalysisOutcome {
+            exit_state: Some(FlowStateSnapshot::new()),
+            ..FlowAnalysisOutcome::default()
+        };
 
         let emitter = DiagnosticsEmitter::new(&context);
         let payload = emitter.emit(&outcome);
@@ -923,8 +921,10 @@ mod tests {
         let facts = builder.build();
         let context = NullSafetyContext::from_parts(Some(&facts), None, None);
 
-        let mut outcome = FlowAnalysisOutcome::default();
-        outcome.exit_state = Some(FlowStateSnapshot::new());
+        let outcome = FlowAnalysisOutcome {
+            exit_state: Some(FlowStateSnapshot::new()),
+            ..FlowAnalysisOutcome::default()
+        };
 
         let emitter = DiagnosticsEmitter::new(&context);
         let payload = emitter.emit(&outcome);
@@ -952,8 +952,10 @@ mod tests {
         let mut context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
         context.late_init_mut().allow_late_init("session");
 
-        let mut outcome = FlowAnalysisOutcome::default();
-        outcome.exit_state = Some(FlowStateSnapshot::new());
+        let outcome = FlowAnalysisOutcome {
+            exit_state: Some(FlowStateSnapshot::new()),
+            ..FlowAnalysisOutcome::default()
+        };
 
         let emitter = DiagnosticsEmitter::new(&context);
         let payload = emitter.emit(&outcome);

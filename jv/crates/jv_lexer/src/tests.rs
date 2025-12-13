@@ -365,7 +365,7 @@ fn lex_wildcard_and_multiple_implicit_params() {
         })
         .collect();
 
-    assert!(matches!(essential.get(0), Some(TokenType::Underscore)));
+    assert!(matches!(essential.first(), Some(TokenType::Underscore)));
     assert!(matches!(
         essential.get(1),
         Some(TokenType::ImplicitParam(1))
@@ -1679,7 +1679,7 @@ fn regex_literal_basic_tokenization() {
         .find(|token| matches!(token.token_type, TokenType::RegexLiteral(_)))
         .expect("expected regex literal token");
 
-    assert_eq!(regex_token.lexeme, "abc");
+    assert_eq!(regex_token.lexeme.as_ref(), "abc");
     assert_eq!(
         regex_token.token_type,
         TokenType::RegexLiteral("abc".to_string())
@@ -1694,8 +1694,8 @@ fn regex_literal_basic_tokenization() {
         })
         .expect("regex metadata should be present");
 
-    assert_eq!(metadata.0, "/abc/");
-    assert_eq!(metadata.1, "abc");
+    assert_eq!(metadata.0.as_str(), "/abc/");
+    assert_eq!(metadata.1.as_str(), "abc");
 }
 
 #[test]

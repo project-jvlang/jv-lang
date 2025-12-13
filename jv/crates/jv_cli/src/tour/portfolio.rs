@@ -58,8 +58,10 @@ impl PortfolioGenerator {
     }
 
     pub fn with_output_root<P: Into<PathBuf>>(root: P) -> Self {
-        let mut config = PortfolioConfig::default();
-        config.output_root = root.into();
+        let config = PortfolioConfig {
+            output_root: root.into(),
+            ..PortfolioConfig::default()
+        };
         Self { config }
     }
 
@@ -347,13 +349,12 @@ fn build_project_readme(project: &Project, artifact: &JarArtifact) -> String {
             for item in step.walkthrough {
                 content.push_str(&format!("- {}\n", item));
             }
-            if let Some(code) = step.code {
-                if !code.trim().is_empty() {
+            if let Some(code) = step.code
+                && !code.trim().is_empty() {
                     content.push_str("\n```jv\n");
                     content.push_str(code.trim());
                     content.push_str("\n```\n");
                 }
-            }
             if !step.verification.is_empty() {
                 content.push_str("\n検証コマンド:\n");
                 for command in step.verification {
@@ -520,7 +521,7 @@ fn add_entries(
         entries.push(entry);
     }
 
-    entries.sort_by(|a, b| a.path().cmp(&b.path()));
+    entries.sort_by_key(|a| a.path());
 
     for entry in entries {
         let path = entry.path();

@@ -179,7 +179,7 @@ impl ConstraintSolver {
             }
             ConstraintKind::Placeholder(placeholder) => {
                 return Err(SolveError::Placeholder {
-                    placeholder: *placeholder,
+                    placeholder,
                     note: constraint.note.clone(),
                 });
             }

@@ -127,11 +127,10 @@ fn tuple_demo_example_preserves_interpolation_calls() {
                 _ => false,
             }),
             Expression::Call { function, args, .. } => {
-                if let Expression::MemberAccess { property, .. } = function.as_ref() {
-                    if property == "_3" {
+                if let Expression::MemberAccess { property, .. } = function.as_ref()
+                    && property == "_3" {
                         return true;
                     }
-                }
                 if expression_uses_tuple_component(function) {
                     return true;
                 }
@@ -175,7 +174,7 @@ fn tuple_demo_example_preserves_interpolation_calls() {
                     || expression_uses_tuple_component(then_branch)
                     || else_branch
                         .as_ref()
-                        .map_or(false, |expr| expression_uses_tuple_component(expr))
+                        .is_some_and(|expr| expression_uses_tuple_component(expr))
             }
             Expression::When {
                 expr,
@@ -184,17 +183,17 @@ fn tuple_demo_example_preserves_interpolation_calls() {
                 ..
             } => {
                 expr.as_ref()
-                    .map_or(false, |expr| expression_uses_tuple_component(expr))
+                    .is_some_and(|expr| expression_uses_tuple_component(expr))
                     || arms.iter().any(|arm| {
                         expression_uses_tuple_component(&arm.body)
                             || arm
                                 .guard
                                 .as_ref()
-                                .map_or(false, |guard| expression_uses_tuple_component(guard))
+                                .is_some_and(expression_uses_tuple_component)
                     })
                     || else_arm
                         .as_ref()
-                        .map_or(false, |expr| expression_uses_tuple_component(expr))
+                        .is_some_and(|expr| expression_uses_tuple_component(expr))
             }
             Expression::Lambda { body, .. } => expression_uses_tuple_component(body),
             Expression::Unary { operand, .. } => expression_uses_tuple_component(operand),

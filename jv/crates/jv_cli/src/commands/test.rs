@@ -46,12 +46,14 @@ pub fn run(args: TestArgs) -> Result<()> {
         .map_err(|diagnostic| tooling_failure(&diagnostic_path, diagnostic))?;
 
     let generated_root = project_root.join("target/generated-tests");
-    let mut overrides = CliOverrides::default();
-    overrides.entrypoint = entrypoint_override;
-    overrides.output = Some(generated_root.clone());
-    overrides.java_only = true;
-    overrides.clean = args.clean;
-    overrides.target = args.target;
+    let overrides = CliOverrides {
+        entrypoint: entrypoint_override,
+        output: Some(generated_root.clone()),
+        java_only: true,
+        clean: args.clean,
+        target: args.target,
+        ..CliOverrides::default()
+    };
 
     let mut plan = BuildOptionsFactory::compose(project_root.clone(), settings, layout, overrides)
         .map_err(|diagnostic| tooling_failure(&diagnostic_path, diagnostic))?;

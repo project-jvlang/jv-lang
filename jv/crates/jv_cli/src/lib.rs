@@ -216,11 +216,11 @@ fn format_suggestions(suggestions: &[String]) -> String {
         return String::new();
     }
 
-    let joined = suggestions
+    
+    suggestions
         .iter()
         .map(|suggestion| format!("\n  提案: {suggestion}"))
-        .collect::<String>();
-    joined
+        .collect::<String>()
 }
 
 fn format_learning_hint(hint: Option<&str>) -> String {
@@ -828,14 +828,13 @@ pub mod pipeline {
                 (snapshot, facts_snapshot, Some(telemetry))
             }
             Err(errors) => {
-                if let Some(diagnostic) = errors.iter().find_map(from_check_error) {
-                    if options.check {
+                if let Some(diagnostic) = errors.iter().find_map(from_check_error)
+                    && options.check {
                         return Err(tooling_failure(
                             entrypoint,
                             diagnostic.with_strategy(DiagnosticStrategy::Deferred),
                         ));
                     }
-                }
                 if options.check {
                     let details = errors
                         .iter()
@@ -1527,12 +1526,12 @@ pub mod pipeline {
                             "helper": event
                                 .helper_method
                                 .as_ref()
-                                .map(|helper| format_helper_spec(helper)),
+                                .map(format_helper_spec),
                             "warned": event.warned,
                             "source_span": event
                                 .source_span
                                 .as_ref()
-                                .map(|span| format_span(span)),
+                                .map(format_span),
                             "java_span_hint": event.java_span_hint.clone(),
                             "nullable_guard": event
                                 .nullable_guard
@@ -1548,7 +1547,7 @@ pub mod pipeline {
                 "catalog_hits": telemetry
                     .catalog_hits
                     .iter()
-                    .map(|helper| format_helper_spec(helper))
+                    .map(format_helper_spec)
                     .collect::<Vec<_>>(),
             })
         });
@@ -1587,10 +1586,7 @@ pub mod pipeline {
             println!("クリーンビルド: 実行しました / Clean build: applied");
         }
 
-        let compile_result = match compile(prepared_output.plan()) {
-            Ok(result) => result,
-            Err(err) => return Err(err),
-        };
+        let compile_result = compile(prepared_output.plan())?;
 
         if !compile_result.warnings.is_empty() {
             for warning in &compile_result.warnings {

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tempfile::tempdir;
@@ -48,7 +48,7 @@ fn test_hydrate_resolved_dependencies_with_jars_empty() {
     assert!(resolved.dependencies.is_empty());
 }
 
-fn write_fake_jar(local_repo: &PathBuf, coords: (&str, &str, &str)) -> PathBuf {
+fn write_fake_jar(local_repo: &Path, coords: (&str, &str, &str)) -> PathBuf {
     let (group, artifact, version) = coords;
     let jar_path = local_repo
         .join(group.replace('.', "/"))

@@ -236,7 +236,7 @@ impl<'a> ReconstructionContext<'a> {
                 modifiers,
                 span,
             } => {
-                let type_annotation = Some(self.convert_java_type(java_type));
+                let type_annotation = Some(Self::convert_java_type(java_type));
                 let initializer_expr = match (is_final, initializer) {
                     (_, Some(expr)) => {
                         Some(self.with_segment("initializer", |ctx| ctx.convert_expression(expr))?)
@@ -353,7 +353,7 @@ impl<'a> ReconstructionContext<'a> {
                 let return_type = if matches!(return_type, JavaType::Void) {
                     None
                 } else {
-                    Some(self.convert_java_type(return_type))
+                    Some(Self::convert_java_type(return_type))
                 };
 
                 let body_expr = match body {
@@ -667,7 +667,7 @@ impl<'a> ReconstructionContext<'a> {
             }
             IrExpression::SequencePipeline { span, .. } => {
                 return self.placeholder_expression(
-                    &span,
+                    span,
                     WarningKind::UnsupportedNode,
                     "Sequence pipeline expression reconstruction is not implemented",
                 );
@@ -698,7 +698,7 @@ impl<'a> ReconstructionContext<'a> {
     ) -> Result<jv_ast::Parameter, ReconstructionError> {
         self.visit_node();
 
-        let type_annotation = Some(self.convert_java_type(&param.java_type));
+        let type_annotation = Some(Self::convert_java_type(&param.java_type));
 
         self.record_success();
 
@@ -711,13 +711,13 @@ impl<'a> ReconstructionContext<'a> {
         })
     }
 
-    fn convert_java_type(&mut self, java_type: &JavaType) -> TypeAnnotation {
+    fn convert_java_type(java_type: &JavaType) -> TypeAnnotation {
         match java_type {
             JavaType::Primitive(name) | JavaType::Reference { name, .. } => {
                 TypeAnnotation::Simple(name.clone())
             }
             JavaType::Array { element_type, .. } => {
-                TypeAnnotation::Array(Box::new(self.convert_java_type(element_type)))
+                TypeAnnotation::Array(Box::new(Self::convert_java_type(element_type)))
             }
             JavaType::Functional {
                 param_types,
@@ -726,9 +726,9 @@ impl<'a> ReconstructionContext<'a> {
             } => TypeAnnotation::Function {
                 params: param_types
                     .iter()
-                    .map(|ty| self.convert_java_type(ty))
+                    .map(Self::convert_java_type)
                     .collect(),
-                return_type: Box::new(self.convert_java_type(return_type)),
+                return_type: Box::new(Self::convert_java_type(return_type)),
             },
             JavaType::Wildcard { kind, bound } => {
                 let text = match kind {
@@ -737,7 +737,7 @@ impl<'a> ReconstructionContext<'a> {
                         "? extends {}",
                         bound
                             .as_ref()
-                            .map(|inner| self.convert_java_type(inner))
+                            .map(|inner| Self::convert_java_type(inner.as_ref()))
                             .map(render_type_annotation)
                             .unwrap_or_else(|| "Object".to_string())
                     ),
@@ -745,7 +745,7 @@ impl<'a> ReconstructionContext<'a> {
                         "? super {}",
                         bound
                             .as_ref()
-                            .map(|inner| self.convert_java_type(inner))
+                            .map(|inner| Self::convert_java_type(inner.as_ref()))
                             .map(render_type_annotation)
                             .unwrap_or_else(|| "Object".to_string())
                     ),

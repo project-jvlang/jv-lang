@@ -87,14 +87,13 @@ impl ConversionRulesEngine {
                 ConversionOutcome::Identity
             }
             _ => {
-                if let Some(lookup) = catalog {
-                    if let Some(helper) = lookup.find_helper(from, to) {
+                if let Some(lookup) = catalog
+                    && let Some(helper) = lookup.find_helper(from, to) {
                         return ConversionOutcome::Allowed(
                             ConversionMetadata::new(ConversionKind::MethodInvocation)
                                 .with_helper(helper),
                         );
                     }
-                }
                 ConversionOutcome::Rejected(TypeError::incompatible_conversion(
                     from.describe(),
                     to.describe(),

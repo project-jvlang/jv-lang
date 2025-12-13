@@ -134,13 +134,12 @@ fn ensure_toolchain_envs() {
             ("JAVA25_HOME", toolchain_java_home(JavaTarget::Java25)),
             ("JAVA21_HOME", toolchain_java_home(JavaTarget::Java21)),
         ] {
-            if env::var_os(var).is_none() {
-                if let Some(path) = dir {
+            if env::var_os(var).is_none()
+                && let Some(path) = dir {
                     unsafe {
                         env::set_var(var, path);
                     }
                 }
-            }
         }
     });
 }
@@ -352,8 +351,8 @@ fn discover_cli_binary() -> Option<PathBuf> {
         }
     }
 
-    if let Some(toolchains_dir) = toolchains_root() {
-        if let Ok(entries) = fs::read_dir(&toolchains_dir) {
+    if let Some(toolchains_dir) = toolchains_root()
+        && let Ok(entries) = fs::read_dir(&toolchains_dir) {
             for entry in entries.flatten() {
                 if !entry.file_type().map(|ty| ty.is_dir()).unwrap_or(false) {
                     continue;
@@ -371,7 +370,6 @@ fn discover_cli_binary() -> Option<PathBuf> {
                 }
             }
         }
-    }
 
     candidates.into_iter().find(|path| path.exists())
 }
@@ -414,14 +412,6 @@ fn java_command_for_target(target: JavaTarget) -> Option<Command> {
         cmd.env("JAVA_HOME", &info.java_home);
         cmd
     })
-}
-
-fn javac_command() -> Option<Command> {
-    javac_command_for_target(default_java_target())
-}
-
-fn java_command() -> Option<Command> {
-    java_command_for_target(default_java_target())
 }
 
 fn has_javac_for_target(target: JavaTarget) -> bool {
@@ -759,7 +749,7 @@ fn build_script_example(cli_path: &Path, source: &Path, label: &str) -> Result<(
     let output = Command::new(cli_path)
         .current_dir(&workdir)
         .arg("build")
-        .arg(&source)
+        .arg(source)
         .arg("--java-only")
         .arg("--target")
         .arg("25")
@@ -890,17 +880,15 @@ fn sanitize_label(label: &str) -> String {
 
 fn resolve_project_entrypoint(root: &Path) -> PathBuf {
     let manifest = root.join("jv.toml");
-    if let Ok(content) = fs::read_to_string(&manifest) {
-        if let Ok(value) = toml::from_str::<toml::Value>(&content) {
-            if let Some(entrypoint) = value
+    if let Ok(content) = fs::read_to_string(&manifest)
+        && let Ok(value) = toml::from_str::<toml::Value>(&content)
+            && let Some(entrypoint) = value
                 .get("project")
                 .and_then(|project| project.get("entrypoint"))
                 .and_then(|path| path.as_str())
             {
                 return root.join(entrypoint);
             }
-        }
-    }
     root.join("src/main.jv")
 }
 
@@ -1246,7 +1234,7 @@ fn type_inference_snapshot_emitted_with_emit_types() {
         .get("answer")
         .expect("answer binding exported in environment");
     assert!(matches!(scheme.ty, TypeKind::Primitive(PrimitiveType::Int)));
-    assert!(snapshot.bindings().len() >= 1);
+    assert!(!snapshot.bindings().is_empty());
 }
 
 #[test]
@@ -2325,7 +2313,7 @@ fn pipeline_parses_package_declarations() {
             },
         );
 
-        let artifacts = compile(&plan).expect(&format!("package fixture {} compiles", name));
+        let artifacts = compile(&plan).unwrap_or_else(|_| panic!("package fixture {} compiles", name));
 
         // Verify that Java files were generated
         assert!(
@@ -2337,7 +2325,7 @@ fn pipeline_parses_package_declarations() {
         // Read generated Java source to verify package declaration
         for java_file in &artifacts.java_files {
             let java_source =
-                fs::read_to_string(java_file).expect(&format!("read generated Java for {}", name));
+                fs::read_to_string(java_file).unwrap_or_else(|_| panic!("read generated Java for {}", name));
 
             // Verify package declaration in generated Java code
             assert!(

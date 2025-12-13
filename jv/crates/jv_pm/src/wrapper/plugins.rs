@@ -111,15 +111,11 @@ pub fn discover_declared_plugins(
     if let Some(parent) = project
         .children()
         .find(|node| node.is_element() && node.tag_name().name() == "parent")
-    {
-        if let Some(resolver) = resolver {
-            if let Ok(parent_coords) = parse_parent_coordinates(parent) {
-                if let Ok(metadata) = resolver.metadata_for(&parent_coords) {
+        && let Some(resolver) = resolver
+            && let Ok(parent_coords) = parse_parent_coordinates(parent)
+                && let Ok(metadata) = resolver.metadata_for(&parent_coords) {
                     import_parent_metadata(&mut properties, &mut plugin_versions, metadata);
                 }
-            }
-        }
-    }
 
     if let Some(group) = node_text(&project, "groupId") {
         properties.insert("project.groupId".to_string(), group);

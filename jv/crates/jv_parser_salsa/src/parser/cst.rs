@@ -30,6 +30,12 @@ pub struct CstBuilder {
     root: Option<CstNode>,
 }
 
+impl Default for CstBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CstBuilder {
     /// 新しいビルダーを生成する。
     pub fn new() -> Self {

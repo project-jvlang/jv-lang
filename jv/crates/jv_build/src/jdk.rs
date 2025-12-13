@@ -245,7 +245,7 @@ fn extract_version_token(output: &str) -> Option<&str> {
 
 fn interpret_version_token(token: &str) -> Option<u32> {
     if let Some(stripped) = token.strip_prefix("1.") {
-        let mut parts = stripped.split(|ch| ch == '.' || ch == '_' || ch == '-');
+        let mut parts = stripped.split(['.', '_', '-']);
         let minor = parts.next()?;
         return minor
             .chars()

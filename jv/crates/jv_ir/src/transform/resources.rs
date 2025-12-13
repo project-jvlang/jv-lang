@@ -25,7 +25,7 @@ pub fn desugar_use_expression(
             body: lambda_body,
             ..
         } => {
-            let param = parameters.get(0);
+            let param = parameters.first();
             if let Some(param) = param {
                 resource_name = param.name.clone();
                 if let Some(annotation) = &param.type_annotation {

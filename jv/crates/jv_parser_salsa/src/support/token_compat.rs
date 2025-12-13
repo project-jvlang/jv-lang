@@ -76,7 +76,7 @@ pub fn span_from_legacy_token(token: &LegacyToken, index: &LineIndex, source: &s
         .line_starts
         .get(line_idx + 1)
         .copied()
-        .unwrap_or_else(|| source.len());
+        .unwrap_or(source.len());
     let line_slice = &source[line_start..line_end];
 
     let column_offset = token.column.saturating_sub(1);
@@ -131,13 +131,13 @@ fn merge_trivia(target: &mut TokenTrivia, trivia: &[Trivia], line: usize, column
 /// トリビアを既存トークンへ付与する。
 pub fn attach_trivia(token: &mut LegacyToken, trivia: &[Trivia]) {
     let (line, column) = {
-        let start = token
+        
+        token
             .leading_trivia
             .passthrough_comments
             .first()
             .map(|c| (c.line, c.column))
-            .unwrap_or((token.line, token.column));
-        start
+            .unwrap_or((token.line, token.column))
     };
     merge_trivia(&mut token.leading_trivia, trivia, line, column);
 }

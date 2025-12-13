@@ -147,7 +147,7 @@ fn parse_modifiers(ctx: &mut ParserContext) {
         "ref",
     ];
     while let Some(tok) = ctx.current() {
-        if tok.kind == TokenKind::Identifier && MODS.iter().any(|m| tok.lexeme_eq(*m)) {
+        if tok.kind == TokenKind::Identifier && MODS.iter().any(|m| tok.lexeme_eq(m)) {
             ctx.start_node(SyntaxKind::Modifier);
             ctx.bump();
             ctx.finish_node();
@@ -201,9 +201,7 @@ fn parse_primary_constructor(ctx: &mut ParserContext) {
         while ctx.peek_kind() != Some(TokenKind::RightParen) && !ctx.is_eof() {
             ctx.start_node(SyntaxKind::ClassParameter);
             parse_modifiers(ctx);
-            if ctx.peek_kind() == Some(TokenKind::Val) {
-                ctx.bump();
-            } else if ctx.peek_kind() == Some(TokenKind::Var) {
+            if matches!(ctx.peek_kind(), Some(TokenKind::Val | TokenKind::Var)) {
                 ctx.bump();
             }
             parse_parameter_pattern(ctx);

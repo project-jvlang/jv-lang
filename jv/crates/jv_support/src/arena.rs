@@ -82,6 +82,12 @@ struct TransformPoolsInner {
     last_session: RefCell<Option<PoolSessionMetrics>>,
 }
 
+impl Default for TransformPools {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TransformPools {
     /// Default chunk size used when pre-allocating arenas.
     pub const DEFAULT_CHUNK_BYTES: usize = DEFAULT_CHUNK_BYTES;
@@ -203,13 +209,13 @@ impl<'pool> ArenaAccessor<'pool> {
     }
 
     /// Allocates a slice filled by repeatedly invoking the generator.
-    pub fn alloc_slice_with<T, F>(&mut self, len: usize, mut generator: F) -> &mut [T]
+    pub fn alloc_slice_with<T, F>(&mut self, len: usize, generator: F) -> &mut [T]
     where
         F: FnMut(usize) -> T,
     {
         let bytes = std::mem::size_of::<T>() * len;
         self.metrics.record(bytes);
-        self.bump.alloc_slice_fill_with(len, |idx| generator(idx))
+        self.bump.alloc_slice_fill_with(len, generator)
     }
 
     /// Allocates a slice by cloning a template value.

@@ -228,7 +228,7 @@ impl KindSolver {
             let resolved = state
                 .resolved
                 .or(state.annotation)
-                .unwrap_or_else(|| Kind::Star);
+                .unwrap_or(Kind::Star);
             assignments.insert(parameter, resolved);
         }
 
@@ -253,7 +253,7 @@ fn resolve_argument_kind(
         KindArgument::Constructor(symbol) => environment
             .constructor_kind(symbol)
             .cloned()
-            .or_else(|| Some(Kind::Star)),
+            .or(Some(Kind::Star)),
         KindArgument::Parameter(parameter) => states
             .get(parameter)
             .and_then(|state| state.expected().cloned()),
@@ -327,6 +327,21 @@ pub fn describe_kind(kind: &Kind) -> String {
                     .join(", ");
                 format!("{} where {}", base_desc, parts)
             }
+        }
+    }
+}
+
+use crate::solver::GenericSolverDiagnostic;
+
+impl From<KindSolverDiagnostic> for GenericSolverDiagnostic {
+    fn from(value: KindSolverDiagnostic) -> Self {
+        GenericSolverDiagnostic::KindMismatch {
+            symbol: value.owner,
+            parameter: value.parameter,
+            parameter_name: value.parameter_name,
+            expected: value.expected,
+            actual: value.actual,
+            span: value.span,
         }
     }
 }
@@ -423,20 +438,5 @@ mod tests {
         assert_eq!(solution.diagnostics().len(), 0);
         assert_eq!(solution.telemetry().checks, 1);
         assert_eq!(solution.telemetry().cache_hits, 0);
-    }
-}
-
-use crate::solver::GenericSolverDiagnostic;
-
-impl From<KindSolverDiagnostic> for GenericSolverDiagnostic {
-    fn from(value: KindSolverDiagnostic) -> Self {
-        GenericSolverDiagnostic::KindMismatch {
-            symbol: value.owner,
-            parameter: value.parameter,
-            parameter_name: value.parameter_name,
-            expected: value.expected,
-            actual: value.actual,
-            span: value.span,
-        }
     }
 }

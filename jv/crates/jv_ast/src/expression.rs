@@ -24,6 +24,7 @@ pub enum LogBlockLevel {
 
 /// ログブロック内で保持される要素。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum LogItem {
     /// ログ前に評価されるステートメント。
     Statement(crate::Statement),
@@ -261,6 +262,7 @@ pub enum RegexCommandModeOrigin {
 
 /// Replacement description for a regex command.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum RegexReplacement {
     /// Literal replacement with optional embedded expressions/back-references.
     Literal(RegexLiteralReplacement),
@@ -290,6 +292,7 @@ pub struct RegexLambdaReplacement {
 
 /// Template segment in a literal replacement.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum RegexTemplateSegment {
     Text(String),
     BackReference(u32),
@@ -311,33 +314,27 @@ pub enum RegexFlag {
 
 /// Delimiter metadata describing how a sequence literal separated its elements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum SequenceDelimiter {
     /// Elements are comma-delimited (default behaviour).
+    #[default]
     Comma,
     /// Elements are separated through layout-aware trivia such as whitespace.
     Whitespace,
 }
 
-impl Default for SequenceDelimiter {
-    fn default() -> Self {
-        SequenceDelimiter::Comma
-    }
-}
 
 /// Metadata describing how arguments were grouped for a function call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum CallArgumentStyle {
     /// Arguments are comma-delimited (current default).
+    #[default]
     Comma,
     /// Arguments rely on layout-aware grouping (whitespace informed).
     Whitespace,
 }
 
-impl Default for CallArgumentStyle {
-    fn default() -> Self {
-        CallArgumentStyle::Comma
-    }
-}
 
 /// Additional metadata captured for function call arguments.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -493,6 +490,7 @@ pub enum Argument {
 
 /// String interpolation parts
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum StringPart {
     Text(String),
     Expression(Expression),
@@ -553,8 +551,10 @@ pub struct RegexTestDiagnostic {
 
 /// 左辺に適用するガード戦略。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum RegexGuardStrategy {
     /// ガード不要。
+    #[default]
     None,
     /// 一時変数へ退避しつつ null ガードを行う。
     CaptureAndGuard {
@@ -564,11 +564,6 @@ pub enum RegexGuardStrategy {
     },
 }
 
-impl Default for RegexGuardStrategy {
-    fn default() -> Self {
-        RegexGuardStrategy::None
-    }
-}
 
 /// When expression arms with pattern matching
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -589,8 +584,10 @@ pub enum ImplicitWhenEnd {
 
 /// Parameter property binding (e.g. primary constructor `val`/`var`).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ParameterProperty {
     /// No property binding; parameter is local to the callable.
+    #[default]
     None,
     /// `val` parameter; exposes a read-only property.
     Val,
@@ -598,11 +595,6 @@ pub enum ParameterProperty {
     Var,
 }
 
-impl Default for ParameterProperty {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 /// Modifier flags attached to a function or lambda parameter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

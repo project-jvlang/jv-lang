@@ -152,11 +152,10 @@ impl<'graph> ConstructorConstraintBuilder<'graph> {
         let mut recorded_edges = 0usize;
         let mut incremental = incremental;
 
-        if let Some(ast_id) = input.ast_id {
-            if let Some(builder) = incremental.as_mut() {
+        if let Some(ast_id) = input.ast_id
+            && let Some(builder) = incremental.as_mut() {
                 builder.mark_dirty(ast_id);
             }
-        }
 
         for (index, argument) in input.arguments.iter().enumerate() {
             self.graph

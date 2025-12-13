@@ -196,9 +196,7 @@ fn match_normalized_type(hint: &str) -> String {
         "char".to_string()
     } else if hint.eq_ignore_ascii_case("String") {
         "String".to_string()
-    } else if hint.eq_ignore_ascii_case("Void") {
-        "Void".to_string()
-    } else if hint.eq_ignore_ascii_case("Unit") {
+    } else if hint.eq_ignore_ascii_case("Void") || hint.eq_ignore_ascii_case("Unit") {
         "Void".to_string()
     } else if hint.eq_ignore_ascii_case("Bool") {
         "boolean".to_string()

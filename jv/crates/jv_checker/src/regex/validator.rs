@@ -256,11 +256,10 @@ impl<'a> RegexValidationVisitor<'a> {
     }
 
     fn visit_catch_clause(&mut self, clause: &TryCatchClause) {
-        if let Some(parameter) = &clause.parameter {
-            if let Some(default) = &parameter.default_value {
+        if let Some(parameter) = &clause.parameter
+            && let Some(default) = &parameter.default_value {
                 self.visit_expression(default);
             }
-        }
         self.visit_expression(clause.body.as_ref());
     }
 

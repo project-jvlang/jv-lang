@@ -38,9 +38,7 @@ pub fn generate_logging_artifacts(config: &LoggingConfig) -> Vec<GeneratedArtifa
 fn render_logback(config: &LoggingConfig) -> String {
     let mut lines = Vec::new();
     lines.push("<configuration scan=\"true\">".to_string());
-    lines.push(format!(
-        "  <appender name=\"OTEL\" class=\"io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender\">"
-    ));
+    lines.push("  <appender name=\"OTEL\" class=\"io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender\">".to_string());
     lines.push(format!(
         "    <otelExporter endpoint=\"{}\" protocol=\"{}\"/>",
         xml_escape(endpoint(config)),
@@ -194,9 +192,9 @@ fn endpoint(config: &LoggingConfig) -> &str {
         .unwrap_or("http://localhost:4317")
 }
 
-fn sorted_entries<'a>(
-    map: &'a std::collections::HashMap<String, String>,
-) -> Vec<(&'a str, &'a str)> {
+fn sorted_entries(
+    map: &std::collections::HashMap<String, String>,
+) -> Vec<(&str, &str)> {
     let mut entries: Vec<(&str, &str)> =
         map.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     entries.sort_by(|left, right| left.0.cmp(right.0));

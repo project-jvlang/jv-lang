@@ -176,10 +176,7 @@ fn test_pattern_identifier() {
 #[test]
 fn test_pattern_wildcard() {
     let pattern = Pattern::Wildcard(dummy_span());
-    match pattern {
-        Pattern::Wildcard(_) => assert!(true),
-        _ => panic!("Expected wildcard pattern"),
-    }
+    assert!(matches!(pattern, Pattern::Wildcard(_)));
 }
 
 // Visibility tests

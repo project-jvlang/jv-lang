@@ -114,16 +114,14 @@ pub fn parse_class(bytes: &[u8]) -> Result<ParsedClass, ClassParseError> {
         let is_accessible = access_flags & (ACC_PUBLIC | ACC_PROTECTED) != 0;
 
         if is_static {
-            if name != "<clinit>" {
-                if let Ok(signature) = parse_method_descriptor(descriptor) {
+            if name != "<clinit>"
+                && let Ok(signature) = parse_method_descriptor(descriptor) {
                     static_methods.push((name.to_string(), signature));
                 }
-            }
-        } else if is_accessible && name != "<init>" {
-            if let Ok(signature) = parse_method_descriptor(descriptor) {
+        } else if is_accessible && name != "<init>"
+            && let Ok(signature) = parse_method_descriptor(descriptor) {
                 instance_methods.push((name.to_string(), signature));
             }
-        }
 
         skip_attributes(&mut reader, attributes_count)?;
     }
@@ -137,7 +135,7 @@ pub fn parse_class(bytes: &[u8]) -> Result<ParsedClass, ClassParseError> {
     let package = fqcn
         .rsplit_once('.')
         .map(|(pkg, _)| pkg.to_string())
-        .unwrap_or_else(|| String::new());
+        .unwrap_or_else(String::new);
 
     Ok(ParsedClass {
         fqcn,
@@ -299,7 +297,7 @@ impl ConstantPool {
                     reader.read_u2()?; // string index
                     Constant::Other
                 }
-                9 | 10 | 11 => {
+                9..=11 => {
                     reader.skip(4)?;
                     Constant::Other
                 }

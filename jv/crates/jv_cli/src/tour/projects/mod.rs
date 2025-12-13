@@ -240,9 +240,11 @@ pub fn build_executable(project: &MiniProject) -> Result<JarArtifact> {
     let output_dir = format!("target/jv/{}/classes", project.slug);
     let jar_path = format!("target/jv/{}/dist/{}.jar", project.slug, project.slug);
 
-    let mut build_config = BuildConfig::default();
-    build_config.output_dir = output_dir.clone();
-    build_config.classpath = vec![format!("target/jv/{}/deps/*", project.slug)];
+    let build_config = BuildConfig {
+        output_dir: output_dir.clone(),
+        classpath: vec![format!("target/jv/{}/deps/*", project.slug)],
+        ..BuildConfig::default()
+    };
 
     let commands = vec![
         format!(

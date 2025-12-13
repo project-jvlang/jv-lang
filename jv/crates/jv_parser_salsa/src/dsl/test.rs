@@ -56,7 +56,7 @@ fn value_from_span(token: &OwnedToken, source: &str) -> String {
     let normalized_lexeme = normalize_lexeme(token.lexeme.as_ref());
     let span_value = source
         .get(token.span.start as usize..token.span.end as usize)
-        .map(|slice| normalize_lexeme(slice));
+        .map(normalize_lexeme);
 
     match span_value {
         Some(value) if value.len() >= normalized_lexeme.len() => value,

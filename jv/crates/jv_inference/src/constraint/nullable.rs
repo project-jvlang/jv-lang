@@ -95,7 +95,7 @@ fn contains_parameter(reference: &BoundTypeReference, parameter: TypeId) -> bool
 pub fn referenced_type_parameters(predicate: &BoundPredicate, buffer: &mut Vec<TypeId>) {
     let mut set = HashSet::new();
     collect(predicate, &mut set);
-    buffer.extend(set.into_iter());
+    buffer.extend(set);
 }
 
 fn collect(predicate: &BoundPredicate, set: &mut HashSet<TypeId>) {

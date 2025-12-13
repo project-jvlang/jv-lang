@@ -171,13 +171,12 @@ fn unescape_percent(segment: &str) -> String {
     let mut result = String::with_capacity(segment.len());
     let mut chars = segment.chars().peekable();
     while let Some(ch) = chars.next() {
-        if ch == '%' {
-            if matches!(chars.peek(), Some('%')) {
+        if ch == '%'
+            && matches!(chars.peek(), Some('%')) {
                 chars.next();
                 result.push('%');
                 continue;
             }
-        }
         result.push(ch);
     }
     result
@@ -185,8 +184,8 @@ fn unescape_percent(segment: &str) -> String {
 
 fn build_brace_pattern(segments: &[String], arg_count: usize) -> String {
     let mut pattern = String::new();
-    for index in 0..arg_count {
-        pattern.push_str(&segments[index]);
+    for segment in segments.iter().take(arg_count) {
+        pattern.push_str(segment);
         pattern.push_str("{}");
     }
     pattern.push_str(&segments[arg_count]);
@@ -195,8 +194,8 @@ fn build_brace_pattern(segments: &[String], arg_count: usize) -> String {
 
 fn build_numbered_pattern(segments: &[String], arg_count: usize) -> String {
     let mut pattern = String::new();
-    for index in 0..arg_count {
-        pattern.push_str(&segments[index]);
+    for (index, segment) in segments.iter().take(arg_count).enumerate() {
+        pattern.push_str(segment);
         pattern.push('{');
         pattern.push_str(&index.to_string());
         pattern.push('}');

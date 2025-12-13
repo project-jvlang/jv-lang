@@ -53,17 +53,14 @@ impl AuthConfig {
 /// 認証方式。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum AuthType {
+    #[default]
     None,
     Basic,
     Token,
 }
 
-impl Default for AuthType {
-    fn default() -> Self {
-        AuthType::None
-    }
-}
 
 /// グループフィルタ。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

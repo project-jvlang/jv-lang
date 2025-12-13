@@ -68,11 +68,7 @@ pub fn persist_single_run_report(
         warm_start,
     }];
 
-    let warm_average_ms = if warm_sessions > 0 {
-        total_ms
-    } else {
-        total_ms
-    };
+    let warm_average_ms = total_ms;
     let warm_min_ms = warm_average_ms;
     let warm_max_ms = warm_average_ms;
 

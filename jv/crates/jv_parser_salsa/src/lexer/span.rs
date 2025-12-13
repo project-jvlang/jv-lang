@@ -10,4 +10,8 @@ impl Span {
     pub fn len(&self) -> u32 {
         self.end.saturating_sub(self.start)
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.start >= self.end
+    }
 }

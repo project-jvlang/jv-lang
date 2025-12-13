@@ -124,7 +124,7 @@ struct MethodFeatures {
     marked_test_suite: bool,
 }
 
-fn extract_method<'a>(statement: &'a IrStatement) -> Option<&'a IrStatement> {
+fn extract_method(statement: &IrStatement) -> Option<&IrStatement> {
     match statement {
         IrStatement::Commented { statement, .. } => extract_method(statement),
         IrStatement::MethodDeclaration { .. } => Some(statement),

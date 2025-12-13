@@ -137,7 +137,7 @@ fn lower_numeric_range(
                 binding: binding_name,
                 binding_type: binding_type.clone(),
                 end_variable: end_var_name,
-                end_type: end_type,
+                end_type,
                 inclusive: range.inclusive,
                 span: range.span.clone(),
             })),
@@ -265,11 +265,10 @@ fn resolve_binding_type(
         return convert_type_annotation(annotation.clone());
     }
 
-    if let Some(expr) = fallback {
-        if let Some(java_type) = extract_java_type(expr) {
+    if let Some(expr) = fallback
+        && let Some(java_type) = extract_java_type(expr) {
             return Ok(java_type);
         }
-    }
 
     Ok(default_type)
 }

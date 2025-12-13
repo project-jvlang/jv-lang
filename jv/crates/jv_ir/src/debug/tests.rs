@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use super::*;
 use crate::transform::transform_program;
 use crate::types::{
@@ -17,8 +15,10 @@ fn span() -> Span {
 
 fn sample_program() -> Program {
     let span = span();
-    let mut modifiers = Modifiers::default();
-    modifiers.visibility = Visibility::Internal;
+    let modifiers = Modifiers {
+        visibility: Visibility::Internal,
+        ..Modifiers::default()
+    };
 
     Program {
         package: Some("demo.example".to_string()),

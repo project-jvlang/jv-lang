@@ -108,6 +108,12 @@ pub struct EnvironmentManager<P: JdkProbe = BuildSystemProbe> {
     required_major: u8,
 }
 
+impl Default for EnvironmentManager<BuildSystemProbe> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EnvironmentManager<BuildSystemProbe> {
     pub fn new() -> Self {
         Self {

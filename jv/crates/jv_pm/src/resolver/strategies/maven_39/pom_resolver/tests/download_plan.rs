@@ -83,10 +83,13 @@ fn download_plan_unifies_base_and_plugin_closures() {
     store_pom(&cache, &plugin_test, &[]);
 
     let base_closure = resolver
-        .resolve_closure_with_options(&[base_root.clone()], ClosureOptions::base())
+        .resolve_closure_with_options(std::slice::from_ref(&base_root), ClosureOptions::base())
         .expect("base closure");
     let plugin_closure = resolver
-        .resolve_closure_with_options(&[plugin_root.clone()], ClosureOptions::plugin_download())
+        .resolve_closure_with_options(
+            std::slice::from_ref(&plugin_root),
+            ClosureOptions::plugin_download(),
+        )
         .expect("plugin closure");
 
     // download_plan と同じロジックで union を構成
@@ -169,10 +172,10 @@ fn download_plan_matches_expected_baseline() {
     store_pom(&cache, &plugin_root, &[]);
 
     let base_closure = resolver
-        .resolve_closure_with_options(&[base_root.clone()], ClosureOptions::base())
+        .resolve_closure_with_options(std::slice::from_ref(&base_root), ClosureOptions::base())
         .expect("base closure");
     let plugin_closure = resolver
-        .resolve_closure_with_options(&[plugin_root.clone()], ClosureOptions::plugin_download())
+        .resolve_closure_with_options(std::slice::from_ref(&plugin_root), ClosureOptions::plugin_download())
         .expect("plugin closure");
 
     let mut plan = Vec::new();
@@ -281,10 +284,10 @@ fn download_plan_matches_reference_maven_like_baseline() {
     store_pom(&cache, &plugin_root, &[]);
 
     let base_closure = resolver
-        .resolve_closure_with_options(&[base_root.clone()], ClosureOptions::base())
+        .resolve_closure_with_options(std::slice::from_ref(&base_root), ClosureOptions::base())
         .expect("base closure");
     let plugin_closure = resolver
-        .resolve_closure_with_options(&[plugin_root.clone()], ClosureOptions::plugin_download())
+        .resolve_closure_with_options(std::slice::from_ref(&plugin_root), ClosureOptions::plugin_download())
         .expect("plugin closure");
 
     let mut plan = Vec::new();
@@ -428,9 +431,10 @@ fn download_plan_matches_real_maven_fixture_list() {
 ///
 /// allow_multiple_versions=false のため、同じGAの異なるバージョン
 /// (commons-lang3:3.14.0 と 3.8.1) は Nearest 戦略で1つに統合される。
+///
 /// - commons-lang3:3.14.0 は root (depth=0)
 /// - commons-lang3:3.8.1 は dependency (depth=1)
-/// → Nearest により 3.14.0 が勝ち、3.8.1 は除外される
+///   → Nearest により 3.14.0 が勝ち、3.8.1 は除外される
 ///
 /// 結果: フィクスチャ62件のうち61件が含まれる（3.8.1が除外）。
 ///
@@ -509,7 +513,7 @@ fn download_plan_single_closure_deduplicates_same_ga() {
 
     // all scopes + optional を許容する plugin_download オプションで展開
     let closure = resolver
-        .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
+        .resolve_closure_with_options(std::slice::from_ref(&root), ClosureOptions::plugin_download())
         .expect("closure");
 
     let plan_set: std::collections::HashSet<String> = closure
@@ -541,8 +545,10 @@ fn download_plan_single_closure_deduplicates_same_ga() {
 /// フィクスチャ 62 件と一致することを検証する。
 ///
 /// 実際のMavenでは:
+///
 /// - base_closure: プロジェクト依存のみ (commons-lang3:3.14.0)
 /// - plugin_closure: プラグインの推移的依存 (commons-lang3:3.8.1 を含む)
+///
 /// 異なるソースから来るため、同じGAでも両バージョンが保持される。
 #[test]
 fn wrapper_download_plan_matches_fixture_with_plugin_seeds() {
@@ -654,7 +660,7 @@ fn wrapper_download_plan_matches_fixture_with_plugin_seeds() {
 
     // base_closure: プロジェクト依存のみ
     let base_closure =
-        pom_resolver::resolve_union_per_root(&resolver, &[root.clone()], ClosureOptions::base())
+        pom_resolver::resolve_union_per_root(&resolver, std::slice::from_ref(&root), ClosureOptions::base())
             .expect("base closure");
 
     // plugin_closure: プラグインの推移的依存
@@ -896,7 +902,7 @@ fn download_plan_includes_key_maven_baseline_coords() {
     let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
 
     let closure = resolver
-        .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
+        .resolve_closure_with_options(std::slice::from_ref(&root), ClosureOptions::plugin_download())
         .expect("closure");
     let plan_set: std::collections::HashSet<String> = closure
         .iter()
@@ -986,7 +992,7 @@ fn wrapper_single_closure_deduplicates_same_ga() {
     let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
 
     let closure = resolver
-        .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
+        .resolve_closure_with_options(std::slice::from_ref(&root), ClosureOptions::plugin_download())
         .expect("closure");
 
     let plan_set: std::collections::HashSet<String> = closure
@@ -1077,7 +1083,7 @@ fn base_closure_excludes_provided_and_test_scope() {
     store_pom(&cache, &compile_dep, &[]);
 
     let closure = resolver
-        .resolve_closure_with_options(&[root.clone()], ClosureOptions::base())
+        .resolve_closure_with_options(std::slice::from_ref(&root), ClosureOptions::base())
         .expect("base closure");
 
     let ids: std::collections::HashSet<String> = closure
@@ -1178,7 +1184,7 @@ fn base_closure_uses_nearest_version_wins_strategy() {
     store_pom(&cache, &lib_v2, &[]);
 
     let closure = resolver
-        .resolve_closure_with_options(&[root.clone()], ClosureOptions::base())
+        .resolve_closure_with_options(std::slice::from_ref(&root), ClosureOptions::base())
         .expect("base closure");
 
     let ids: std::collections::HashSet<String> = closure
@@ -1280,7 +1286,7 @@ fn wrapper_closure_matches_commons_lang3_fixture_multiple_versions() {
     let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
 
     let closure = resolver
-        .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
+        .resolve_closure_with_options(std::slice::from_ref(&root), ClosureOptions::plugin_download())
         .expect("wrapper closure");
 
     fn latest_ids(entries: &[ArtifactCoordinates]) -> std::collections::HashSet<String> {
@@ -1356,7 +1362,7 @@ fn wrapper_download_plan_missing_standard_plugins_without_plugin_seeds_red() {
 
     // plugin seeds を投入しない現在の実装に合わせて download_plan を構築
     let base_closure = resolver
-        .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
+        .resolve_closure_with_options(std::slice::from_ref(&root), ClosureOptions::plugin_download())
         .expect("base closure");
     let mut download_plan = base_closure.clone();
     // Full GAV deduplication - Maven keeps different versions from different contexts
@@ -1474,7 +1480,7 @@ fn base_closure_single_closure_deduplicates_same_ga() {
     let resolver = MavenDependencyResolver::new(&runtime, cache.clone(), Vec::new());
 
     let closure = resolver
-        .resolve_closure_with_options(&[root.clone()], ClosureOptions::base())
+        .resolve_closure_with_options(std::slice::from_ref(&root), ClosureOptions::base())
         .expect("base closure");
 
     let plan_set: std::collections::HashSet<String> = closure
@@ -1552,7 +1558,7 @@ fn wrapper_closure_includes_provided_and_skips_test_dependencies_for_commons_lan
     store_pom(&cache, &provided, &[]);
     store_pom(&cache, &test_dep, &[]);
 
-    let closure = resolve_plugin_closure(&resolver, &[root.clone()]).expect("wrapper closure");
+    let closure = resolve_plugin_closure(&resolver, std::slice::from_ref(&root)).expect("wrapper closure");
     let ids: std::collections::HashSet<String> = closure
         .iter()
         .map(|c| format!("{}:{}:{}", c.group_id, c.artifact_id, c.version))
@@ -1581,15 +1587,16 @@ fn wrapper_closure_includes_provided_and_skips_test_dependencies_for_commons_lan
     );
 }
 
-#[test]
 /// plugin_download() での Nearest 戦略による重複排除と scope フィルタリングのテスト。
 ///
 /// allow_multiple_versions=false のため、同じGAの重複は Nearest 戦略で排除される。
+///
 /// - root (commons-lang3:3.14.0) は depth=0
 /// - older (commons-lang3:3.8.1) は depth=1 の依存
-/// → Nearest により root が勝ち、older は除外される
+///   → Nearest により root が勝ち、older は除外される
 ///
 /// また、test スコープの依存は除外される。
+#[test]
 fn plugin_download_nearest_deduplicates_and_excludes_test_scope() {
     let temp = tempdir().expect("temp dir");
     let cache = Arc::new(DependencyCache::with_dir(temp.path().join("cache")).expect("cache"));
@@ -1650,7 +1657,7 @@ fn plugin_download_nearest_deduplicates_and_excludes_test_scope() {
     store_pom(&cache, &test_dep, &[]);
 
     let closure = resolver
-        .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
+        .resolve_closure_with_options(std::slice::from_ref(&root), ClosureOptions::plugin_download())
         .expect("plugin_download closure");
 
     let ids: std::collections::HashSet<String> = closure
@@ -1962,7 +1969,7 @@ fn plugin_download_filters_to_baseline_versions_for_commons_ga() {
     }
 
     let closure = resolver
-        .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
+        .resolve_closure_with_options(std::slice::from_ref(&root), ClosureOptions::plugin_download())
         .expect("closure");
     let versions: std::collections::HashMap<(String, String), std::collections::HashSet<String>> =
         closure
@@ -2061,7 +2068,7 @@ fn plugin_download_uses_nearest_version_for_same_ga() {
     // resolve_union_per_root を直接使用（resolve_plugin_closure は lifecycle-bound のみ推移解決）
     let closure = pom_resolver::resolve_union_per_root(
         &resolver,
-        &[root.clone()],
+        std::slice::from_ref(&root),
         ClosureOptions::plugin_download(),
     )
     .expect("closure");
@@ -2221,7 +2228,7 @@ fn plugin_execution_full_deduplicates_versions_and_skips_provided() {
 
     let closure = resolver
         .resolve_closure_with_options(
-            &[plugin_root.clone()],
+            std::slice::from_ref(&plugin_root),
             ClosureOptions::plugin_execution_full(),
         )
         .expect("execution closure");
@@ -2485,7 +2492,7 @@ fn plugin_closure_includes_all_fixture_deps() {
     // resolve_union_per_root を直接使用（resolve_plugin_closure は lifecycle-bound のみ推移解決）
     let closure = pom_resolver::resolve_union_per_root(
         &resolver,
-        &[root.clone()],
+        std::slice::from_ref(&root),
         ClosureOptions::plugin_download(),
     )
     .expect("plugin closure with filtering");
@@ -2772,7 +2779,7 @@ fn plugin_seed_brings_in_unexpected_transitive_versions_red() {
 
     // 実装では plugin_roots が seeds に含まれるため、plugin_download が余計な古い版を拾うと想定。
     let plugin_closure = resolver
-        .resolve_closure_with_options(&[plugin.clone()], ClosureOptions::plugin_seed())
+        .resolve_closure_with_options(std::slice::from_ref(&plugin), ClosureOptions::plugin_seed())
         .expect("plugin closure");
     let set: std::collections::HashSet<String> = plugin_closure
         .iter()
@@ -2818,7 +2825,7 @@ fn managed_artifacts_should_be_included_in_download_plan_red() {
     }
 
     let closure = resolver
-        .resolve_closure_with_options(&[root.clone()], ClosureOptions::plugin_download())
+        .resolve_closure_with_options(std::slice::from_ref(&root), ClosureOptions::plugin_download())
         .expect("closure");
 
     let mut download_plan = closure.clone();

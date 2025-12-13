@@ -93,8 +93,8 @@ impl<'env> CapabilityDictionaryResolver<'env> {
             candidates.retain(|implementation| implementation.dispatch.supports_inline());
         }
 
-        if let Some(preferred) = &bound.hints.preferred_impl {
-            if let Some(implementation) = candidates
+        if let Some(preferred) = &bound.hints.preferred_impl
+            && let Some(implementation) = candidates
                 .iter()
                 .find(|entry| entry.implementor.as_str() == preferred)
             {
@@ -104,7 +104,6 @@ impl<'env> CapabilityDictionaryResolver<'env> {
                     implementation.dispatch,
                 ));
             }
-        }
 
         if candidates.is_empty() {
             return Err(CapabilityResolutionError::NotFound {

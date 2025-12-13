@@ -75,7 +75,7 @@ impl CompactConstraintGraph {
     /// Returns an iterator over the outgoing neighbours for the provided node.
     pub fn neighbours(&self, node: NodeId) -> impl Iterator<Item = (NodeId, EdgeKind)> + '_ {
         let type_count = self.type_count;
-        let index = Self::node_index(node, type_count) as usize;
+        let index = Self::node_index(node, type_count);
         let start = self.type_indices[index] as usize;
         let end = self.type_indices[index + 1] as usize;
 

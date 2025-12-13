@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod suite {
     use crate::context::{RegisteredMethodCall, RegisteredMethodDeclaration, SequenceStyleCache};
     use crate::{
         CompletableFutureOp, DataFormat, IrCaseLabel, IrDeconstructionComponent,
@@ -279,19 +279,17 @@ mod tests {
             .find_map(|stmt| match stmt {
                 IrStatement::MethodDeclaration {
                     name,
-                    body: Some(body),
+                    body: Some(IrExpression::Block { statements, .. }),
                     ..
-                } if name == "main" => match body {
-                    IrExpression::Block { statements, .. } => statements.iter().find_map(|stmt| {
-                        if let IrStatement::Expression { expr, .. } = stmt {
-                            if let IrExpression::LogInvocation { plan, .. } = expr {
+                } if name == "main" => {
+                    statements.iter().find_map(|stmt| {
+                        if let IrStatement::Expression { expr, .. } = stmt
+                            && let IrExpression::LogInvocation { plan, .. } = expr {
                                 return Some(plan.as_ref());
                             }
-                        }
                         None
-                    }),
-                    _ => None,
-                },
+                    })
+                }
                 _ => None,
             })
             .expect("log invocation present");
@@ -361,9 +359,8 @@ mod tests {
                 body: Some(body),
                 ..
             } = stmt
-            {
-                if name == "main" {
-                    if let IrExpression::Block { statements, .. } = body {
+                && name == "main"
+                    && let IrExpression::Block { statements, .. } = body {
                         return statements.iter().any(|stmt| {
                             matches!(
                                 stmt,
@@ -374,8 +371,6 @@ mod tests {
                             )
                         });
                     }
-                }
-            }
             false
         });
 
@@ -4214,11 +4209,9 @@ fun sample(value: Any): Int {
                     body: Some(body),
                     ..
                 } = decl
-                {
-                    if name == "sample" {
+                    && name == "sample" {
                         return Some(body);
                     }
-                }
                 None
             })
             .expect("sample method present in IR");

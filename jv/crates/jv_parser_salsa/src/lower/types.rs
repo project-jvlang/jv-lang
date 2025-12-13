@@ -9,9 +9,7 @@ pub fn lower_type_annotation(
     tokens: &[OwnedToken],
 ) -> Option<TypeAnnotation> {
     let filtered: Vec<_> = tokens
-        .iter()
-        .cloned()
-        .filter(|tok| {
+        .iter().filter(|&tok| {
             !matches!(
                 tok.kind,
                 TokenKind::Whitespace
@@ -20,7 +18,7 @@ pub fn lower_type_annotation(
                     | TokenKind::BlockComment
                     | TokenKind::JavaDocComment
             )
-        })
+        }).cloned()
         .collect();
 
     if filtered.is_empty() {

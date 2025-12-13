@@ -42,8 +42,10 @@ fn compose_plan(root: &TempDirGuard, clean: bool) -> crate::pipeline::BuildPlan 
     let settings = ManifestLoader::load(&manifest_path).expect("manifest loads");
     let layout = ProjectLayout::from_settings(&project_root, &settings).expect("layout resolves");
 
-    let mut overrides = CliOverrides::default();
-    overrides.clean = clean;
+    let overrides = CliOverrides {
+        clean,
+        ..CliOverrides::default()
+    };
 
     BuildOptionsFactory::compose(project_root, settings, layout, overrides)
         .expect("plan composition succeeds")

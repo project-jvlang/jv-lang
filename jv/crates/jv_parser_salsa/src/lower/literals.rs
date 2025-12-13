@@ -5,6 +5,7 @@ use jv_ast::expression::Expression;
 use jv_ast::types::{Literal, RegexLiteral};
 
 /// 単純リテラルをローワリングする。
+#[allow(dead_code)]
 pub fn lower_literal(tok: &OwnedToken, ctx: &LoweringContext<'_>) -> Option<Expression> {
     match tok.kind {
         TokenKind::Number => Some(Expression::Literal(
@@ -16,7 +17,7 @@ pub fn lower_literal(tok: &OwnedToken, ctx: &LoweringContext<'_>) -> Option<Expr
             ctx.span_for_token(tok),
         )),
         TokenKind::Character => {
-            let ch = tok.lexeme.chars().nth(0).unwrap_or_default();
+            let ch = tok.lexeme.chars().next().unwrap_or_default();
             Some(Expression::Literal(
                 Literal::Character(ch),
                 ctx.span_for_token(tok),
@@ -43,6 +44,7 @@ pub fn lower_literal(tok: &OwnedToken, ctx: &LoweringContext<'_>) -> Option<Expr
     }
 }
 
+#[allow(dead_code)]
 fn strip_quotes(raw: &str) -> String {
     if raw.len() >= 2 {
         let first = raw.chars().next().unwrap_or('"');

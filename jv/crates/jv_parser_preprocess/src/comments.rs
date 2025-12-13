@@ -26,9 +26,9 @@ impl CommentsStage {
         let mut result_origins = Vec::with_capacity(tokens.len());
         let mut stack: Vec<SequenceContext> = Vec::new();
         let mut pending_when = PendingWhenTracker::new();
-        let mut iter = tokens.into_iter().zip(origins.into_iter());
+        let iter = tokens.into_iter().zip(origins);
 
-        while let Some((mut token, origin)) = iter.next() {
+        for (mut token, origin) in iter {
             let when_event = pending_when.observe(&token.token_type);
             let starts_when_block = matches!(when_event, WhenTrackerEvent::EnterBlock);
 
@@ -57,12 +57,11 @@ impl CommentsStage {
                 _ => {}
             }
 
-            if let Some(ctx) = stack.last_mut() {
-                if ctx.pending_comment {
+            if let Some(ctx) = stack.last_mut()
+                && ctx.pending_comment {
                     token.leading_trivia.comments = true;
                     ctx.pending_comment = false;
                 }
-            }
 
             match token.token_type {
                 TokenType::LeftBracket => {
@@ -106,11 +105,10 @@ impl CommentsStage {
                 TokenType::LeftBrace => {
                     if starts_when_block {
                         stack.push(SequenceContext::new_when());
-                    } else if let Some(ctx) = stack.last_mut() {
-                        if let SequenceContextKind::When = ctx.kind {
+                    } else if let Some(ctx) = stack.last_mut()
+                        && let SequenceContextKind::When = ctx.kind {
                             ctx.when_brace_depth = ctx.when_brace_depth.saturating_add(1);
                         }
-                    }
                     if let Some(ctx) = stack.last_mut() {
                         ctx.pending_comment = false;
                     }
@@ -119,8 +117,8 @@ impl CommentsStage {
                     let mut handled_when = false;
                     let mut popped_when = false;
 
-                    if let Some(ctx) = stack.last_mut() {
-                        if let SequenceContextKind::When = ctx.kind {
+                    if let Some(ctx) = stack.last_mut()
+                        && let SequenceContextKind::When = ctx.kind {
                             handled_when = true;
                             if ctx.when_brace_depth > 1 {
                                 ctx.when_brace_depth -= 1;
@@ -130,13 +128,11 @@ impl CommentsStage {
                                 popped_when = true;
                             }
                         }
-                    }
 
-                    if popped_when || !handled_when {
-                        if let Some(ctx) = stack.last_mut() {
+                    if (popped_when || !handled_when)
+                        && let Some(ctx) = stack.last_mut() {
                             ctx.pending_comment = false;
                         }
-                    }
                 }
                 _ => {}
             }

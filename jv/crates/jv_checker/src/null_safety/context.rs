@@ -653,7 +653,7 @@ mod tests {
 
         let context = NullSafetyContext::from_parts(Some(&facts), Some(&env), None);
 
-        assert_eq!(context.is_degraded(), false);
+        assert!(!context.is_degraded());
         assert_eq!(context.lattice().len(), 3);
         assert_eq!(
             context.lattice().get("user_id"),

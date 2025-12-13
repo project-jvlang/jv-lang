@@ -6,6 +6,8 @@
 //! deterministic and focuses on providing a solid foundation for later
 //! extensions such as SAT-style bound reduction and incremental solving hooks.
 
+#![allow(clippy::result_large_err)]
+
 pub mod generic;
 pub mod null_safety_bridge;
 pub mod raw_types;
@@ -277,12 +279,11 @@ impl ConstraintSolver {
     ) -> Result<SolveOutcome, SolveError> {
         let _profiling_guard = profiling::start("jv_inference::constraint_solver.solve");
         while let Some(constraint) = constraints.pop() {
-            if let Some(fingerprint) = ConstraintFingerprint::from_kind(&constraint.kind) {
-                if !self.seen_constraints.insert(fingerprint) {
+            if let Some(fingerprint) = ConstraintFingerprint::from_kind(&constraint.kind)
+                && !self.seen_constraints.insert(fingerprint) {
                     self.telemetry.record_pruned();
                     continue;
                 }
-            }
 
             self.telemetry.constraints_processed += 1;
             self.process_constraint(constraint)?;
@@ -299,7 +300,7 @@ impl ConstraintSolver {
 
         let residual = constraints.drain();
         let value_restrictions = graph
-            .map(|g| value_restriction_components(g))
+            .map(value_restriction_components)
             .unwrap_or_default();
 
         Ok(SolveOutcome::new(
@@ -473,11 +474,10 @@ impl ConstraintSolver {
     }
 
     fn prune(&self, ty: TypeKind) -> TypeKind {
-        if let TypeVariant::Variable(id) = ty.variant().clone() {
-            if let Some(replacement) = self.substitutions.get(&id) {
+        if let TypeVariant::Variable(id) = ty.variant().clone()
+            && let Some(replacement) = self.substitutions.get(&id) {
                 return self.prune(replacement.clone());
             }
-        }
         ty
     }
 }

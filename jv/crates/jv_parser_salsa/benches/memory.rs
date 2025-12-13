@@ -4,7 +4,7 @@ use crate::harness::{
 };
 use criterion::{Criterion, black_box};
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub fn bench_memory(c: &mut Criterion) {
@@ -100,7 +100,7 @@ fn sample_path() -> PathBuf {
 }
 
 /// 呼び出しごとに `rss_probe` を別プロセスで実行し、出力から RSS 差分を取得する。
-fn run_delta_via_rss_probe(kind: PipelineKind, corpus_path: &PathBuf) -> u64 {
+fn run_delta_via_rss_probe(kind: PipelineKind, corpus_path: &Path) -> u64 {
     let pipeline_arg = match kind {
         PipelineKind::SalsaFast => "salsa_fast",
         PipelineKind::SalsaFull => "salsa_full",
@@ -144,7 +144,7 @@ fn run_modules_delta(
     kind: PipelineKind,
     modules: &[CorpusEntry],
     use_process_probe: bool,
-    modules_path: &PathBuf,
+    modules_path: &Path,
 ) -> u64 {
     if use_process_probe {
         panic!(

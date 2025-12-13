@@ -115,7 +115,7 @@ fn type_facts_snapshot_contains_environment() {
         pretty.contains("greeting"),
         "json output should mention binding: {pretty}"
     );
-    assert!(facts.bindings().len() >= 1);
+    assert!(!facts.bindings().is_empty());
 }
 
 #[test]

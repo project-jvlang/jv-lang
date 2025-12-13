@@ -12,9 +12,11 @@ fn render_java(program: IrProgram) -> String {
 
 #[test]
 fn implicit_val_fields_render_with_final_modifier() {
-    let mut immutable_mods = IrModifiers::default();
-    immutable_mods.visibility = IrVisibility::Private;
-    immutable_mods.is_final = true;
+    let immutable_mods = IrModifiers {
+        visibility: IrVisibility::Private,
+        is_final: true,
+        ..IrModifiers::default()
+    };
 
     let immutable_field = IrStatement::FieldDeclaration {
         name: "IMMUTABLE".to_string(),
@@ -27,8 +29,10 @@ fn implicit_val_fields_render_with_final_modifier() {
         span: dummy_span(),
     };
 
-    let mut mutable_mods = IrModifiers::default();
-    mutable_mods.visibility = IrVisibility::Private;
+    let mutable_mods = IrModifiers {
+        visibility: IrVisibility::Private,
+        ..IrModifiers::default()
+    };
 
     let mutable_field = IrStatement::FieldDeclaration {
         name: "mutableValue".to_string(),
@@ -41,8 +45,10 @@ fn implicit_val_fields_render_with_final_modifier() {
         span: dummy_span(),
     };
 
-    let mut class_modifiers = IrModifiers::default();
-    class_modifiers.visibility = IrVisibility::Public;
+    let class_modifiers = IrModifiers {
+        visibility: IrVisibility::Public,
+        ..IrModifiers::default()
+    };
 
     let holder = IrStatement::ClassDeclaration {
         name: "Holder".to_string(),
@@ -122,29 +128,30 @@ fn implicit_vals_in_function_scope_render_as_final_locals() {
         span: dummy_span(),
     });
 
-    let mut inner_block_statements = Vec::new();
-    inner_block_statements.push(IrStatement::VariableDeclaration {
-        name: "innerValue".to_string(),
-        java_type: int_type(),
-        initializer: Some(IrExpression::Literal(
-            Literal::Number("42".to_string()),
-            dummy_span(),
-        )),
-        is_final: true,
-        modifiers: IrModifiers::default(),
-        span: dummy_span(),
-    });
-    inner_block_statements.push(IrStatement::VariableDeclaration {
-        name: "innerMutable".to_string(),
-        java_type: int_type(),
-        initializer: Some(IrExpression::Literal(
-            Literal::Number("24".to_string()),
-            dummy_span(),
-        )),
-        is_final: false,
-        modifiers: IrModifiers::default(),
-        span: dummy_span(),
-    });
+    let inner_block_statements = vec![
+        IrStatement::VariableDeclaration {
+            name: "innerValue".to_string(),
+            java_type: int_type(),
+            initializer: Some(IrExpression::Literal(
+                Literal::Number("42".to_string()),
+                dummy_span(),
+            )),
+            is_final: true,
+            modifiers: IrModifiers::default(),
+            span: dummy_span(),
+        },
+        IrStatement::VariableDeclaration {
+            name: "innerMutable".to_string(),
+            java_type: int_type(),
+            initializer: Some(IrExpression::Literal(
+                Literal::Number("24".to_string()),
+                dummy_span(),
+            )),
+            is_final: false,
+            modifiers: IrModifiers::default(),
+            span: dummy_span(),
+        },
+    ];
 
     method_statements.push(IrStatement::Block {
         statements: inner_block_statements,
@@ -157,8 +164,10 @@ fn implicit_vals_in_function_scope_render_as_final_locals() {
         span: dummy_span(),
     };
 
-    let mut method_modifiers = IrModifiers::default();
-    method_modifiers.visibility = IrVisibility::Public;
+    let method_modifiers = IrModifiers {
+        visibility: IrVisibility::Public,
+        ..IrModifiers::default()
+    };
 
     let method = IrStatement::MethodDeclaration {
         name: "demo".to_string(),
@@ -174,8 +183,10 @@ fn implicit_vals_in_function_scope_render_as_final_locals() {
         span: dummy_span(),
     };
 
-    let mut class_modifiers = IrModifiers::default();
-    class_modifiers.visibility = IrVisibility::Public;
+    let class_modifiers = IrModifiers {
+        visibility: IrVisibility::Public,
+        ..IrModifiers::default()
+    };
 
     let container = IrStatement::ClassDeclaration {
         name: "Locals".to_string(),
@@ -229,8 +240,7 @@ fn implicit_vals_in_function_scope_render_as_final_locals() {
 
 #[test]
 fn implicit_vals_across_multiple_methods_remain_final() {
-    let mut first_body = Vec::new();
-    first_body.push(IrStatement::VariableDeclaration {
+    let first_body = vec![IrStatement::VariableDeclaration {
         name: "first".to_string(),
         java_type: int_type(),
         initializer: Some(IrExpression::Literal(
@@ -240,7 +250,7 @@ fn implicit_vals_across_multiple_methods_remain_final() {
         is_final: true,
         modifiers: IrModifiers::default(),
         span: dummy_span(),
-    });
+    }];
 
     let first_method = IrStatement::MethodDeclaration {
         name: "firstMethod".to_string(),
@@ -254,18 +264,16 @@ fn implicit_vals_across_multiple_methods_remain_final() {
             java_type: JavaType::Void,
             span: dummy_span(),
         }),
-        modifiers: {
-            let mut mods = IrModifiers::default();
-            mods.visibility = IrVisibility::Public;
-            mods
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            ..IrModifiers::default()
         },
         throws: vec![],
         assertion_patterns: Vec::new(),
         span: dummy_span(),
     };
 
-    let mut second_statements = Vec::new();
-    second_statements.push(IrStatement::VariableDeclaration {
+    let second_statements = vec![IrStatement::VariableDeclaration {
         name: "second".to_string(),
         java_type: string_type(),
         initializer: Some(IrExpression::Literal(
@@ -275,7 +283,7 @@ fn implicit_vals_across_multiple_methods_remain_final() {
         is_final: true,
         modifiers: IrModifiers::default(),
         span: dummy_span(),
-    });
+    }];
 
     let second_method = IrStatement::MethodDeclaration {
         name: "secondMethod".to_string(),
@@ -289,18 +297,19 @@ fn implicit_vals_across_multiple_methods_remain_final() {
             java_type: JavaType::Void,
             span: dummy_span(),
         }),
-        modifiers: {
-            let mut mods = IrModifiers::default();
-            mods.visibility = IrVisibility::Public;
-            mods
+        modifiers: IrModifiers {
+            visibility: IrVisibility::Public,
+            ..IrModifiers::default()
         },
         throws: vec![],
         assertion_patterns: Vec::new(),
         span: dummy_span(),
     };
 
-    let mut class_modifiers = IrModifiers::default();
-    class_modifiers.visibility = IrVisibility::Public;
+    let class_modifiers = IrModifiers {
+        visibility: IrVisibility::Public,
+        ..IrModifiers::default()
+    };
 
     let program = IrProgram {
         package: None,

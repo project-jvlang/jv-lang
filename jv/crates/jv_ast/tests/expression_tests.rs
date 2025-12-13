@@ -1,6 +1,5 @@
 // Expression tests for jv_ast
 use jv_ast::*;
-use serde_json;
 
 // Test helper functions
 fn dummy_span() -> Span {
@@ -114,10 +113,7 @@ fn test_expression_index_access() {
         index: Box::new(index),
         span: dummy_span(),
     };
-    match expr {
-        Expression::IndexAccess { .. } => assert!(true),
-        _ => panic!("Expected index access expression"),
-    }
+    assert!(matches!(expr, Expression::IndexAccess { .. }));
 }
 
 #[test]
@@ -129,10 +125,7 @@ fn test_expression_null_safe_index_access() {
         index: Box::new(index),
         span: dummy_span(),
     };
-    match expr {
-        Expression::NullSafeIndexAccess { .. } => assert!(true),
-        _ => panic!("Expected null-safe index access expression"),
-    }
+    assert!(matches!(expr, Expression::NullSafeIndexAccess { .. }));
 }
 
 #[test]
@@ -390,19 +383,13 @@ fn test_expression_try() {
 #[test]
 fn test_expression_this() {
     let expr = Expression::This(dummy_span());
-    match expr {
-        Expression::This(_) => assert!(true),
-        _ => panic!("Expected this expression"),
-    }
+    assert!(matches!(expr, Expression::This(_)));
 }
 
 #[test]
 fn test_expression_super() {
     let expr = Expression::Super(dummy_span());
-    match expr {
-        Expression::Super(_) => assert!(true),
-        _ => panic!("Expected super expression"),
-    }
+    assert!(matches!(expr, Expression::Super(_)));
 }
 
 // Argument tests
@@ -410,10 +397,7 @@ fn test_expression_super() {
 fn test_argument_positional() {
     let expr = Expression::Literal(Literal::String("value".to_string()), dummy_span());
     let arg = Argument::Positional(expr);
-    match arg {
-        Argument::Positional(_) => assert!(true),
-        _ => panic!("Expected positional argument"),
-    }
+    assert!(matches!(arg, Argument::Positional(_)));
 }
 
 #[test]
@@ -444,10 +428,7 @@ fn test_string_part_text() {
 fn test_string_part_expression() {
     let expr = Expression::Identifier("name".to_string(), dummy_span());
     let part = StringPart::Expression(expr);
-    match part {
-        StringPart::Expression(_) => assert!(true),
-        _ => panic!("Expected expression string part"),
-    }
+    assert!(matches!(part, StringPart::Expression(_)));
 }
 
 // WhenArm tests

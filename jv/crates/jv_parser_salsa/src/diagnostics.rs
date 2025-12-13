@@ -46,7 +46,7 @@ pub(crate) fn compose_frontend_diagnostics(
         )
     }));
 
-    let formatter = DiagnosticFormatter::default();
+    let formatter = DiagnosticFormatter;
     let context = DiagnosticContext::new(
         &parser_views,
         &preprocess_diagnostics,

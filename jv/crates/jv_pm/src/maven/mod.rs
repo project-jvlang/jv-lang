@@ -90,6 +90,12 @@ pub struct MavenIntegrationFiles {
     pub files: Vec<(PathBuf, String)>,
 }
 
+impl Default for MavenIntegrationFiles {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MavenIntegrationFiles {
     pub fn new() -> Self {
         Self { files: Vec::new() }

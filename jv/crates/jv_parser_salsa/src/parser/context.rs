@@ -57,19 +57,17 @@ impl ParserContext {
     /// ステートメント列を解析する。terminator が指定されている場合、そのトークンに遭遇した時点で終了する。
     pub(crate) fn parse_statement_list(&mut self, terminator: Option<TokenKind>) {
         while !self.is_eof() {
-            if let Some(term) = terminator {
-                if self.peek_kind() == Some(term) {
+            if let Some(term) = terminator
+                && self.peek_kind() == Some(term) {
                     break;
                 }
-            }
             let before = self.cursor;
-            if !self.parse_single_statement() {
-                if before == self.cursor {
+            if !self.parse_single_statement()
+                && before == self.cursor {
                     // 進まない場合はエラーとしてリカバリ。
                     self.error("予期しないトークンです");
                     recover_statement(self);
                 }
-            }
         }
     }
 

@@ -76,24 +76,24 @@ pub fn render_explanation(code: &str) -> Option<String> {
 
     let mut buffer = String::new();
     let _ = writeln!(buffer, "{} — {}", entry.code, entry.title);
-    let _ = writeln!(buffer, "");
+    let _ = writeln!(buffer);
     let _ = writeln!(buffer, "概要 / Overview:");
     let _ = writeln!(buffer, "  {}", entry.overview);
     if !entry.details.is_empty() {
-        let _ = writeln!(buffer, "");
+        let _ = writeln!(buffer);
         let _ = writeln!(buffer, "背景 / Details:");
         for line in entry.details {
             let _ = writeln!(buffer, "  - {}", line);
         }
     }
     if !entry.remediation.is_empty() {
-        let _ = writeln!(buffer, "");
+        let _ = writeln!(buffer);
         let _ = writeln!(buffer, "対処方法 / Remediation steps:");
         for step in entry.remediation {
             let _ = writeln!(buffer, "  1. {}", step);
         }
     }
-    let _ = writeln!(buffer, "");
+    let _ = writeln!(buffer);
     let _ = writeln!(
         buffer,
         "ヒント / Hints: `jv check --telemetry` を併用すると推論コストを解析できます。"

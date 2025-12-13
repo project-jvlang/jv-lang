@@ -51,12 +51,11 @@ fn normalize_decimal_number(
                 seen_exp = true;
                 exponent_digits = 0;
                 normalized.push('e');
-                if let Some(&next) = chars.peek() {
-                    if next == '+' || next == '-' {
+                if let Some(&next) = chars.peek()
+                    && (next == '+' || next == '-') {
                         normalized.push(next);
                         chars.next();
                     }
-                }
             }
             'f' | 'F' | 'd' | 'D' | 'l' | 'L' => {
                 if chars.peek().is_some() {
@@ -147,10 +146,10 @@ fn can_begin_layout_item(source: &str, idx: usize, ch: char) -> bool {
                 return false;
             }
 
-            match source[cursor..].chars().next() {
-                Some(next) if next.is_ascii_digit() => true,
-                _ => false,
-            }
+            matches!(
+                source[cursor..].chars().next(),
+                Some(next) if next.is_ascii_digit()
+            )
         }
         '$' => true,
         _ => false,
@@ -195,8 +194,8 @@ impl Normalizer {
         mut metadata: PreMetadata,
         normalized_text: String,
     ) -> NormalizedToken<'source> {
-        if let Some(carry) = token.carry_over.clone() {
-            if !matches!(
+        if let Some(carry) = token.carry_over.clone()
+            && !matches!(
                 token.kind,
                 RawTokenKind::CommentCandidate | RawTokenKind::Eof
             ) {
@@ -204,7 +203,6 @@ impl Normalizer {
                     .provisional_metadata
                     .push(TokenMetadata::CommentCarryOver(carry));
             }
-        }
 
         NormalizedToken::new(token, normalized_text, metadata)
     }
@@ -331,10 +329,10 @@ impl Normalizer {
 
         let inner = &lexeme[1..lexeme.len() - 1];
         let mut pattern = String::with_capacity(inner.len());
-        let mut chars = inner.chars();
+        let chars = inner.chars();
         let mut escaped = false;
 
-        while let Some(ch) = chars.next() {
+        for ch in chars {
             if escaped {
                 if ch == '/' {
                     pattern.push('/');
@@ -404,7 +402,7 @@ impl Normalizer {
             if bytes[index] == b'$' && index + 1 < inner.len() && bytes[index + 1] == b'{' {
                 let literal_slice = &inner[literal_start..index];
                 if let Some(literal) =
-                    self.unescape_literal_segment(literal_slice, span.start.clone())?
+                    self.unescape_literal_segment(literal_slice, span.start)?
                 {
                     segments.push(StringInterpolationSegment::Literal(literal));
                 }
@@ -452,7 +450,7 @@ impl Normalizer {
         }
 
         let trailing_slice = &inner[literal_start..];
-        if let Some(literal) = self.unescape_literal_segment(trailing_slice, span.start.clone())? {
+        if let Some(literal) = self.unescape_literal_segment(trailing_slice, span.start)? {
             segments.push(StringInterpolationSegment::Literal(literal));
         }
 

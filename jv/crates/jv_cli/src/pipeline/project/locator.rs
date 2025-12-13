@@ -53,6 +53,7 @@ impl ProjectLocator {
         self
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn locate(&self, start: impl AsRef<Path>) -> Result<ProjectRoot, EnhancedDiagnostic> {
         let start_path = start.as_ref();
         let search_origin = self.normalize_start(start_path)?;
@@ -94,6 +95,7 @@ impl ProjectLocator {
         Err(self.not_found_diagnostic(&search_origin))
     }
 
+    #[allow(clippy::result_large_err)]
     fn normalize_start(&self, start: &Path) -> Result<PathBuf, EnhancedDiagnostic> {
         let cwd = std::env::current_dir().map_err(|_| self.not_found_diagnostic(start))?;
         let cwd_canonical = fs::canonicalize(&cwd).map_err(|_| self.not_found_diagnostic(&cwd))?;
@@ -176,10 +178,10 @@ impl ProjectLocator {
 }
 
 fn strip_trailing_dot_components(path: &Path) -> PathBuf {
-    let mut components = path.components().peekable();
+    let components = path.components().peekable();
     let mut result = PathBuf::new();
 
-    while let Some(component) = components.next() {
+    for component in components {
         match component {
             Component::CurDir => {
                 // Skip redundant ./ segments

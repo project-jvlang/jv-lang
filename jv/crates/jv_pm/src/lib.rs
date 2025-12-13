@@ -74,8 +74,10 @@ pub enum PackageError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum JavaTarget {
     Java21,
+    #[default]
     Java25,
 }
 
@@ -100,11 +102,6 @@ impl JavaTarget {
     }
 }
 
-impl Default for JavaTarget {
-    fn default() -> Self {
-        JavaTarget::Java25
-    }
-}
 
 impl fmt::Display for JavaTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -278,11 +275,10 @@ impl Manifest {
     }
 
     pub fn maven_description(&self) -> Option<&str> {
-        if let Some(desc) = self.maven.description.as_deref() {
-            if !desc.trim().is_empty() {
+        if let Some(desc) = self.maven.description.as_deref()
+            && !desc.trim().is_empty() {
                 return Some(desc);
             }
-        }
         self.package.description.as_deref()
     }
 }
@@ -300,6 +296,7 @@ pub struct BuildInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(Default)]
 pub struct MavenProjectMetadata {
     pub group_id: String,
     pub artifact_id: Option<String>,
@@ -308,35 +305,16 @@ pub struct MavenProjectMetadata {
     pub url: Option<String>,
 }
 
-impl Default for MavenProjectMetadata {
-    fn default() -> Self {
-        Self {
-            group_id: String::new(),
-            artifact_id: None,
-            packaging: None,
-            description: None,
-            url: None,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
+#[derive(Default)]
 pub struct ProjectSection {
     pub sources: SourceSection,
     pub output: OutputSection,
     pub entrypoint: Option<String>,
 }
 
-impl Default for ProjectSection {
-    fn default() -> Self {
-        Self {
-            sources: SourceSection::default(),
-            output: OutputSection::default(),
-            entrypoint: None,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]

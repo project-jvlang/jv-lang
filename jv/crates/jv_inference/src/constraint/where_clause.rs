@@ -212,7 +212,7 @@ impl<'a> WhereConstraintResolver<'a> {
                 continue;
             };
 
-            let family_list = grouped.entry(parameter).or_insert_with(Vec::new);
+            let family_list = grouped.entry(parameter).or_default();
 
             let canonical = bound.reference.primitive.canonical_family();
             match family_list

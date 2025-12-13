@@ -40,7 +40,7 @@ fn detect_returns_error_for_jv_native_project() {
     let temp = tempdir().expect("temp");
     create_file(temp.path(), "jv.toml");
 
-    let err = run_in_directory(temp.path(), || WrapperContext::detect()).unwrap_err();
+    let err = run_in_directory(temp.path(), WrapperContext::detect).unwrap_err();
     assert!(matches!(err, WrapperError::NativeProjectDetected));
 }
 
@@ -50,7 +50,7 @@ fn detect_returns_error_for_mixed_configuration() {
     create_file(temp.path(), "jv.toml");
     create_file(temp.path(), "pom.xml");
 
-    let err = run_in_directory(temp.path(), || WrapperContext::detect()).unwrap_err();
+    let err = run_in_directory(temp.path(), WrapperContext::detect).unwrap_err();
     assert!(matches!(err, WrapperError::MixedProjectConfiguration));
 }
 
@@ -59,7 +59,7 @@ fn detect_loads_context_for_maven_project() {
     let temp = tempdir().expect("temp");
     create_file(temp.path(), "pom.xml");
 
-    let context = run_in_directory(temp.path(), || WrapperContext::detect()).expect("context");
+    let context = run_in_directory(temp.path(), WrapperContext::detect).expect("context");
     assert!(!context.template_generated);
     assert!(context.pom_path.exists());
     assert!(context.settings_path.exists());
@@ -69,7 +69,7 @@ fn detect_loads_context_for_maven_project() {
 fn detect_generates_template_when_artifacts_missing() {
     let temp = tempdir().expect("temp");
 
-    let context = run_in_directory(temp.path(), || WrapperContext::detect()).expect("context");
+    let context = run_in_directory(temp.path(), WrapperContext::detect).expect("context");
     assert!(context.template_generated);
     assert!(context.pom_path.exists());
     assert!(context.settings_path.exists());
@@ -82,7 +82,7 @@ fn detect_handles_template_generation_failure() {
     let temp = tempdir().expect("temp");
     let _guard = ReadOnlyGuard::new(temp.path());
 
-    let err = run_in_directory(temp.path(), || WrapperContext::detect()).unwrap_err();
+    let err = run_in_directory(temp.path(), WrapperContext::detect).unwrap_err();
     assert!(matches!(err, WrapperError::OperationFailed(_)));
 }
 

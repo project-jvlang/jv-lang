@@ -23,11 +23,11 @@ fn lower_expression_with_depth(
 }
 
 /// 指定した区切りトークンまでのスライスを返す（最初の出現位置基準）。
-pub fn slice_until<'a, F>(
-    tokens: &'a [OwnedToken],
+pub fn slice_until<F>(
+    tokens: &[OwnedToken],
     delimiter: TokenKind,
     kind_fn: F,
-) -> Option<(&'a [OwnedToken], &'a [OwnedToken])>
+) -> Option<(&[OwnedToken], &[OwnedToken])>
 where
     F: Fn(&OwnedToken) -> TokenKind,
 {
@@ -86,11 +86,7 @@ fn parse_expression_bp(
 ) -> Option<Expression> {
     let mut lhs = parse_prefix(ctx, cursor, depth)?;
 
-    loop {
-        let op_tok = match cursor.peek() {
-            Some(tok) => tok.clone(),
-            None => break,
-        };
+    while let Some(op_tok) = cursor.peek().cloned() {
 
         let (l_bp, r_bp, op) = match infix_binding_power(&op_tok) {
             Some(info) => info,

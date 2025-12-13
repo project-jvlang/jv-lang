@@ -13,8 +13,10 @@ const STORAGE_VERSION: u8 = 1;
 const CERTIFICATE_TITLE: &str = "jv言語ツアー達成証";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
+#[derive(Default)]
 pub enum SectionStatus {
     #[serde(rename = "not_started")]
+    #[default]
     NotStarted,
     #[serde(rename = "in_progress")]
     InProgress,
@@ -22,11 +24,6 @@ pub enum SectionStatus {
     Completed,
 }
 
-impl Default for SectionStatus {
-    fn default() -> Self {
-        SectionStatus::NotStarted
-    }
-}
 
 impl SectionStatus {
     pub fn icon(self) -> &'static str {
@@ -378,7 +375,7 @@ impl ProgressTracker {
             .state
             .sections
             .entry(section)
-            .or_insert_with(SectionProgress::default);
+            .or_default();
         if entry.status == SectionStatus::NotStarted {
             entry.status = SectionStatus::InProgress;
             entry.started_at = Some(Utc::now());
@@ -410,7 +407,7 @@ impl ProgressTracker {
             .state
             .sections
             .entry(section)
-            .or_insert_with(SectionProgress::default);
+            .or_default();
 
         if entry.quiz.passed {
             return Ok(QuizOutcome {
@@ -445,8 +442,8 @@ impl ProgressTracker {
 
         let selected = parse_choice(trimmed);
 
-        if let Some(answer) = selected {
-            if answer == question.answer {
+        if let Some(answer) = selected
+            && answer == question.answer {
                 entry.quiz.passed = true;
                 self.persist()?;
                 return Ok(QuizOutcome {
@@ -457,7 +454,6 @@ impl ProgressTracker {
                     ],
                 });
             }
-        }
 
         self.persist()?;
         Ok(QuizOutcome {
@@ -476,7 +472,7 @@ impl ProgressTracker {
                 .state
                 .sections
                 .entry(section)
-                .or_insert_with(SectionProgress::default);
+                .or_default();
 
             if entry.status != SectionStatus::Completed {
                 entry.status = SectionStatus::Completed;
@@ -492,14 +488,13 @@ impl ProgressTracker {
 
         let mut note_path = existing_note;
 
-        if needs_note {
-            if let Some(generated) = self.create_learning_note(section, completed_at)? {
+        if needs_note
+            && let Some(generated) = self.create_learning_note(section, completed_at)? {
                 if let Some(entry) = self.state.sections.get_mut(&section) {
                     entry.note_path = Some(generated.clone());
                 }
                 note_path = Some(generated);
             }
-        }
 
         let achievements = self.update_achievements();
         let certificate = self.ensure_certificate();
@@ -524,50 +519,45 @@ impl ProgressTracker {
         let total = SectionId::all().len();
         let mut newly_awarded = Vec::new();
 
-        if completed >= 1 {
-            if let Some(record) = self.ensure_achievement(
+        if completed >= 1
+            && let Some(record) = self.ensure_achievement(
                 AchievementId::FirstSection,
                 "ファーストステップ",
                 "初めてのセクションを完了しました。継続して学習を進めましょう！",
             ) {
                 newly_awarded.push(record);
             }
-        }
 
-        if completed >= total / 2 {
-            if let Some(record) = self.ensure_achievement(
+        if completed >= total / 2
+            && let Some(record) = self.ensure_achievement(
                 AchievementId::HalfMilestone,
                 "ミッドウェイヒーロー",
                 "全セクションの半分に到達しました。もうひと踏ん張り！",
             ) {
                 newly_awarded.push(record);
             }
-        }
 
-        if completed == total {
-            if let Some(record) = self.ensure_achievement(
+        if completed == total
+            && let Some(record) = self.ensure_achievement(
                 AchievementId::FullCompletion,
                 "ツアーコンプリート",
                 "全てのセクションを完了し、jv言語の主要機能をマスターしました。",
             ) {
                 newly_awarded.push(record);
             }
-        }
 
         if self
             .state
             .sections
             .values()
             .all(|progress| progress.quiz.passed)
-        {
-            if let Some(record) = self.ensure_achievement(
+            && let Some(record) = self.ensure_achievement(
                 AchievementId::QuizMaster,
                 "クイズマスター",
                 "全ての理解度チェックに合格しました。知識が確かなものになりました！",
             ) {
                 newly_awarded.push(record);
             }
-        }
 
         newly_awarded
     }

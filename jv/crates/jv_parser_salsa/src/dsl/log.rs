@@ -10,9 +10,7 @@ pub fn lower_log_block(
     tokens: &[OwnedToken],
     depth: usize,
 ) -> Option<Expression> {
-    let Some(first) = tokens.first() else {
-        return None;
-    };
+    let first = tokens.first()?;
     let level = log_level(first.kind)?;
 
     // 先行トリビアを除いたブロック本体を抽出する。

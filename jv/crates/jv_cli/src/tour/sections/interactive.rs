@@ -117,10 +117,7 @@ impl SessionState {
         Ok(false)
     }
 
-    fn append_line<W: Write>(&mut self, line: &str, writer: &mut W) -> Result<()>
-    where
-        W: Write,
-    {
+    fn append_line<W: Write>(&mut self, line: &str, writer: &mut W) -> Result<()> {
         self.lines.push(line.to_string());
         writeln!(
             writer,

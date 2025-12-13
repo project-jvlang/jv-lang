@@ -35,9 +35,11 @@ pub enum LoggingConfigError {
 
 /// ログレベル。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum LogLevel {
     Trace,
     Debug,
+    #[default]
     Info,
     Warn,
     Error,
@@ -59,11 +61,6 @@ impl LogLevel {
     }
 }
 
-impl Default for LogLevel {
-    fn default() -> Self {
-        LogLevel::Info
-    }
-}
 
 impl fmt::Display for LogLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -111,7 +108,9 @@ impl<'de> Deserialize<'de> for LogLevel {
 
 /// サポートするロギングフレームワーク。
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub enum LoggingFramework {
+    #[default]
     Slf4j,
     Log4j2,
     JbossLogging,
@@ -144,11 +143,6 @@ impl LoggingFramework {
     }
 }
 
-impl Default for LoggingFramework {
-    fn default() -> Self {
-        LoggingFramework::Slf4j
-    }
-}
 
 impl fmt::Display for LoggingFramework {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -225,7 +219,9 @@ pub struct CustomLoggingFramework {
 
 /// OpenTelemetry の接続プロトコル。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum OtelProtocol {
+    #[default]
     Grpc,
     Http,
 }
@@ -243,11 +239,6 @@ impl OtelProtocol {
     }
 }
 
-impl Default for OtelProtocol {
-    fn default() -> Self {
-        OtelProtocol::Grpc
-    }
-}
 
 impl fmt::Display for OtelProtocol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -365,6 +356,7 @@ impl OpenTelemetryLayer {
 /// ロギング設定本体。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct LoggingConfig {
     pub framework: LoggingFramework,
     pub log_level: LogLevel,
@@ -372,16 +364,6 @@ pub struct LoggingConfig {
     pub opentelemetry: OpenTelemetryConfig,
 }
 
-impl Default for LoggingConfig {
-    fn default() -> Self {
-        Self {
-            framework: LoggingFramework::default(),
-            log_level: LogLevel::default(),
-            default_level: LogLevel::default(),
-            opentelemetry: OpenTelemetryConfig::default(),
-        }
-    }
-}
 
 impl LoggingConfig {
     /// マニフェストに基づき設定を初期化する。
@@ -407,11 +389,10 @@ impl LoggingConfig {
         if let Some(default_level) = layer.default_level {
             self.default_level = default_level;
         }
-        if let Some(otel_layer) = &layer.opentelemetry {
-            if !otel_layer.is_empty() {
+        if let Some(otel_layer) = &layer.opentelemetry
+            && !otel_layer.is_empty() {
                 self.opentelemetry.apply_layer(otel_layer);
             }
-        }
     }
 }
 
@@ -432,7 +413,7 @@ impl LoggingConfigLayer {
             && self
                 .opentelemetry
                 .as_ref()
-                .map_or(true, OpenTelemetryLayer::is_empty)
+                .is_none_or(OpenTelemetryLayer::is_empty)
     }
 }
 

@@ -67,7 +67,10 @@ fn plugin_closure_excludes_optional_and_test_scopes() {
     store_pom(&cache, &dep_test, &[]);
 
     let closure = resolver
-        .resolve_closure_with_options(&[plugin_root.clone()], ClosureOptions::plugin_download())
+        .resolve_closure_with_options(
+            std::slice::from_ref(&plugin_root),
+            ClosureOptions::plugin_download(),
+        )
         .expect("resolve plugin closure");
 
     let names: Vec<String> = closure

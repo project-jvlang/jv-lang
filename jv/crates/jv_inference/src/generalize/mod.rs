@@ -67,7 +67,7 @@ fn substitute_type(original: &TypeKind, subs: &HashMap<TypeId, TypeKind>) -> Typ
             variable
         }),
         TypeVariant::Primitive(name) => {
-            let mut result = TypeKind::new(TypeVariant::Primitive(*name));
+            let mut result = TypeKind::new(TypeVariant::Primitive(name));
             result = result.with_nullability(original.nullability());
             if let Some(bounds) = original.bounds() {
                 result = result.with_bounds(bounds.clone());

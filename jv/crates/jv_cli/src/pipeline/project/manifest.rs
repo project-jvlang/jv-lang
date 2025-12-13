@@ -31,6 +31,7 @@ pub struct OutputConfig {
 pub struct ManifestLoader;
 
 impl ManifestLoader {
+    #[allow(clippy::result_large_err)]
     pub fn load(manifest_path: impl AsRef<Path>) -> Result<ProjectSettings, EnhancedDiagnostic> {
         let manifest_path = manifest_path.as_ref();
         let manifest = Manifest::load_from_path(manifest_path)
@@ -39,6 +40,7 @@ impl ManifestLoader {
         Self::build_settings(manifest, manifest_path)
     }
 
+    #[allow(clippy::result_large_err)]
     fn build_settings(
         manifest: Manifest,
         manifest_path: &Path,
@@ -67,6 +69,7 @@ impl ManifestLoader {
         })
     }
 
+    #[allow(clippy::result_large_err)]
     fn validate_sources(
         manifest_path: &Path,
         sources: &SourceSection,
@@ -76,6 +79,7 @@ impl ManifestLoader {
         Ok(())
     }
 
+    #[allow(clippy::result_large_err)]
     fn validate_patterns(
         manifest_path: &Path,
         field: &str,
@@ -111,6 +115,7 @@ impl ManifestLoader {
         Ok(())
     }
 
+    #[allow(clippy::result_large_err)]
     fn validate_entrypoint(
         manifest_path: &Path,
         value: &str,
@@ -151,6 +156,7 @@ impl ManifestLoader {
         Ok(PathBuf::from(trimmed))
     }
 
+    #[allow(clippy::result_large_err)]
     fn validate_output(
         manifest_path: &Path,
         output: &OutputSection,
@@ -223,6 +229,6 @@ fn starts_with_separator(value: &str) -> bool {
 
 fn contains_parent_reference(value: &str) -> bool {
     value
-        .split(|c| c == '/' || c == '\\')
+        .split(['/', '\\'])
         .any(|segment| segment == "..")
 }

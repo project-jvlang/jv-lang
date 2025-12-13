@@ -13,7 +13,7 @@ fn main() {
         .and_then(|p| p.parent())
         .expect("workspace root resolution");
 
-    let config_source = resolve_config_source(&workspace_root);
+    let config_source = resolve_config_source(workspace_root);
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR is set"));
     let target = out_dir.join("embedded_default_repositories.toml");
 

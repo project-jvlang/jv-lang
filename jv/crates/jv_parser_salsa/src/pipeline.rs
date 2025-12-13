@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 /// パースオプション。CST/TriviaMap 生成の有無やトークン軽量化を切り替える。
 #[derive(Debug, Clone, Copy)]
+#[derive(Default)]
 pub struct ParseOptions {
     pub generate_cst: bool,
     pub generate_trivia_map: bool,
@@ -25,28 +26,16 @@ pub struct ParseOptions {
 
 /// Salsa パイプラインのキャッシュモード。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum CacheMode {
     /// クエリ結果をパイプライン間で共有する。
     Shared,
     /// 実行ごとに新しい DB を作成しキャッシュを持ち越さない。
+    #[default]
     Ephemeral,
 }
 
-impl Default for CacheMode {
-    fn default() -> Self {
-        CacheMode::Ephemeral
-    }
-}
 
-impl Default for ParseOptions {
-    fn default() -> Self {
-        Self {
-            generate_cst: false,
-            generate_trivia_map: false,
-            trim_trivia_and_metadata: false,
-        }
-    }
-}
 
 /// パイプラインが保持する共有リソース（JDK メタデータなど）。
 #[derive(Debug, Clone)]

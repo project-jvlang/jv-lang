@@ -237,8 +237,8 @@ impl CompatibilityAnalyzer {
                 continue;
             }
 
-            if entry.name().ends_with(".class") {
-                if let Some(major) = extract_class_major(&mut entry) {
+            if entry.name().ends_with(".class")
+                && let Some(major) = extract_class_major(&mut entry) {
                     self.record_finding(
                         findings,
                         highest_major,
@@ -249,7 +249,6 @@ impl CompatibilityAnalyzer {
                         },
                     );
                 }
-            }
         }
 
         Ok(())
@@ -285,11 +284,10 @@ impl CompatibilityAnalyzer {
         highest_major: &mut Option<u16>,
         finding: CompatibilityFinding,
     ) {
-        if let Some(major) = finding.version.as_major() {
-            if highest_major.map(|current| major > current).unwrap_or(true) {
+        if let Some(major) = finding.version.as_major()
+            && highest_major.map(|current| major > current).unwrap_or(true) {
                 *highest_major = Some(major);
             }
-        }
         findings.push(finding);
     }
 }

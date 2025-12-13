@@ -208,12 +208,11 @@ impl TransformContext {
     ) {
         let component_map: HashMap<String, JavaType> = components
             .into_iter()
-            .map(|(name, ty)| (name, ty))
             .collect();
         for key in Self::record_type_keys(&type_name) {
             self.record_components
                 .entry(key)
-                .or_insert_with(HashMap::new)
+                .or_default()
                 .extend(
                     component_map
                         .iter()
@@ -255,16 +254,14 @@ impl TransformContext {
 
     fn record_type_keys(type_name: &str) -> Vec<String> {
         let mut keys = vec![type_name.to_string()];
-        if let Some(simple) = type_name.rsplit('.').next() {
-            if simple != type_name {
+        if let Some(simple) = type_name.rsplit('.').next()
+            && simple != type_name {
                 keys.push(simple.to_string());
             }
-        }
-        if let Some(simple) = type_name.rsplit('$').next() {
-            if simple != type_name {
+        if let Some(simple) = type_name.rsplit('$').next()
+            && simple != type_name {
                 keys.push(simple.to_string());
             }
-        }
         keys
     }
 
@@ -893,7 +890,7 @@ fn infer_map_method_return_type(method_name: &str, receiver: &JavaType) -> Optio
 fn complete_map_method_call(
     method_name: &str,
     args: &mut [IrExpression],
-    argument_types: &mut Vec<JavaType>,
+    argument_types: &mut [JavaType],
     receiver: &JavaType,
     return_type: &mut JavaType,
 ) {
@@ -989,7 +986,7 @@ fn map_key_value_types(java_type: &JavaType) -> Option<(JavaType, JavaType)> {
 
 fn ensure_argument_type(
     args: &mut [IrExpression],
-    argument_types: &mut Vec<JavaType>,
+    argument_types: &mut [JavaType],
     index: usize,
     expected: &JavaType,
 ) {
@@ -1021,7 +1018,7 @@ fn ensure_lambda_param_names(param_names: &mut Vec<String>, required: usize) {
 
 fn ensure_unary_lambda_argument(
     args: &mut [IrExpression],
-    argument_types: &mut Vec<JavaType>,
+    argument_types: &mut [JavaType],
     index: usize,
     param_type: &JavaType,
     return_type: &JavaType,
@@ -1065,7 +1062,7 @@ fn ensure_unary_lambda_argument(
 
 fn ensure_bifunction_lambda_argument(
     args: &mut [IrExpression],
-    argument_types: &mut Vec<JavaType>,
+    argument_types: &mut [JavaType],
     index: usize,
     first_param: &JavaType,
     second_param: &JavaType,
@@ -1092,7 +1089,7 @@ fn ensure_bifunction_lambda_argument(
             || param_types[1] != expected_params[1]
         {
             param_types.clear();
-            param_types.extend(expected_params.into_iter());
+            param_types.extend(expected_params);
         }
 
         let functional_type = JavaType::Functional {

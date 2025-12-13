@@ -32,7 +32,7 @@ pub fn generate_settings_xml(
     write_simple(
         &mut writer,
         "localRepository",
-        &request.local_repository.to_string_lossy(),
+        request.local_repository.to_string_lossy(),
     )?;
 
     if !request.mirrors.is_empty() {
@@ -55,11 +55,10 @@ pub fn generate_settings_xml(
     for repo in request.repositories {
         writer.write_event(Event::Start(BytesStart::new("repository")))?;
         write_simple(&mut writer, "id", &repo.id)?;
-        if let Some(name) = repo.name.as_deref() {
-            if !name.trim().is_empty() {
+        if let Some(name) = repo.name.as_deref()
+            && !name.trim().is_empty() {
                 write_simple(&mut writer, "name", name)?;
             }
-        }
         write_simple(&mut writer, "url", &repo.url)?;
 
         writer.write_event(Event::Start(BytesStart::new("releases")))?;

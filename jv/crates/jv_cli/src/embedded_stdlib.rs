@@ -433,11 +433,10 @@ fn rewrite_expression(expression: &mut Expression) {
         } => {
             rewrite_expression(body.as_mut());
             for clause in catch_clauses {
-                if let Some(parameter) = &mut clause.parameter {
-                    if let Some(default) = &mut parameter.default_value {
+                if let Some(parameter) = &mut clause.parameter
+                    && let Some(default) = &mut parameter.default_value {
                         rewrite_expression(default);
                     }
-                }
                 rewrite_expression(clause.body.as_mut());
             }
             if let Some(finally_block) = finally_block {
@@ -861,11 +860,10 @@ impl<'a, 'b> ProgramUsageDetector<'a, 'b> {
             } => {
                 self.visit_expression(body);
                 for clause in catch_clauses {
-                    if let Some(parameter) = &clause.parameter {
-                        if let Some(default) = &parameter.default_value {
+                    if let Some(parameter) = &clause.parameter
+                        && let Some(default) = &parameter.default_value {
                             self.visit_expression(default);
                         }
-                    }
                     self.visit_expression(&clause.body);
                 }
                 if let Some(finally_block) = finally_block {
@@ -1026,11 +1024,10 @@ impl StdlibCatalog {
             return packages.clone();
         }
 
-        if let Some((package, _)) = reference.rsplit_once('.') {
-            if self.packages.contains(package) {
+        if let Some((package, _)) = reference.rsplit_once('.')
+            && self.packages.contains(package) {
                 return [package.to_string()].into_iter().collect();
             }
-        }
 
         BTreeSet::new()
     }
@@ -1273,11 +1270,10 @@ fn extract_stdlib_dependencies(program: &Program) -> Vec<String> {
     let mut dependencies = BTreeSet::new();
 
     for statement in &program.imports {
-        if let Statement::Import { path, .. } = statement {
-            if let Some(package) = stdlib_dependency_from_path(path) {
+        if let Statement::Import { path, .. } = statement
+            && let Some(package) = stdlib_dependency_from_path(path) {
                 dependencies.insert(package);
             }
-        }
     }
 
     dependencies.into_iter().collect()
@@ -1288,11 +1284,10 @@ fn stdlib_dependency_from_path(path: &str) -> Option<String> {
         return None;
     }
 
-    if let Some(package) = package_of(path) {
-        if package.starts_with("jv.") {
+    if let Some(package) = package_of(path)
+        && package.starts_with("jv.") {
             return Some(package.to_string());
         }
-    }
 
     Some(path.to_string())
 }
@@ -1648,11 +1643,10 @@ fn manifest_type_parameter(
 
 fn manifest_key(package: Option<&str>, path: &[String]) -> String {
     let mut segments: Vec<String> = Vec::new();
-    if let Some(pkg) = package {
-        if !pkg.is_empty() {
+    if let Some(pkg) = package
+        && !pkg.is_empty() {
             segments.extend(pkg.split('.').map(|segment| segment.to_string()));
         }
-    }
     segments.extend(path.iter().cloned());
     segments.join("::")
 }

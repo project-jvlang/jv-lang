@@ -21,6 +21,7 @@ pub struct PreparedOutput {
 }
 
 impl OutputManager {
+    #[allow(clippy::result_large_err)]
     pub fn prepare(plan: BuildPlan) -> Result<PreparedOutput, EnhancedDiagnostic> {
         let base_dir = plan.options.output_dir.clone();
         let target_label = format!("java{}", plan.build_config.target.as_str());
@@ -74,6 +75,7 @@ impl PreparedOutput {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn ensure_within_workspace(root: &Path, candidate: &Path) -> Result<(), EnhancedDiagnostic> {
     if path_within(root, candidate) {
         Ok(())
@@ -81,7 +83,7 @@ fn ensure_within_workspace(root: &Path, candidate: &Path) -> Result<(), Enhanced
         Err(io_diagnostic(
             candidate,
             "がワークスペース外を指しています",
-            std::io::Error::new(std::io::ErrorKind::Other, "workspace violation"),
+            std::io::Error::other("workspace violation"),
         ))
     }
 }

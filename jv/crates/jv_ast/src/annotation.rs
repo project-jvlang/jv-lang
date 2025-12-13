@@ -165,17 +165,16 @@ pub fn detect_reserved_conflicts<'a>(
                 }
             }
 
-            if reserved_uses.len() > 1 {
-                if let Some(first) = reserved_uses.first() {
+            if reserved_uses.len() > 1
+                && let Some(first) = reserved_uses.first() {
                     for duplicate in reserved_uses.iter().skip(1) {
                         conflicts.push(ReservedAnnotationConflict {
-                            primary: *first,
+                            primary: first,
                             secondary: Some(*duplicate),
                             kind: ReservedConflictKind::DuplicateUsage,
                         });
                     }
                 }
-            }
 
             for annotation in shadowing {
                 conflicts.push(ReservedAnnotationConflict {
@@ -202,7 +201,7 @@ pub fn detect_reserved_conflicts<'a>(
                             .collect();
                         if !other_reserved.is_empty() && simple.as_str() <= *other {
                             conflicts.push(ReservedAnnotationConflict {
-                                primary: *reserved_uses.first().unwrap(),
+                                primary: reserved_uses.first().unwrap(),
                                 secondary: Some(other_reserved[0]),
                                 kind: ReservedConflictKind::MutualExclusion { other },
                             });

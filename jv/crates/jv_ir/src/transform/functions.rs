@@ -76,8 +76,8 @@ pub fn desugar_default_parameters(
         }
     }
 
-    if infer_return_type {
-        if let Some(hinted_return) = hint_return_type.clone() {
+    if infer_return_type
+        && let Some(hinted_return) = hint_return_type.clone() {
             java_return_type = hinted_return;
             infer_return_type = false;
             debug!(
@@ -86,7 +86,6 @@ pub fn desugar_default_parameters(
                 "using TypeFacts return type for default parameters"
             );
         }
-    }
 
     let fallback_record_type = unique_record_type(context);
     if fallback_record_type.is_some() {
@@ -146,11 +145,10 @@ pub fn desugar_default_parameters(
 
     let ir_body = transform_expression(*body, context)?;
 
-    if infer_return_type {
-        if let Some(inferred) = infer_return_type_from_ir_expression(&ir_body) {
+    if infer_return_type
+        && let Some(inferred) = infer_return_type_from_ir_expression(&ir_body) {
             java_return_type = inferred;
         }
-    }
 
     context
         .type_info
@@ -237,11 +235,10 @@ fn create_delegating_call(
 }
 
 fn infer_return_type_from_ir_expression(body: &IrExpression) -> Option<JavaType> {
-    if let Some(java_type) = extract_java_type(body) {
-        if java_type != JavaType::void() {
+    if let Some(java_type) = extract_java_type(body)
+        && java_type != JavaType::void() {
             return Some(java_type);
         }
-    }
 
     let mut accumulator = ReturnTypeAccumulator::default();
     gather_return_types_from_expression(body, &mut accumulator);
@@ -745,8 +742,8 @@ pub fn desugar_top_level_function(
                 }
             }
 
-            if should_infer_return {
-                if let Some(hinted_return) = hint_return_type.clone() {
+            if should_infer_return
+                && let Some(hinted_return) = hint_return_type.clone() {
                     java_return_type = hinted_return;
                     should_infer_return = false;
                     debug!(
@@ -755,7 +752,6 @@ pub fn desugar_top_level_function(
                         "using TypeFacts return type"
                     );
                 }
-            }
 
             let fallback_record_type = unique_record_type(context);
             if fallback_record_type.is_some() {
@@ -890,14 +886,13 @@ pub fn desugar_top_level_function(
             context.exit_scope();
             let ir_body = body_ir_result?;
 
-            if should_infer_return {
-                if let Some(inferred) = infer_return_type_from_ir_expression(&ir_body) {
+            if should_infer_return
+                && let Some(inferred) = infer_return_type_from_ir_expression(&ir_body) {
                     java_return_type = inferred;
                     context
                         .type_info
                         .insert(name.clone(), java_return_type.clone());
                 }
-            }
 
             // Create method declaration
             let mut method = IrStatement::MethodDeclaration {

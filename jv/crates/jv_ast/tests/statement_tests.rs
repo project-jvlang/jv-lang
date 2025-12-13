@@ -212,10 +212,7 @@ fn test_statement_expression() {
         expr,
         span: dummy_span(),
     };
-    match stmt {
-        Statement::Expression { .. } => assert!(true),
-        _ => panic!("Expected expression statement"),
-    }
+    assert!(matches!(stmt, Statement::Expression { .. }));
 }
 
 #[test]
@@ -243,10 +240,7 @@ fn test_statement_assignment() {
         binding_pattern: None,
         span: dummy_span(),
     };
-    match stmt {
-        Statement::Assignment { .. } => assert!(true),
-        _ => panic!("Expected assignment statement"),
-    }
+    assert!(matches!(stmt, Statement::Assignment { .. }));
 }
 
 #[test]
@@ -317,7 +311,7 @@ fn test_statement_for_in_numeric_range_strategy() {
     match stmt {
         Statement::ForIn(for_in) => match for_in.strategy {
             LoopStrategy::NumericRange(ref meta) => {
-                assert_eq!(meta.inclusive, false);
+                assert!(!meta.inclusive);
                 assert_eq!(meta.span, range_span);
             }
             _ => panic!("Expected numeric range strategy"),
@@ -329,19 +323,13 @@ fn test_statement_for_in_numeric_range_strategy() {
 #[test]
 fn test_statement_break() {
     let stmt = Statement::Break(dummy_span());
-    match stmt {
-        Statement::Break(_) => assert!(true),
-        _ => panic!("Expected break statement"),
-    }
+    assert!(matches!(stmt, Statement::Break(_)));
 }
 
 #[test]
 fn test_statement_continue() {
     let stmt = Statement::Continue(dummy_span());
-    match stmt {
-        Statement::Continue(_) => assert!(true),
-        _ => panic!("Expected continue statement"),
-    }
+    assert!(matches!(stmt, Statement::Continue(_)));
 }
 
 #[test]
@@ -470,10 +458,7 @@ fn test_concurrency_spawn() {
         body: Box::new(body),
         span: dummy_span(),
     };
-    match construct {
-        ConcurrencyConstruct::Spawn { .. } => assert!(true),
-        _ => panic!("Expected spawn construct"),
-    }
+    assert!(matches!(construct, ConcurrencyConstruct::Spawn { .. }));
 }
 
 #[test]
@@ -486,10 +471,7 @@ fn test_concurrency_async() {
         body: Box::new(body),
         span: dummy_span(),
     };
-    match construct {
-        ConcurrencyConstruct::Async { .. } => assert!(true),
-        _ => panic!("Expected async construct"),
-    }
+    assert!(matches!(construct, ConcurrencyConstruct::Async { .. }));
 }
 
 #[test]
@@ -508,10 +490,7 @@ fn test_concurrency_await() {
         expr: Box::new(expr),
         span: dummy_span(),
     };
-    match construct {
-        ConcurrencyConstruct::Await { .. } => assert!(true),
-        _ => panic!("Expected await construct"),
-    }
+    assert!(matches!(construct, ConcurrencyConstruct::Await { .. }));
 }
 
 // ResourceManagement tests
@@ -533,10 +512,7 @@ fn test_resource_use() {
         body: Box::new(body),
         span: dummy_span(),
     };
-    match construct {
-        ResourceManagement::Use { .. } => assert!(true),
-        _ => panic!("Expected use construct"),
-    }
+    assert!(matches!(construct, ResourceManagement::Use { .. }));
 }
 
 #[test]
@@ -552,10 +528,7 @@ fn test_resource_defer() {
         body: Box::new(body),
         span: dummy_span(),
     };
-    match construct {
-        ResourceManagement::Defer { .. } => assert!(true),
-        _ => panic!("Expected defer construct"),
-    }
+    assert!(matches!(construct, ResourceManagement::Defer { .. }));
 }
 
 #[test]

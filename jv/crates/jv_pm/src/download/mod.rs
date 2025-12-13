@@ -668,9 +668,11 @@ mod tests {
             .map(|index| ArtifactDownloadRequest::new(sample_coords(index)))
             .collect::<Vec<_>>();
 
-        let mut build = BuildInfo::default();
-        build.max_concurrent_downloads = Some(20);
-        build.max_concurrent_warning = Some(16);
+        let build = BuildInfo {
+            max_concurrent_downloads: Some(20),
+            max_concurrent_warning: Some(16),
+            ..BuildInfo::default()
+        };
 
         let manager = DownloadManager::new(Arc::clone(&registry), Arc::clone(&cache))
             .apply_manifest(Some(&build));

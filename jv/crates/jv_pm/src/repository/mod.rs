@@ -209,15 +209,14 @@ impl RepositoryManager {
             return Cow::Owned(mirror.url.clone());
         }
 
-        if self.use_global_repositories {
-            if let Some(mirror) = self
+        if self.use_global_repositories
+            && let Some(mirror) = self
                 .global_mirrors
                 .iter()
                 .find(|mirror| matches_pattern(&repo.name, &mirror.mirror_of))
             {
                 return Cow::Owned(mirror.url.clone());
             }
-        }
 
         Cow::Borrowed(&repo.url)
     }
@@ -248,14 +247,13 @@ impl RepositoryManager {
             return true;
         };
 
-        if let Some(excludes) = &filter.exclude_groups {
-            if excludes
+        if let Some(excludes) = &filter.exclude_groups
+            && excludes
                 .iter()
                 .any(|pattern| matches_pattern(group_id, pattern))
             {
                 return false;
             }
-        }
 
         if let Some(includes) = &filter.include_groups {
             return includes
@@ -291,15 +289,14 @@ fn matches_pattern(text: &str, pattern: &str) -> bool {
     let mut remaining = text;
     let mut parts = pattern.split('*').peekable();
 
-    if let Some(first) = parts.peek().copied() {
-        if !pattern.starts_with('*') {
-            let first = first;
-            if !remaining.starts_with(first) {
-                return false;
-            }
-            remaining = &remaining[first.len()..];
-            parts.next();
+    if let Some(first) = parts.peek().copied()
+        && !pattern.starts_with('*')
+    {
+        if !remaining.starts_with(first) {
+            return false;
         }
+        remaining = &remaining[first.len()..];
+        parts.next();
     }
 
     while let Some(part) = parts.next() {

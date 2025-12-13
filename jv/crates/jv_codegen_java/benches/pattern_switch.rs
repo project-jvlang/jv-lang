@@ -140,6 +140,7 @@ fn build_switch_program(
             ..IrModifiers::default()
         },
         throws: vec![],
+        assertion_patterns: vec![],
         span: dummy_span(),
     };
 

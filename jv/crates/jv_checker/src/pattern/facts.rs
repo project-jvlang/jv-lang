@@ -232,14 +232,11 @@ impl NarrowedBinding {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum NarrowedNullability {
     NonNull,
     Nullable,
+    #[default]
     Unknown,
 }
 
-impl Default for NarrowedNullability {
-    fn default() -> Self {
-        NarrowedNullability::Unknown
-    }
-}

@@ -28,7 +28,7 @@ impl Packaging {
     }
 
     /// Parse from string (case-insensitive).
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "jar" => Some(Packaging::Jar),
             "war" => Some(Packaging::War),
@@ -69,7 +69,7 @@ impl JavaVersion {
     }
 
     /// Parse from string.
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "17" => Some(JavaVersion::Java17),
             "21" => Some(JavaVersion::Java21),
@@ -130,13 +130,13 @@ impl InitConfig {
         let packaging = args
             .packaging
             .as_ref()
-            .and_then(|s| Packaging::from_str(s))
+            .and_then(|s| Packaging::parse(s))
             .unwrap_or_default();
 
         let java_version = args
             .java_version
             .as_ref()
-            .and_then(|s| JavaVersion::from_str(s))
+            .and_then(|s| JavaVersion::parse(s))
             .unwrap_or_default();
 
         Ok(InitConfig {
@@ -201,7 +201,7 @@ impl InitConfig {
 
         // Packaging
         let packaging = if let Some(ref p) = args.packaging {
-            Packaging::from_str(p).unwrap_or_default()
+            Packaging::parse(p).unwrap_or_default()
         } else {
             let items: Vec<&str> = Packaging::all().iter().map(|p| p.as_str()).collect();
             let selection = Select::new()
@@ -214,7 +214,7 @@ impl InitConfig {
 
         // Java Version
         let java_version = if let Some(ref jv) = args.java_version {
-            JavaVersion::from_str(jv).unwrap_or_default()
+            JavaVersion::parse(jv).unwrap_or_default()
         } else {
             let items: Vec<&str> = JavaVersion::all().iter().map(|v| v.as_str()).collect();
             let selection = Select::new()
@@ -462,11 +462,11 @@ mod tests {
 
     #[test]
     fn test_packaging_from_str() {
-        assert_eq!(Packaging::from_str("jar"), Some(Packaging::Jar));
-        assert_eq!(Packaging::from_str("JAR"), Some(Packaging::Jar));
-        assert_eq!(Packaging::from_str("war"), Some(Packaging::War));
-        assert_eq!(Packaging::from_str("pom"), Some(Packaging::Pom));
-        assert_eq!(Packaging::from_str("invalid"), None);
+        assert_eq!(Packaging::parse("jar"), Some(Packaging::Jar));
+        assert_eq!(Packaging::parse("JAR"), Some(Packaging::Jar));
+        assert_eq!(Packaging::parse("war"), Some(Packaging::War));
+        assert_eq!(Packaging::parse("pom"), Some(Packaging::Pom));
+        assert_eq!(Packaging::parse("invalid"), None);
     }
 
     #[test]
@@ -478,10 +478,10 @@ mod tests {
 
     #[test]
     fn test_java_version_from_str() {
-        assert_eq!(JavaVersion::from_str("17"), Some(JavaVersion::Java17));
-        assert_eq!(JavaVersion::from_str("21"), Some(JavaVersion::Java21));
-        assert_eq!(JavaVersion::from_str("25"), Some(JavaVersion::Java25));
-        assert_eq!(JavaVersion::from_str("11"), None);
+        assert_eq!(JavaVersion::parse("17"), Some(JavaVersion::Java17));
+        assert_eq!(JavaVersion::parse("21"), Some(JavaVersion::Java21));
+        assert_eq!(JavaVersion::parse("25"), Some(JavaVersion::Java25));
+        assert_eq!(JavaVersion::parse("11"), None);
     }
 
     #[test]
