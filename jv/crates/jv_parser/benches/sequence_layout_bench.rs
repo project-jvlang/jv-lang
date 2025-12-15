@@ -10,9 +10,10 @@ fn first_whitespace_array_span(program: &Program) -> Option<Span> {
             && let Expression::Array {
                 delimiter, span, ..
             } = initializer
-                && matches!(delimiter, jv_ast::SequenceDelimiter::Whitespace) {
-                    return Some(span.clone());
-                }
+            && matches!(delimiter, jv_ast::SequenceDelimiter::Whitespace)
+        {
+            return Some(span.clone());
+        }
         None
     })
 }

@@ -171,12 +171,11 @@ fn unescape_percent(segment: &str) -> String {
     let mut result = String::with_capacity(segment.len());
     let mut chars = segment.chars().peekable();
     while let Some(ch) = chars.next() {
-        if ch == '%'
-            && matches!(chars.peek(), Some('%')) {
-                chars.next();
-                result.push('%');
-                continue;
-            }
+        if ch == '%' && matches!(chars.peek(), Some('%')) {
+            chars.next();
+            result.push('%');
+            continue;
+        }
         result.push(ch);
     }
     result

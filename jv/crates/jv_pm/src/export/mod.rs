@@ -430,9 +430,10 @@ fn collect_jars(current: &Path, jars: &mut Vec<PathBuf>) -> Result<(), ExportErr
             collect_jars(&path, jars)?;
         } else if file_type.is_file()
             && let Some(ext) = path.extension()
-                && ext.eq_ignore_ascii_case("jar") {
-                    jars.push(path);
-                }
+            && ext.eq_ignore_ascii_case("jar")
+        {
+            jars.push(path);
+        }
     }
 
     Ok(())

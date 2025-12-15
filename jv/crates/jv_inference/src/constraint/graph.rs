@@ -448,9 +448,10 @@ impl ConstraintGraph {
                 nodes.sort_by_key(order_key);
                 components.push(nodes);
             } else if let Some(&node) = component.first()
-                && self.has_edge_between(node, node) {
-                    components.push(vec![node]);
-                }
+                && self.has_edge_between(node, node)
+            {
+                components.push(vec![node]);
+            }
         }
 
         components.sort_by(|left, right| order_key(&left[0]).cmp(&order_key(&right[0])));

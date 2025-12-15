@@ -36,15 +36,13 @@ impl Default for ReconstructionOptions {
 }
 
 /// Summary statistics describing a reconstruction run.
-#[derive(Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ReconstructionStats {
     pub total_nodes: usize,
     pub reconstructed_nodes: usize,
     pub placeholder_nodes: usize,
     pub elapsed: Duration,
 }
-
 
 /// Enumerates the warning categories emitted while rebuilding the AST.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

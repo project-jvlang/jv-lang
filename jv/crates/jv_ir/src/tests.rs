@@ -40,8 +40,7 @@ mod suite {
     }
 
     fn parse_when_expression(source: &str) -> Expression {
-        let frontend = Parser::parse(source)
-            .expect("fixture should parse");
+        let frontend = Parser::parse(source).expect("fixture should parse");
         let (program, _, _) = frontend.into_parts();
         for statement in program.statements {
             match statement {
@@ -281,15 +280,14 @@ mod suite {
                     name,
                     body: Some(IrExpression::Block { statements, .. }),
                     ..
-                } if name == "main" => {
-                    statements.iter().find_map(|stmt| {
-                        if let IrStatement::Expression { expr, .. } = stmt
-                            && let IrExpression::LogInvocation { plan, .. } = expr {
-                                return Some(plan.as_ref());
-                            }
-                        None
-                    })
-                }
+                } if name == "main" => statements.iter().find_map(|stmt| {
+                    if let IrStatement::Expression { expr, .. } = stmt
+                        && let IrExpression::LogInvocation { plan, .. } = expr
+                    {
+                        return Some(plan.as_ref());
+                    }
+                    None
+                }),
                 _ => None,
             })
             .expect("log invocation present");
@@ -360,17 +358,18 @@ mod suite {
                 ..
             } = stmt
                 && name == "main"
-                    && let IrExpression::Block { statements, .. } = body {
-                        return statements.iter().any(|stmt| {
-                            matches!(
-                                stmt,
-                                IrStatement::Expression {
-                                    expr: IrExpression::LogInvocation { .. },
-                                    ..
-                                }
-                            )
-                        });
-                    }
+                && let IrExpression::Block { statements, .. } = body
+            {
+                return statements.iter().any(|stmt| {
+                    matches!(
+                        stmt,
+                        IrStatement::Expression {
+                            expr: IrExpression::LogInvocation { .. },
+                            ..
+                        }
+                    )
+                });
+            }
             false
         });
 
@@ -4209,9 +4208,10 @@ fun sample(value: Any): Int {
                     body: Some(body),
                     ..
                 } = decl
-                    && name == "sample" {
-                        return Some(body);
-                    }
+                    && name == "sample"
+                {
+                    return Some(body);
+                }
                 None
             })
             .expect("sample method present in IR");

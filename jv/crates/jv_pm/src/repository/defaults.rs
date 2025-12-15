@@ -9,15 +9,13 @@ const EMBEDDED_TOML: &str = include_str!(concat!(
     "/embedded_default_repositories.toml"
 ));
 
-#[derive(Debug, Clone, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Deserialize, Default)]
 struct EmbeddedConfig {
     #[serde(default)]
     repositories: Vec<RepositoryConfig>,
     #[serde(default)]
     maven: MavenConfigSection,
 }
-
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct MavenConfigSection {
@@ -174,7 +172,6 @@ pub(crate) fn maven_distribution_version(id: &str) -> &'static str {
 
 fn embedded_config() -> &'static EmbeddedConfig {
     EMBEDDED_CONFIG.get_or_init(|| {
-        
         parse_embedded()
             .map(ensure_complete)
             .unwrap_or_else(|_| ensure_complete(EmbeddedConfig::default()))

@@ -32,8 +32,7 @@ impl fmt::Display for TypeId {
 pub type PrimitiveType = JavaPrimitive;
 
 /// 型推論で用いる主な型表現。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum TypeKind {
     Primitive(PrimitiveType),
     Boxed(PrimitiveType),
@@ -45,7 +44,6 @@ pub enum TypeKind {
     #[default]
     Unknown,
 }
-
 
 impl TypeKind {
     /// ヘルパー: 関数型を生成する。
@@ -215,14 +213,12 @@ impl TypeError {
 }
 
 /// 型変数に関する現在の状態を示す。
-#[derive(Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum TypeVariableKind {
     #[default]
     Unbound,
     Bound(TypeKind),
 }
-
 
 /// 型変数を表し、推論過程での束縛状態を保持する。
 #[derive(Debug, Clone, PartialEq)]

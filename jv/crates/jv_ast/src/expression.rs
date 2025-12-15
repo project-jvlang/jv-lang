@@ -313,8 +313,7 @@ pub enum RegexFlag {
 }
 
 /// Delimiter metadata describing how a sequence literal separated its elements.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum SequenceDelimiter {
     /// Elements are comma-delimited (default behaviour).
     #[default]
@@ -323,10 +322,8 @@ pub enum SequenceDelimiter {
     Whitespace,
 }
 
-
 /// Metadata describing how arguments were grouped for a function call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum CallArgumentStyle {
     /// Arguments are comma-delimited (current default).
     #[default]
@@ -334,7 +331,6 @@ pub enum CallArgumentStyle {
     /// Arguments rely on layout-aware grouping (whitespace informed).
     Whitespace,
 }
-
 
 /// Additional metadata captured for function call arguments.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -550,8 +546,7 @@ pub struct RegexTestDiagnostic {
 }
 
 /// 左辺に適用するガード戦略。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum RegexGuardStrategy {
     /// ガード不要。
     #[default]
@@ -563,7 +558,6 @@ pub enum RegexGuardStrategy {
         temp_name: Option<String>,
     },
 }
-
 
 /// When expression arms with pattern matching
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -583,8 +577,7 @@ pub enum ImplicitWhenEnd {
 }
 
 /// Parameter property binding (e.g. primary constructor `val`/`var`).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub enum ParameterProperty {
     /// No property binding; parameter is local to the callable.
     #[default]
@@ -594,7 +587,6 @@ pub enum ParameterProperty {
     /// `var` parameter; exposes a mutable property.
     Var,
 }
-
 
 /// Modifier flags attached to a function or lambda parameter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

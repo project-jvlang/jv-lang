@@ -315,20 +315,22 @@ fn validate_logging_items(table: &Table) -> Result<(), LoggingManifestError> {
 
 fn validate_otel_items(table: &Table) -> Result<(), LoggingManifestError> {
     if let Some(value) = table.get("enabled")
-        && !value.is_bool() {
-            return Err(LoggingManifestError::invalid_type(
-                "logging.opentelemetry.enabled",
-                "真偽値",
-            ));
-        }
+        && !value.is_bool()
+    {
+        return Err(LoggingManifestError::invalid_type(
+            "logging.opentelemetry.enabled",
+            "真偽値",
+        ));
+    }
 
     if let Some(value) = table.get("endpoint")
-        && !value.is_str() {
-            return Err(LoggingManifestError::invalid_type(
-                "logging.opentelemetry.endpoint",
-                "文字列",
-            ));
-        }
+        && !value.is_str()
+    {
+        return Err(LoggingManifestError::invalid_type(
+            "logging.opentelemetry.endpoint",
+            "文字列",
+        ));
+    }
 
     if let Some(value) = table.get("protocol") {
         let Some(protocol) = value.as_str() else {
@@ -347,12 +349,13 @@ fn validate_otel_items(table: &Table) -> Result<(), LoggingManifestError> {
     }
 
     if let Some(value) = table.get("trace_context")
-        && !value.is_bool() {
-            return Err(LoggingManifestError::invalid_type(
-                "logging.opentelemetry.trace_context",
-                "真偽値",
-            ));
-        }
+        && !value.is_bool()
+    {
+        return Err(LoggingManifestError::invalid_type(
+            "logging.opentelemetry.trace_context",
+            "真偽値",
+        ));
+    }
 
     if let Some(resource) = table.get("resource") {
         let resource_table = resource.as_table().ok_or_else(|| {

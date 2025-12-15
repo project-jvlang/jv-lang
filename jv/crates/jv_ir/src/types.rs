@@ -406,8 +406,7 @@ impl LogGuardKind {
 }
 
 /// 利用するロギングフレームワーク種別。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum LoggingFrameworkKind {
     #[default]
     Slf4j,
@@ -415,9 +414,10 @@ pub enum LoggingFrameworkKind {
     JbossLogging,
     CommonsLogging,
     Jul,
-    Custom { identifier: Option<String> },
+    Custom {
+        identifier: Option<String>,
+    },
 }
-
 
 /// ロガーフィールドを識別するID。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

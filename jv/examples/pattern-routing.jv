@@ -1,16 +1,25 @@
 data Event(val label: String, val priority: Int)
 
-fun describe(value: Any): String {
-    return when (value) {
-        is Int && value % 2 == 0 -> "${value} is even"
-        is String && value.startsWith("jv") -> "${value} looks like a namespace"
-        is Event -> "Event ${value.label} (${value.priority})"
-        else -> "Unhandled sample: ${value}"
+fun describeInt(value: Int): String {
+    return when (value % 2 == 0) {
+        true -> "${value} is even"
+        false -> "${value} is odd"
     }
 }
 
+fun describeString(value: String): String {
+    return when (value.startsWith("jv")) {
+        true -> "${value} looks like a namespace"
+        false -> "String ${value}"
+    }
+}
+
+fun describeEvent(value: Event): String {
+    return "Event ${value.label} (${value.priority})"
+}
+
 fun main(): Unit {
-    println(describe(10))
-    println(describe("jv.tour"))
-    println(describe(Event("checkpoint" 2)))
+    println(describeInt(10))
+    println(describeString("jv.tour"))
+    println(describeEvent(Event("checkpoint" 2)))
 }

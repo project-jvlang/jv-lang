@@ -135,8 +135,7 @@ impl From<String> for SymbolId {
 }
 
 /// Nullability metadata threaded through the inference pipeline.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NullabilityFlag {
     /// Nullability is currently unknown.
     #[default]
@@ -146,7 +145,6 @@ pub enum NullabilityFlag {
     /// The type can evaluate to `null`.
     Nullable,
 }
-
 
 impl NullabilityFlag {
     /// Combines two flags, favouring `Nullable` over `Unknown`, and `Unknown` over `NonNull`.
@@ -182,19 +180,21 @@ impl FieldType {
 }
 
 /// Core variant selector for [`TypeKind`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TypeVariant {
     Primitive(&'static str),
     Optional(Box<TypeKind>),
     Function(Vec<TypeKind>, Box<TypeKind>),
-    Record { fields: Vec<FieldType> },
-    Union { arms: Vec<TypeKind> },
+    Record {
+        fields: Vec<FieldType>,
+    },
+    Union {
+        arms: Vec<TypeKind>,
+    },
     Variable(TypeId),
     #[default]
     Unknown,
 }
-
 
 /// Constraint bound predicate.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -337,9 +337,7 @@ pub struct CapabilityHints {
 
 impl CapabilityHints {
     fn key(&self) -> String {
-        let preferred = self
-            .preferred_impl.as_deref()
-            .unwrap_or("_");
+        let preferred = self.preferred_impl.as_deref().unwrap_or("_");
         format!("pref={preferred}:inline={}", self.inline_only)
     }
 }
@@ -695,8 +693,7 @@ impl GenericWhereClause {
 }
 
 /// Full generic signature metadata threaded through the inference pipeline.
-#[derive(Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct GenericSignature {
     pub parameters: Vec<GenericParameterInfo>,
     pub where_clause: Option<GenericWhereClause>,
@@ -741,7 +738,6 @@ impl GenericSignature {
             && self.raw_directives.is_empty()
     }
 }
-
 
 /// Individual constraint between a type parameter and a predicate.
 #[derive(Debug, Clone, PartialEq, Eq)]

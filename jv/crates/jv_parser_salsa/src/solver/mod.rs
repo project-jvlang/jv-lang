@@ -6,8 +6,7 @@ use crate::constraints::{Constraint, ConstraintGraph, ConstraintGraphEdge};
 pub mod solution;
 pub use solution::TypeSolution;
 
-#[derive(Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum SolverState {
     #[default]
     Collecting,
@@ -16,7 +15,6 @@ pub enum SolverState {
     Done,
     Error(String),
 }
-
 
 #[derive(Debug, Default)]
 pub struct Solver {

@@ -266,10 +266,11 @@ fn run_fixture_case(path: &Path, javac_version: Option<u32>) -> Result<()> {
     compare_output(&actual_diag, &expected_diag, stem, "diagnostics")?;
 
     if let Some((ref expected_java25, ref expected_java21)) = expected_pair
-        && let Some(version) = javac_version {
-            compile_with_javac(expected_java25, 25, version, stem, "Java25")?;
-            compile_with_javac(expected_java21, 21, version, stem, "Java21")?;
-        }
+        && let Some(version) = javac_version
+    {
+        compile_with_javac(expected_java25, 25, version, stem, "Java25")?;
+        compile_with_javac(expected_java21, 21, version, stem, "Java21")?;
+    }
 
     Ok(())
 }
@@ -324,9 +325,10 @@ fn parse_javac_major(text: &str) -> Option<u32> {
     for token in text.split_whitespace() {
         if let Some(stripped) = token.split('.').next()
             && let Ok(value) = stripped.parse::<u32>()
-                && value >= 8 {
-                    return Some(value);
-                }
+            && value >= 8
+        {
+            return Some(value);
+        }
     }
     None
 }

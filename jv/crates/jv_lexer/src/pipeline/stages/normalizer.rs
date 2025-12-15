@@ -52,10 +52,11 @@ fn normalize_decimal_number(
                 exponent_digits = 0;
                 normalized.push('e');
                 if let Some(&next) = chars.peek()
-                    && (next == '+' || next == '-') {
-                        normalized.push(next);
-                        chars.next();
-                    }
+                    && (next == '+' || next == '-')
+                {
+                    normalized.push(next);
+                    chars.next();
+                }
             }
             'f' | 'F' | 'd' | 'D' | 'l' | 'L' => {
                 if chars.peek().is_some() {
@@ -198,11 +199,12 @@ impl Normalizer {
             && !matches!(
                 token.kind,
                 RawTokenKind::CommentCandidate | RawTokenKind::Eof
-            ) {
-                metadata
-                    .provisional_metadata
-                    .push(TokenMetadata::CommentCarryOver(carry));
-            }
+            )
+        {
+            metadata
+                .provisional_metadata
+                .push(TokenMetadata::CommentCarryOver(carry));
+        }
 
         NormalizedToken::new(token, normalized_text, metadata)
     }
@@ -401,9 +403,7 @@ impl Normalizer {
 
             if bytes[index] == b'$' && index + 1 < inner.len() && bytes[index + 1] == b'{' {
                 let literal_slice = &inner[literal_start..index];
-                if let Some(literal) =
-                    self.unescape_literal_segment(literal_slice, span.start)?
-                {
+                if let Some(literal) = self.unescape_literal_segment(literal_slice, span.start)? {
                     segments.push(StringInterpolationSegment::Literal(literal));
                 }
 

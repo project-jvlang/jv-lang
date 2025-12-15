@@ -142,7 +142,6 @@ pub enum LockedSource {
     Unknown,
 }
 
-
 impl From<&ResolutionSource> for LockedSource {
     fn from(value: &ResolutionSource) -> Self {
         match value {
@@ -204,8 +203,7 @@ pub struct DependencyRequirementChange {
 }
 
 /// マニフェストとLockfileの差分。
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LockfileDiff {
     pub hash_mismatch: bool,
     pub previous_hash: String,
@@ -215,7 +213,6 @@ pub struct LockfileDiff {
     pub removed_dependencies: Vec<LockfileManifestDependency>,
     pub updated_dependencies: Vec<DependencyRequirementChange>,
 }
-
 
 impl LockfileDiff {
     pub fn is_empty(&self) -> bool {
@@ -442,9 +439,10 @@ impl LockfileService {
         let toml = toml::to_string_pretty(lockfile)?;
         let path = path.as_ref();
         if let Some(parent) = path.parent()
-            && !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)?;
-            }
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent)?;
+        }
         fs::write(path, toml)?;
         Ok(())
     }

@@ -150,9 +150,10 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
 
             if matches!(observed, NullabilityKind::Unknown)
                 && let Some(lattice_state) = self.context.lattice().get(name.as_str())
-                    && !matches!(lattice_state, NullabilityKind::Unknown) {
-                        observed = lattice_state;
-                    }
+                && !matches!(lattice_state, NullabilityKind::Unknown)
+            {
+                observed = lattice_state;
+            }
 
             self.evaluate_exit_state(name.as_str(), observed, &mut diagnostics);
             processed.insert(name.clone());
@@ -172,9 +173,10 @@ impl<'ctx> DiagnosticsEmitter<'ctx> {
 
             if matches!(observed, NullabilityKind::Unknown)
                 && let Some(lattice_state) = self.context.lattice().get(name.as_str())
-                    && !matches!(lattice_state, NullabilityKind::Unknown) {
-                        observed = lattice_state;
-                    }
+                && !matches!(lattice_state, NullabilityKind::Unknown)
+            {
+                observed = lattice_state;
+            }
 
             self.evaluate_exit_state(name.as_str(), observed, &mut diagnostics);
             processed.insert(name.clone());

@@ -56,9 +56,10 @@ pub fn generate_settings_xml(
         writer.write_event(Event::Start(BytesStart::new("repository")))?;
         write_simple(&mut writer, "id", &repo.id)?;
         if let Some(name) = repo.name.as_deref()
-            && !name.trim().is_empty() {
-                write_simple(&mut writer, "name", name)?;
-            }
+            && !name.trim().is_empty()
+        {
+            write_simple(&mut writer, "name", name)?;
+        }
         write_simple(&mut writer, "url", &repo.url)?;
 
         writer.write_event(Event::Start(BytesStart::new("releases")))?;

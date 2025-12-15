@@ -238,17 +238,18 @@ impl CompatibilityAnalyzer {
             }
 
             if entry.name().ends_with(".class")
-                && let Some(major) = extract_class_major(&mut entry) {
-                    self.record_finding(
-                        findings,
-                        highest_major,
-                        CompatibilityFinding {
-                            artifact: format!("{}!{}", path.display(), entry.name()),
-                            version: DetectedVersion::Major(major),
-                            evidence: CompatibilityEvidence::Bytecode,
-                        },
-                    );
-                }
+                && let Some(major) = extract_class_major(&mut entry)
+            {
+                self.record_finding(
+                    findings,
+                    highest_major,
+                    CompatibilityFinding {
+                        artifact: format!("{}!{}", path.display(), entry.name()),
+                        version: DetectedVersion::Major(major),
+                        evidence: CompatibilityEvidence::Bytecode,
+                    },
+                );
+            }
         }
 
         Ok(())
@@ -285,9 +286,10 @@ impl CompatibilityAnalyzer {
         finding: CompatibilityFinding,
     ) {
         if let Some(major) = finding.version.as_major()
-            && highest_major.map(|current| major > current).unwrap_or(true) {
-                *highest_major = Some(major);
-            }
+            && highest_major.map(|current| major > current).unwrap_or(true)
+        {
+            *highest_major = Some(major);
+        }
         findings.push(finding);
     }
 }

@@ -260,10 +260,11 @@ impl TypeLevelEvaluator {
     ) -> TypeLevelEvaluationOutcome {
         let fingerprint = fingerprint_expression(expr);
         if let Some(entry) = self.cache.get(&expr_id)
-            && entry.fingerprint == fingerprint {
-                self.metrics.record_cache_hit();
-                return TypeLevelEvaluationOutcome::success(entry.value.clone(), true);
-            }
+            && entry.fingerprint == fingerprint
+        {
+            self.metrics.record_cache_hit();
+            return TypeLevelEvaluationOutcome::success(entry.value.clone(), true);
+        }
 
         let mut guard = TerminationGuard::new(self.termination);
         let mut dependencies = EvaluationDependencies::new();

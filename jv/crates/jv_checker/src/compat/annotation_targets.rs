@@ -289,23 +289,24 @@ fn check_annotations(
 ) {
     for annotation in annotations {
         if let Some(rule) = lookup_rule(&annotation.name)
-            && !rule.allows(site) {
-                let allowed = rule
-                    .allowed_sites()
-                    .map(|s| s.display_name())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let message = format!(
-                    "Annotation @{} cannot target {}; allowed targets: {}",
-                    annotation.name.simple_name(),
-                    site.display_name(),
-                    allowed
-                );
-                errors.push(CheckError::ValidationError {
-                    message,
-                    span: Some(annotation.span.clone()),
-                });
-            }
+            && !rule.allows(site)
+        {
+            let allowed = rule
+                .allowed_sites()
+                .map(|s| s.display_name())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let message = format!(
+                "Annotation @{} cannot target {}; allowed targets: {}",
+                annotation.name.simple_name(),
+                site.display_name(),
+                allowed
+            );
+            errors.push(CheckError::ValidationError {
+                message,
+                span: Some(annotation.span.clone()),
+            });
+        }
     }
 
     for conflict in detect_reserved_conflicts(annotations) {

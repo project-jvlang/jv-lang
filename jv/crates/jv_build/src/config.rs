@@ -159,14 +159,12 @@ impl Default for SampleConfig {
 }
 
 /// Network access policy for @Sample data sources.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NetworkPolicy {
     Allow,
     #[default]
     Deny,
 }
-
 
 /// Protocol classification for @Sample sources.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

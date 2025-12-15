@@ -22,6 +22,9 @@ impl StatementStrategy for FunctionStrategy {
         // ボディ
         if ctx.peek_kind() == Some(TokenKind::LeftBrace) {
             parse_block(ctx);
+        } else if ctx.peek_kind() == Some(TokenKind::Assign) {
+            ctx.bump();
+            let _ = ctx.parse_expression();
         } else if ctx.peek_kind() == Some(TokenKind::FatArrow) {
             ctx.bump();
             let _ = ctx.parse_expression();
@@ -79,7 +82,16 @@ fn parse_params(ctx: &mut ParserContext) {
 /// 型パラメータやレシーバ、関数名などを引数リスト開始までスキップする。
 fn consume_until_params(ctx: &mut ParserContext) {
     while let Some(kind) = ctx.peek_kind() {
-        if matches!(kind, TokenKind::LeftParen | TokenKind::Eof) {
+        if matches!(
+            kind,
+            TokenKind::LeftParen
+                | TokenKind::LeftBrace
+                | TokenKind::Assign
+                | TokenKind::FatArrow
+                | TokenKind::Colon
+                | TokenKind::Where
+                | TokenKind::Eof
+        ) {
             break;
         }
         ctx.bump();
@@ -90,7 +102,11 @@ fn consume_until_params(ctx: &mut ParserContext) {
 fn consume_return_type_and_where(ctx: &mut ParserContext) {
     loop {
         match ctx.peek_kind() {
-            Some(TokenKind::LeftBrace | TokenKind::FatArrow | TokenKind::Eof) => break,
+            Some(
+                TokenKind::LeftBrace | TokenKind::Assign | TokenKind::FatArrow | TokenKind::Eof,
+            ) => {
+                break;
+            }
             Some(TokenKind::Colon) => {
                 ctx.bump(); // :
                 // 戻り値型。`where` や `{` 手前まで読み飛ばす。
@@ -98,6 +114,7 @@ fn consume_return_type_and_where(ctx: &mut ParserContext) {
                     if matches!(
                         kind,
                         TokenKind::LeftBrace
+                            | TokenKind::Assign
                             | TokenKind::FatArrow
                             | TokenKind::Where
                             | TokenKind::Eof
@@ -112,7 +129,10 @@ fn consume_return_type_and_where(ctx: &mut ParserContext) {
                 while let Some(kind) = ctx.peek_kind() {
                     if matches!(
                         kind,
-                        TokenKind::LeftBrace | TokenKind::FatArrow | TokenKind::Eof
+                        TokenKind::LeftBrace
+                            | TokenKind::Assign
+                            | TokenKind::FatArrow
+                            | TokenKind::Eof
                     ) {
                         break;
                     }

@@ -266,9 +266,10 @@ fn resolve_binding_type(
     }
 
     if let Some(expr) = fallback
-        && let Some(java_type) = extract_java_type(expr) {
-            return Ok(java_type);
-        }
+        && let Some(java_type) = extract_java_type(expr)
+    {
+        return Ok(java_type);
+    }
 
     Ok(default_type)
 }

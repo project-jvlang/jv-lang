@@ -7,8 +7,7 @@ use serde::{Deserialize, Serialize};
 pub struct SchemaId(pub String);
 
 /// Numeric grouping metadata propagated from the lexer into JSON number literals.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum NumberGrouping {
     /// No explicit grouping characters were present.
     #[default]
@@ -20,7 +19,6 @@ pub enum NumberGrouping {
     /// A mix of grouping characters was observed.
     Mixed,
 }
-
 
 /// Classification for JSON comments that are preserved as trivia.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

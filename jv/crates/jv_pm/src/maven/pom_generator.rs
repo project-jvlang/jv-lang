@@ -74,9 +74,10 @@ impl<'a> PomGenerator<'a> {
         }
 
         if let Some(url) = self.manifest.maven.url.as_deref()
-            && !url.trim().is_empty() {
-                self.write_simple(&mut writer, "url", url)?;
-            }
+            && !url.trim().is_empty()
+        {
+            self.write_simple(&mut writer, "url", url)?;
+        }
 
         if !dependencies.is_empty() {
             writer.write_event(Event::Start(BytesStart::new("dependencies")))?;
@@ -99,9 +100,10 @@ impl<'a> PomGenerator<'a> {
                 writer.write_event(Event::Start(BytesStart::new("repository")))?;
                 self.write_simple(&mut writer, "id", &repo.id)?;
                 if let Some(name) = repo.name.as_deref()
-                    && !name.trim().is_empty() {
-                        self.write_simple(&mut writer, "name", name)?;
-                    }
+                    && !name.trim().is_empty()
+                {
+                    self.write_simple(&mut writer, "name", name)?;
+                }
                 self.write_simple(&mut writer, "url", &repo.url)?;
 
                 writer.write_event(Event::Start(BytesStart::new("releases")))?;
@@ -246,14 +248,16 @@ impl<'a> PomGenerator<'a> {
         lock_versions: &Option<HashMap<&str, &str>>,
     ) -> Result<String, PomGenerationError> {
         if let Some(map) = lock_versions.as_ref()
-            && let Some(version) = map.get(dependency_name) {
-                return Ok((*version).to_string());
-            }
+            && let Some(version) = map.get(dependency_name)
+        {
+            return Ok((*version).to_string());
+        }
 
         if let Some(resolved) = resolved
-            && let VersionDecision::Exact(value) = &resolved.decision {
-                return Ok(value.clone());
-            }
+            && let VersionDecision::Exact(value) = &resolved.decision
+        {
+            return Ok(value.clone());
+        }
 
         let trimmed = requirement.trim();
         if trimmed.is_empty() {

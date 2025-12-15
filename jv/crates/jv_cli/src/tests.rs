@@ -1530,10 +1530,10 @@ fn apply_type_facts_sets_sequence_specialization_hint() {
                 .constraints()
                 .iter()
                 .any(|constraint| matches!(constraint.predicate, BoundPredicate::Primitive(_)))
-            {
-                primitive_bound_present = true;
-                break;
-            }
+        {
+            primitive_bound_present = true;
+            break;
+        }
     }
     assert!(
         primitive_bound_present,

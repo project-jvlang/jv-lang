@@ -321,15 +321,13 @@ pub enum PrimitiveTypeName {
 }
 
 /// Origin of a primitive reference in source code.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PrimitiveTypeSource {
     #[default]
     PrimitiveKeyword,
     BoxedIdentifier,
     QualifiedBoxedIdentifier,
 }
-
 
 /// Reference to a primitive family captured from source.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

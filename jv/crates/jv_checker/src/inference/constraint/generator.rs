@@ -598,9 +598,10 @@ impl<'env, 'ext, 'imp> ConstraintGenerator<'env, 'ext, 'imp> {
 
             let mut usage_count = *self.type_var_usage.get(id).unwrap_or(&0);
             if usage_count == 0
-                && let Some(origin) = self.env.type_origin(*id) {
-                    usage_count = *self.type_var_usage.get(&origin).unwrap_or(&0);
-                }
+                && let Some(origin) = self.env.type_origin(*id)
+            {
+                usage_count = *self.type_var_usage.get(&origin).unwrap_or(&0);
+            }
             if usage_count == 0 {
                 let candidate_names: Vec<&'static str> =
                     candidates.iter().map(|(recv, _)| *recv).collect();

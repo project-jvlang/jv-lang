@@ -15,8 +15,7 @@ use jv_parser_preprocess::PreprocessDiagnostic;
 use std::sync::Arc;
 
 /// パースオプション。CST/TriviaMap 生成の有無やトークン軽量化を切り替える。
-#[derive(Debug, Clone, Copy)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ParseOptions {
     pub generate_cst: bool,
     pub generate_trivia_map: bool,
@@ -25,8 +24,7 @@ pub struct ParseOptions {
 }
 
 /// Salsa パイプラインのキャッシュモード。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CacheMode {
     /// クエリ結果をパイプライン間で共有する。
     Shared,
@@ -34,8 +32,6 @@ pub enum CacheMode {
     #[default]
     Ephemeral,
 }
-
-
 
 /// パイプラインが保持する共有リソース（JDK メタデータなど）。
 #[derive(Debug, Clone)]
@@ -308,6 +304,16 @@ fn build_owned_tokens(
         .into_iter()
         .map(|tok| {
             let span = span_from_legacy_token(&tok, index, source);
+            let lexeme = tok
+                .metadata
+                .iter()
+                .find_map(|meta| match meta {
+                    jv_lexer::TokenMetadata::NumberLiteral(info) => {
+                        Some(std::sync::Arc::<str>::from(info.original_lexeme.clone()))
+                    }
+                    _ => None,
+                })
+                .unwrap_or(tok.lexeme);
             let (leading_trivia, metadata) = if trim_trivia_and_metadata {
                 (crate::lexer::TokenTrivia::default(), Vec::new())
             } else {
@@ -316,7 +322,7 @@ fn build_owned_tokens(
             crate::parser::OwnedToken {
                 kind: crate::lexer::kind_from_token_type(&tok.token_type),
                 span,
-                lexeme: tok.lexeme,
+                lexeme,
                 leading_trivia,
                 metadata,
                 diagnostic: tok.diagnostic,
@@ -416,10 +422,23 @@ fn first_parser_error(parse: &ParseResult, index: &LineIndex) -> Option<ParseErr
 }
 
 fn first_lowering_error(lowering: &LoweringResult) -> Option<ParseError> {
+    fn is_fatal_lowering_message(message: &str) -> bool {
+        let message = message.trim();
+        message.contains("式を解釈できませんでした")
+            || message.starts_with("JV-DSL-001")
+            || message.starts_with("JV-DSL-002")
+            || message.starts_with("JV2101")
+            || message.starts_with("JV2102")
+            || message.contains("CST の構築に失敗しました")
+    }
+
     lowering
         .diagnostics
         .iter()
-        .find(|d| matches!(d.severity, LoweringDiagnosticSeverity::Error))
+        .find(|d| {
+            matches!(d.severity, LoweringDiagnosticSeverity::Error)
+                && is_fatal_lowering_message(&d.message)
+        })
         .map(|diagnostic| {
             let message = format!("[{}] {}", SALSA_LOWERING_STAGE, diagnostic.message.clone());
             let span = diagnostic.span.clone().unwrap_or_else(Span::dummy);
@@ -430,6 +449,7 @@ fn first_lowering_error(lowering: &LoweringResult) -> Option<ParseError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jv_ast::Expression;
 
     #[test]
     fn executes_pipeline_and_builds_artifacts() {
@@ -479,5 +499,226 @@ mod tests {
             }
             other => panic!("Syntax エラーを期待したが {:?} を受け取った", other),
         }
+    }
+
+    #[test]
+    fn parses_when_with_subjectless_type_branch_and_semicolon_separators() {
+        let pipeline = SalsaPipeline::new_without_jdk();
+        let source = r#"
+fun provide(): String? = null
+
+maybe = provide()
+val fallback = "fallback";
+label = when (maybe) {
+    is String -> maybe
+    else -> fallback
+}
+"#;
+
+        let output = pipeline
+            .execute(source)
+            .expect("pipeline should parse without syntax errors");
+        let program = &output.program;
+
+        assert!(
+            program.statements.iter().any(|stmt| matches!(
+                stmt,
+                Statement::FunctionDeclaration { name, .. } if name == "provide"
+            )),
+            "expected `provide` function declaration, got: {:?}",
+            program.statements
+        );
+        let provide_return = program.statements.iter().find_map(|stmt| match stmt {
+            Statement::FunctionDeclaration {
+                name, return_type, ..
+            } if name == "provide" => return_type.as_ref(),
+            _ => None,
+        });
+        assert!(
+            provide_return.is_some(),
+            "expected `provide` to have return type annotation, got: {:?}",
+            program.statements
+        );
+        let provide_return = provide_return.unwrap();
+        let base_name = match provide_return {
+            jv_ast::types::TypeAnnotation::Simple(name) => name.as_str(),
+            jv_ast::types::TypeAnnotation::Nullable(inner) => match inner.as_ref() {
+                jv_ast::types::TypeAnnotation::Simple(name) => name.as_str(),
+                jv_ast::types::TypeAnnotation::Generic { name, .. } => name.as_str(),
+                _ => "",
+            },
+            jv_ast::types::TypeAnnotation::Generic { name, .. } => name.as_str(),
+            _ => "",
+        };
+        assert!(
+            !base_name.is_empty(),
+            "expected `provide` return type to have a base name, got: {provide_return:?}"
+        );
+        assert!(
+            program.statements.iter().any(|stmt| matches!(
+                stmt,
+                Statement::ValDeclaration { name, .. } if name == "fallback"
+            )),
+            "expected `fallback` val declaration, got: {:?}",
+            program.statements
+        );
+        assert!(
+            program.statements.iter().any(|stmt| matches!(
+                stmt,
+                Statement::Assignment { target, .. }
+                    if matches!(target, Expression::Identifier(name, _) if name == "label")
+            )),
+            "expected `label` assignment, got: {:?}",
+            program.statements
+        );
+    }
+
+    #[test]
+    fn parses_tuple_literal_expressions() {
+        let pipeline = SalsaPipeline::new_without_jdk();
+        let source = r#"
+fun produce(): (Int String) {
+    (1 "ok")
+}
+"#;
+
+        let output = pipeline
+            .execute(source)
+            .expect("pipeline should parse without syntax errors");
+        let program = &output.program;
+
+        let body = program.statements.iter().find_map(|stmt| match stmt {
+            Statement::FunctionDeclaration { name, body, .. } if name == "produce" => Some(body),
+            _ => None,
+        });
+        let body = body.expect("expected `produce` function declaration");
+
+        let Expression::Block { statements, .. } = body.as_ref() else {
+            panic!("expected block body, got: {body:?}");
+        };
+        let tuple_expr = statements.iter().find_map(|stmt| match stmt {
+            Statement::Expression { expr, .. } => Some(expr),
+            _ => None,
+        });
+        let tuple_expr = tuple_expr.expect("expected expression statement in function body");
+
+        let Expression::Tuple { elements, .. } = tuple_expr else {
+            panic!("expected tuple literal, got: {tuple_expr:?}");
+        };
+        assert_eq!(elements.len(), 2, "expected 2-element tuple literal");
+    }
+
+    #[test]
+    fn preserves_numeric_suffixes_in_number_literals() {
+        let pipeline = SalsaPipeline::new_without_jdk();
+        let source = r#"
+fun sample(): Long {
+    var total = 0L
+    total
+}
+"#;
+
+        let output = pipeline
+            .execute(source)
+            .expect("pipeline should parse without syntax errors");
+        let program = &output.program;
+
+        let body = program.statements.iter().find_map(|stmt| match stmt {
+            Statement::FunctionDeclaration { name, body, .. } if name == "sample" => Some(body),
+            _ => None,
+        });
+        let body = body.expect("expected `sample` function declaration");
+        let Expression::Block { statements, .. } = body.as_ref() else {
+            panic!("expected block body, got: {body:?}");
+        };
+        let initializer = statements.iter().find_map(|stmt| match stmt {
+            Statement::VarDeclaration { initializer, .. } => initializer.as_ref(),
+            _ => None,
+        });
+        let initializer = initializer.expect("expected var initializer");
+        let Expression::Literal(jv_ast::Literal::Number(value), _) = initializer else {
+            panic!("expected number literal initializer, got: {initializer:?}");
+        };
+        assert_eq!(value, "0L");
+    }
+
+    #[test]
+    fn where_clause_does_not_pollute_return_type() {
+        let pipeline = SalsaPipeline::new_without_jdk();
+        let source = r#"
+fun <T> Stream<T>.sumIntFamily(): Int
+    where T : int, T : char, T : short {
+    return 0
+}
+"#;
+
+        let output = pipeline
+            .execute(source)
+            .expect("pipeline should parse without syntax errors");
+        let program = &output.program;
+
+        let return_type = program.statements.iter().find_map(|stmt| match stmt {
+            Statement::FunctionDeclaration {
+                name, return_type, ..
+            } if name == "sumIntFamily" => return_type.as_ref(),
+            Statement::ExtensionFunction(ext) => match ext.function.as_ref() {
+                Statement::FunctionDeclaration {
+                    name, return_type, ..
+                } if name == "sumIntFamily" => return_type.as_ref(),
+                _ => None,
+            },
+            _ => None,
+        });
+        let return_type = return_type.expect("expected sumIntFamily return type");
+        let jv_ast::types::TypeAnnotation::Simple(name) = return_type else {
+            panic!("expected simple return type, got: {return_type:?}");
+        };
+        assert_eq!(name, "Int");
+    }
+
+    #[test]
+    fn lowers_non_empty_function_return_type_annotations() {
+        let pipeline = SalsaPipeline::new_without_jdk();
+        let source = r#"
+fun sizeOf(value: String): Int = 1
+fun isPositive(value: String): Boolean = true
+"#;
+
+        let output = pipeline
+            .execute(source)
+            .expect("pipeline should parse without syntax errors");
+        let program = &output.program;
+
+        let mut seen = 0usize;
+        for statement in &program.statements {
+            if let Statement::FunctionDeclaration {
+                name, return_type, ..
+            } = statement
+                && matches!(name.as_str(), "sizeOf" | "isPositive")
+            {
+                let ty = return_type.as_ref().expect("return type must exist");
+                let base_name = match ty {
+                    jv_ast::types::TypeAnnotation::Simple(name) => name.as_str(),
+                    jv_ast::types::TypeAnnotation::Nullable(inner) => match inner.as_ref() {
+                        jv_ast::types::TypeAnnotation::Simple(name) => name.as_str(),
+                        jv_ast::types::TypeAnnotation::Generic { name, .. } => name.as_str(),
+                        _ => "",
+                    },
+                    jv_ast::types::TypeAnnotation::Generic { name, .. } => name.as_str(),
+                    _ => "",
+                };
+                assert!(
+                    !base_name.is_empty(),
+                    "expected `{name}` return type to have a base name, got: {ty:?}"
+                );
+                let expected = if name == "sizeOf" { "Int" } else { "Boolean" };
+                assert_eq!(
+                    base_name, expected,
+                    "expected `{name}` return type to be `{expected}`, got: {ty:?}"
+                );
+                seen += 1;
+            }
+        }
+        assert_eq!(seen, 2, "expected to check both helper functions");
     }
 }

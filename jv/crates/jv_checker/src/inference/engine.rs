@@ -290,9 +290,10 @@ fn collect_function_names(program: &Program) -> Vec<String> {
     let mut names = Vec::new();
     for statement in &program.statements {
         if let Statement::FunctionDeclaration { name, .. } = statement
-            && seen.insert(name.clone()) {
-                names.push(name.clone());
-            }
+            && seen.insert(name.clone())
+        {
+            names.push(name.clone());
+        }
     }
     names
 }

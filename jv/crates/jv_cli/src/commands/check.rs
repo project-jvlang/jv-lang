@@ -240,13 +240,14 @@ fn conversion_diagnostic_blocks(input_path: &Path, telemetry: &InferenceTelemetr
         if let Some(mut diagnostic) = conversion_diagnostic(event) {
             diagnostic = diagnostic.with_strategy(DiagnosticStrategy::Deferred);
             if diagnostic.learning_hints.is_none()
-                && let Some(helper) = event.helper_method.as_ref() {
-                    let hint = format!(
-                        "Implicit helper: {}. Call it explicitly if you prefer explicit conversions.",
-                        helper_label(helper)
-                    );
-                    diagnostic = diagnostic.with_learning_hint(hint);
-                }
+                && let Some(helper) = event.helper_method.as_ref()
+            {
+                let hint = format!(
+                    "Implicit helper: {}. Call it explicitly if you prefer explicit conversions.",
+                    helper_label(helper)
+                );
+                diagnostic = diagnostic.with_learning_hint(hint);
+            }
             let rendered = format_tooling_diagnostic(input_path, &diagnostic);
             reports.push(rendered);
         }

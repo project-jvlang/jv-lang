@@ -58,10 +58,11 @@ impl CommentsStage {
             }
 
             if let Some(ctx) = stack.last_mut()
-                && ctx.pending_comment {
-                    token.leading_trivia.comments = true;
-                    ctx.pending_comment = false;
-                }
+                && ctx.pending_comment
+            {
+                token.leading_trivia.comments = true;
+                ctx.pending_comment = false;
+            }
 
             match token.token_type {
                 TokenType::LeftBracket => {
@@ -106,9 +107,10 @@ impl CommentsStage {
                     if starts_when_block {
                         stack.push(SequenceContext::new_when());
                     } else if let Some(ctx) = stack.last_mut()
-                        && let SequenceContextKind::When = ctx.kind {
-                            ctx.when_brace_depth = ctx.when_brace_depth.saturating_add(1);
-                        }
+                        && let SequenceContextKind::When = ctx.kind
+                    {
+                        ctx.when_brace_depth = ctx.when_brace_depth.saturating_add(1);
+                    }
                     if let Some(ctx) = stack.last_mut() {
                         ctx.pending_comment = false;
                     }
@@ -118,21 +120,23 @@ impl CommentsStage {
                     let mut popped_when = false;
 
                     if let Some(ctx) = stack.last_mut()
-                        && let SequenceContextKind::When = ctx.kind {
-                            handled_when = true;
-                            if ctx.when_brace_depth > 1 {
-                                ctx.when_brace_depth -= 1;
-                                ctx.pending_comment = false;
-                            } else {
-                                stack.pop();
-                                popped_when = true;
-                            }
+                        && let SequenceContextKind::When = ctx.kind
+                    {
+                        handled_when = true;
+                        if ctx.when_brace_depth > 1 {
+                            ctx.when_brace_depth -= 1;
+                            ctx.pending_comment = false;
+                        } else {
+                            stack.pop();
+                            popped_when = true;
                         }
+                    }
 
                     if (popped_when || !handled_when)
-                        && let Some(ctx) = stack.last_mut() {
-                            ctx.pending_comment = false;
-                        }
+                        && let Some(ctx) = stack.last_mut()
+                    {
+                        ctx.pending_comment = false;
+                    }
                 }
                 _ => {}
             }

@@ -34,7 +34,7 @@ use jv_inference::{
 };
 use jv_ir::types::{IrImport, IrImportDetail};
 use jv_ir::{TransformContext, transform_program_with_context};
-use jv_lexer::{Token, TokenMetadata, TokenType};
+use jv_lexer::{Lexer, Token, TokenMetadata, TokenType};
 use jv_parser::Parser;
 use serde::{Deserialize, Serialize};
 use services::completion::logging::{log_block_snippet_completions, manifest_logging_completions};
@@ -402,15 +402,16 @@ fn symbol_candidates(package: Option<&str>, path: &[String]) -> Vec<String> {
     }
 
     if let Some(pkg) = package
-        && !pkg.is_empty() {
-            if !colon_join.is_empty() {
-                push_candidate(&mut candidates, format!("{pkg}::{colon_join}"));
-            }
-            let dot = path.join(".");
-            if !dot.is_empty() {
-                push_candidate(&mut candidates, format!("{pkg}::{dot}"));
-            }
+        && !pkg.is_empty()
+    {
+        if !colon_join.is_empty() {
+            push_candidate(&mut candidates, format!("{pkg}::{colon_join}"));
         }
+        let dot = path.join(".");
+        if !dot.is_empty() {
+            push_candidate(&mut candidates, format!("{pkg}::{dot}"));
+        }
+    }
 
     candidates
 }
@@ -697,13 +698,15 @@ impl JvLanguageServer {
                 self.regex_metadata.remove(uri);
                 self.programs.remove(uri);
                 self.generics.remove(uri);
-                return match from_parse_error(&error) {
+                let mut diagnostics = match from_parse_error(&error) {
                     Some(diagnostic) => vec![tooling_diagnostic_to_lsp(
                         uri,
                         diagnostic.with_strategy(DiagnosticStrategy::Interactive),
                     )],
                     None => vec![fallback_diagnostic(uri, "Parser error")],
                 };
+                diagnostics.extend(fallback_raw_comment_diagnostics_from_source(content));
+                return diagnostics;
             }
         };
 
@@ -804,12 +807,14 @@ impl JvLanguageServer {
                 regex_analyses = validator.take_analyses();
             }
 
-            if regex_analyses.is_empty() && has_regex_literals
-                && let Some(regex_program) = Self::regex_program_from_tokens(&tokens) {
-                    let mut validator = RegexValidator::new();
-                    let _ = validator.validate_program(&regex_program);
-                    regex_analyses = validator.take_analyses();
-                }
+            if regex_analyses.is_empty()
+                && has_regex_literals
+                && let Some(regex_program) = Self::regex_program_from_tokens(&tokens)
+            {
+                let mut validator = RegexValidator::new();
+                let _ = validator.validate_program(&regex_program);
+                regex_analyses = validator.take_analyses();
+            }
         }
 
         match check_result {
@@ -899,7 +904,29 @@ impl JvLanguageServer {
         }
 
         if !emitted_raw_comment_diagnostics {
-            diagnostics.extend(fallback_raw_comment_diagnostics(&tokens));
+            let mut fallback = fallback_raw_comment_diagnostics(&tokens);
+            if fallback.is_empty() {
+                let mut lexer = Lexer::new(content.to_string());
+                if let Ok(lexed) = lexer.tokenize() {
+                    fallback = fallback_raw_comment_diagnostics(&lexed);
+                }
+            }
+            if fallback.is_empty() {
+                fallback = fallback_raw_comment_diagnostics_from_source(content);
+            }
+            diagnostics.extend(fallback);
+        }
+        if !diagnostics
+            .iter()
+            .any(|diag| matches!(diag.code.as_deref(), Some("JV3202" | "JV3203")))
+        {
+            let mut extra = fallback_raw_comment_diagnostics_from_source(content);
+            extra.retain(|candidate| {
+                !diagnostics.iter().any(|existing| {
+                    existing.code == candidate.code && existing.message == candidate.message
+                })
+            });
+            diagnostics.extend(extra);
         }
 
         for analysis in &regex_analyses {
@@ -1168,9 +1195,10 @@ fn build_generic_hover(
         info.name
     ));
     if let Some(pkg) = package
-        && !pkg.is_empty() {
-            lines.push(format!("パッケージ: {}", pkg));
-        }
+        && !pkg.is_empty()
+    {
+        lines.push(format!("パッケージ: {}", pkg));
+    }
 
     if !summary.type_params.is_empty() {
         lines.push("型パラメータ:".to_string());
@@ -1350,9 +1378,10 @@ fn summarize_symbol(
             }
             if let Some(type_id) = type_ids.get(idx) {
                 if let Some(facts) = facts
-                    && let Some(kind) = facts.kind_for(*type_id) {
-                        attributes.push(format!("推論kind: {:?}", kind));
-                    }
+                    && let Some(kind) = facts.kind_for(*type_id)
+                {
+                    attributes.push(format!("推論kind: {:?}", kind));
+                }
                 if let Some(variance) = variance_map.get(type_id) {
                     attributes.push(format!("変位: {:?}", variance));
                 }
@@ -1657,7 +1686,51 @@ fn fallback_raw_comment_diagnostics(tokens: &[Token]) -> Vec<Diagnostic> {
                     diagnostics.push(build_raw_comment_diagnostic(mode, owner, span));
                 }
             }
+            TokenType::FieldNameLabel(text) => {
+                if let Some(text) = text.primary.as_deref() {
+                    if let Some((mode, owner)) = parse_raw_comment_directive(text) {
+                        let span = comment_span_from_token(token, text);
+                        diagnostics.push(build_raw_comment_diagnostic(mode, owner, span));
+                    }
+                }
+            }
             _ => {}
+        }
+    }
+    diagnostics
+}
+
+fn fallback_raw_comment_diagnostics_from_source(content: &str) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for (line_idx, line) in content.lines().enumerate() {
+        for directive in ["jv:raw-allow", "jv:raw-default"] {
+            let Some(byte_idx) = line.find(directive) else {
+                continue;
+            };
+            let after = line.get(byte_idx..).unwrap_or("");
+            let (mode, payload) = if let Some(rest) = after.strip_prefix("jv:raw-allow") {
+                (RawDirectiveMode::AllowContinuation, rest.trim())
+            } else if let Some(rest) = after.strip_prefix("jv:raw-default") {
+                (RawDirectiveMode::DefaultPolicy, rest.trim())
+            } else {
+                continue;
+            };
+
+            let owner_token = payload.split_whitespace().next().unwrap_or("");
+            let owner = owner_token
+                .split('.')
+                .map(|segment| segment.trim())
+                .filter(|segment| !segment.is_empty())
+                .collect::<Vec<_>>()
+                .join(".");
+            if owner.is_empty() {
+                continue;
+            }
+
+            let start_column = line[..byte_idx].chars().count() + 1;
+            let end_column = start_column + after.chars().count();
+            let span = Span::new(line_idx + 1, start_column, line_idx + 1, end_column);
+            diagnostics.push(build_raw_comment_diagnostic(mode, owner, span));
         }
     }
     diagnostics
@@ -2137,9 +2210,10 @@ fn format_hover_contents(analysis: &RegexAnalysis) -> String {
                 lines.push(format!("  Suggestion: {}", suggestion));
             }
             if let Some(hint) = &diagnostic.learning_hints
-                && !hint.trim().is_empty() {
-                    lines.push(format!("  Hint: {}", hint.trim()));
-                }
+                && !hint.trim().is_empty()
+            {
+                lines.push(format!("  Hint: {}", hint.trim()));
+            }
         }
     }
 
@@ -2345,9 +2419,10 @@ fn sequence_lambda_issue_ranges(content: &str) -> Vec<(usize, usize)> {
         let brace_index = search_index + relative;
         if let Some(identifier) = preceding_identifier(content, brace_index)
             && SEQUENCE_LAMBDA_OPERATIONS.contains(&identifier.as_str())
-                && let Some((start, end)) = detect_implicit_it(content, brace_index) {
-                    issues.push((start, end));
-                }
+            && let Some((start, end)) = detect_implicit_it(content, brace_index)
+        {
+            issues.push((start, end));
+        }
         search_index = brace_index + 1;
     }
     issues
@@ -2458,12 +2533,14 @@ fn statement_contains_regex_features(statement: &Statement) -> bool {
                     .initializer
                     .as_ref()
                     .is_some_and(expression_contains_regex_features)
-                    || property.getter.as_ref().is_some_and(|expr| {
-                        expression_contains_regex_features(expr.as_ref())
-                    })
-                    || property.setter.as_ref().is_some_and(|expr| {
-                        expression_contains_regex_features(expr.as_ref())
-                    })
+                    || property
+                        .getter
+                        .as_ref()
+                        .is_some_and(|expr| expression_contains_regex_features(expr.as_ref()))
+                    || property
+                        .setter
+                        .as_ref()
+                        .is_some_and(|expr| expression_contains_regex_features(expr.as_ref()))
             });
             property_has_regex
                 || methods
@@ -2621,16 +2698,17 @@ fn expression_contains_regex_features(expression: &Expression) -> bool {
             else_arm,
             ..
         } => {
-            expr.as_ref().is_some_and(|expr| {
-                expression_contains_regex_features(expr.as_ref())
-            }) || arms.iter().any(|arm| {
-                arm.guard
+            expr.as_ref()
+                .is_some_and(|expr| expression_contains_regex_features(expr.as_ref()))
+                || arms.iter().any(|arm| {
+                    arm.guard
+                        .as_ref()
+                        .is_some_and(expression_contains_regex_features)
+                        || expression_contains_regex_features(&arm.body)
+                })
+                || else_arm
                     .as_ref()
-                    .is_some_and(expression_contains_regex_features)
-                    || expression_contains_regex_features(&arm.body)
-            }) || else_arm.as_ref().is_some_and(|expr| {
-                expression_contains_regex_features(expr.as_ref())
-            })
+                    .is_some_and(|expr| expression_contains_regex_features(expr.as_ref()))
         }
         Expression::If {
             condition,
@@ -2640,9 +2718,9 @@ fn expression_contains_regex_features(expression: &Expression) -> bool {
         } => {
             expression_contains_regex_features(condition)
                 || expression_contains_regex_features(then_branch)
-                || else_branch.as_ref().is_some_and(|expr| {
-                    expression_contains_regex_features(expr.as_ref())
-                })
+                || else_branch
+                    .as_ref()
+                    .is_some_and(|expr| expression_contains_regex_features(expr.as_ref()))
         }
         Expression::Block { statements, .. } => {
             statements.iter().any(statement_contains_regex_features)
@@ -2658,9 +2736,9 @@ fn expression_contains_regex_features(expression: &Expression) -> bool {
                 || catch_clauses
                     .iter()
                     .any(catch_clause_contains_regex_features)
-                || finally_block.as_ref().is_some_and(|expr| {
-                    expression_contains_regex_features(expr.as_ref())
-                })
+                || finally_block
+                    .as_ref()
+                    .is_some_and(|expr| expression_contains_regex_features(expr.as_ref()))
         }
     }
 }

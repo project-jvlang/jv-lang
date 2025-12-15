@@ -132,7 +132,11 @@ fn line_start_offsets(source: &str) -> Vec<usize> {
 
 fn token_length_in_source(raw: &jv_lexer::Token) -> usize {
     if let Some(length) = raw.metadata.iter().find_map(|meta| match meta {
-        jv_lexer::TokenMetadata::NumberLiteral(info) => Some(info.original_lexeme.len()),
+        jv_lexer::TokenMetadata::NumberLiteral(info) => Some(
+            info.original_lexeme
+                .len()
+                .saturating_add(info.suffix.map(|_| 1).unwrap_or(0)),
+        ),
         jv_lexer::TokenMetadata::RegexLiteral { raw, .. } => Some(raw.len()),
         jv_lexer::TokenMetadata::StringLiteral(info) => {
             let delimiter_len: usize = match info.delimiter {

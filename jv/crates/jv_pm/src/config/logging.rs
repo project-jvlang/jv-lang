@@ -34,8 +34,7 @@ pub enum LoggingConfigError {
 }
 
 /// ログレベル。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LogLevel {
     Trace,
     Debug,
@@ -60,7 +59,6 @@ impl LogLevel {
         &["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]
     }
 }
-
 
 impl fmt::Display for LogLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -107,8 +105,7 @@ impl<'de> Deserialize<'de> for LogLevel {
 }
 
 /// サポートするロギングフレームワーク。
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum LoggingFramework {
     #[default]
     Slf4j,
@@ -142,7 +139,6 @@ impl LoggingFramework {
         ]
     }
 }
-
 
 impl fmt::Display for LoggingFramework {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -218,8 +214,7 @@ pub struct CustomLoggingFramework {
 }
 
 /// OpenTelemetry の接続プロトコル。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum OtelProtocol {
     #[default]
     Grpc,
@@ -238,7 +233,6 @@ impl OtelProtocol {
         &["grpc", "http"]
     }
 }
-
 
 impl fmt::Display for OtelProtocol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -364,7 +358,6 @@ pub struct LoggingConfig {
     pub opentelemetry: OpenTelemetryConfig,
 }
 
-
 impl LoggingConfig {
     /// マニフェストに基づき設定を初期化する。
     pub fn from_manifest(manifest_value: Option<Self>) -> Self {
@@ -390,9 +383,10 @@ impl LoggingConfig {
             self.default_level = default_level;
         }
         if let Some(otel_layer) = &layer.opentelemetry
-            && !otel_layer.is_empty() {
-                self.opentelemetry.apply_layer(otel_layer);
-            }
+            && !otel_layer.is_empty()
+        {
+            self.opentelemetry.apply_layer(otel_layer);
+        }
     }
 }
 

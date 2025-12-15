@@ -323,10 +323,11 @@ pub fn desugar_data_class(
                 None => {
                     let mut hint = context.record_component_type(&name, &param.name);
                     if hint.is_none()
-                        && let Some(package) = context.current_package.as_deref() {
-                            let fq = format!("{package}.{name}");
-                            hint = context.record_component_type(&fq, &param.name);
-                        }
+                        && let Some(package) = context.current_package.as_deref()
+                    {
+                        let fq = format!("{package}.{name}");
+                        hint = context.record_component_type(&fq, &param.name);
+                    }
                     if hint.is_some() {
                         debug!(
                             target: "jv::transform::facts",
@@ -386,10 +387,11 @@ pub fn desugar_data_class(
             None => {
                 let mut hint = context.record_component_type(&name, &param.name);
                 if hint.is_none()
-                    && let Some(package) = context.current_package.as_deref() {
-                        let fq = format!("{package}.{name}");
-                        hint = context.record_component_type(&fq, &param.name);
-                    }
+                    && let Some(package) = context.current_package.as_deref()
+                {
+                    let fq = format!("{package}.{name}");
+                    hint = context.record_component_type(&fq, &param.name);
+                }
                 if let Some(ref ty) = hint {
                     debug!(
                         target: "jv::transform::facts",

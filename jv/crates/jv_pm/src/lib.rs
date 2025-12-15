@@ -73,8 +73,7 @@ pub enum PackageError {
     IoError(#[from] std::io::Error),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum JavaTarget {
     Java21,
     #[default]
@@ -101,7 +100,6 @@ impl JavaTarget {
         self.as_str()
     }
 }
-
 
 impl fmt::Display for JavaTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -276,9 +274,10 @@ impl Manifest {
 
     pub fn maven_description(&self) -> Option<&str> {
         if let Some(desc) = self.maven.description.as_deref()
-            && !desc.trim().is_empty() {
-                return Some(desc);
-            }
+            && !desc.trim().is_empty()
+        {
+            return Some(desc);
+        }
         self.package.description.as_deref()
     }
 }
@@ -305,7 +304,6 @@ pub struct MavenProjectMetadata {
     pub url: Option<String>,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 #[derive(Default)]
@@ -314,7 +312,6 @@ pub struct ProjectSection {
     pub output: OutputSection,
     pub entrypoint: Option<String>,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]

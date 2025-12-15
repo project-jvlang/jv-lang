@@ -89,16 +89,12 @@ fn log_block_items_are_preserved_in_ast_order() {
         other => panic!("3番目の要素はメッセージ式のはずです: {:?}", other),
     }
 
-    let nested_blocks = 1
-        + log_block
-            .items
-            .iter()
-            .filter(|item| matches!(item, LogItem::Nested(_)))
-            .count();
-    assert_eq!(
-        nested_blocks, 2,
-        "親子2つの LogBlock が生成されるべきです"
-    );
+    let nested_blocks = 1 + log_block
+        .items
+        .iter()
+        .filter(|item| matches!(item, LogItem::Nested(_)))
+        .count();
+    assert_eq!(nested_blocks, 2, "親子2つの LogBlock が生成されるべきです");
 }
 
 #[test]
@@ -115,8 +111,7 @@ fn log_block_reports_diagnostic_when_nested_too_deep() {
         }
     "#;
 
-    let error =
-        Parser::parse(source).expect_err("過剰なネストではパースエラーが発生するはずです");
+    let error = Parser::parse(source).expect_err("過剰なネストではパースエラーが発生するはずです");
 
     match error {
         ParseError::Syntax { message, .. } => {

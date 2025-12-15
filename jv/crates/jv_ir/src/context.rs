@@ -206,18 +206,13 @@ impl TransformContext {
         type_name: String,
         components: Vec<(String, JavaType)>,
     ) {
-        let component_map: HashMap<String, JavaType> = components
-            .into_iter()
-            .collect();
+        let component_map: HashMap<String, JavaType> = components.into_iter().collect();
         for key in Self::record_type_keys(&type_name) {
-            self.record_components
-                .entry(key)
-                .or_default()
-                .extend(
-                    component_map
-                        .iter()
-                        .map(|(name, ty)| (name.clone(), ty.clone())),
-                );
+            self.record_components.entry(key).or_default().extend(
+                component_map
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), ty.clone())),
+            );
         }
     }
 
@@ -255,13 +250,15 @@ impl TransformContext {
     fn record_type_keys(type_name: &str) -> Vec<String> {
         let mut keys = vec![type_name.to_string()];
         if let Some(simple) = type_name.rsplit('.').next()
-            && simple != type_name {
-                keys.push(simple.to_string());
-            }
+            && simple != type_name
+        {
+            keys.push(simple.to_string());
+        }
         if let Some(simple) = type_name.rsplit('$').next()
-            && simple != type_name {
-                keys.push(simple.to_string());
-            }
+            && simple != type_name
+        {
+            keys.push(simple.to_string());
+        }
         keys
     }
 

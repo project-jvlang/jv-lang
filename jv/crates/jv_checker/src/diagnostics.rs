@@ -383,11 +383,12 @@ fn frontend_diagnostic_to_tooling(diagnostic: &FrontendDiagnostic) -> EnhancedDi
     let severity = map_frontend_severity(diagnostic.severity());
 
     if let Some(code) = diagnostic.code()
-        && let Some(descriptor) = descriptor(code) {
-            let mut tooling = EnhancedDiagnostic::new(descriptor, message, span);
-            tooling.severity = severity;
-            return tooling;
-        }
+        && let Some(descriptor) = descriptor(code)
+    {
+        let mut tooling = EnhancedDiagnostic::new(descriptor, message, span);
+        tooling.severity = severity;
+        return tooling;
+    }
 
     let fallback_message = if let Some(code) = diagnostic.code() {
         format!("{code}: {message}")
@@ -562,9 +563,9 @@ fn collect_statement_raw_diagnostics(
             if let Some((mode, owner)) = parse_raw_type_comment(comment)
                 && let Some(diagnostic) =
                     build_raw_type_diagnostic(mode, owner, comment_span.clone())
-                {
-                    diagnostics.push(diagnostic);
-                }
+            {
+                diagnostics.push(diagnostic);
+            }
             collect_statement_raw_diagnostics(inner, diagnostics);
         }
         IrStatement::ClassDeclaration {

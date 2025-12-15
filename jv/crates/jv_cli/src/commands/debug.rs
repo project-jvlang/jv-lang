@@ -103,11 +103,12 @@ fn write_artifact(args: &DebugArgs, artifact: &ReconstructedAst) -> Result<()> {
     match &args.output {
         Some(path) if path != Path::new("-") => {
             if let Some(parent) = path.parent()
-                && !parent.as_os_str().is_empty() {
-                    fs::create_dir_all(parent).with_context(|| {
-                        format!("出力ディレクトリの作成に失敗しました: {}", parent.display())
-                    })?;
-                }
+                && !parent.as_os_str().is_empty()
+            {
+                fs::create_dir_all(parent).with_context(|| {
+                    format!("出力ディレクトリの作成に失敗しました: {}", parent.display())
+                })?;
+            }
             let file = File::create(path).with_context(|| {
                 format!("出力ファイルを作成できませんでした: {}", path.display())
             })?;

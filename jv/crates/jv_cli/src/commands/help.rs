@@ -12,8 +12,7 @@ pub struct HelpArgs {
     pub list_topics: bool,
 }
 
-#[derive(Debug, Clone, ValueEnum)]
-#[derive(Default)]
+#[derive(Debug, Clone, ValueEnum, Default)]
 pub enum HelpTopic {
     #[value(alias = "pm")]
     #[default]
@@ -23,7 +22,6 @@ pub enum HelpTopic {
     Cache,
     Export,
 }
-
 
 impl HelpTopic {
     fn possible_name(&self) -> &'static str {

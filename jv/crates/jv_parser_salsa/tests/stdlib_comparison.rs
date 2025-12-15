@@ -33,10 +33,7 @@ fn salsa_parses_stdlib_corpus_without_errors() {
         ) {
             Ok(salsa_output) => {
                 successes += 1;
-                let diagnostics = salsa_output
-                    .artifacts
-                    .diagnostics()
-                    .final_diagnostics();
+                let diagnostics = salsa_output.artifacts.diagnostics().final_diagnostics();
                 if !diagnostics.is_empty() {
                     eprintln!(
                         "diagnostics for {:?}: {:?}",

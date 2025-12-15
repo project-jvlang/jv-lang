@@ -3,8 +3,7 @@ use crate::types::TypeId;
 use std::collections::HashMap;
 
 /// Variance annotation associated with a type parameter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Variance {
     Covariant,
     Contravariant,
@@ -12,7 +11,6 @@ pub enum Variance {
     #[default]
     Bivariant,
 }
-
 
 /// Individual usage position encountered during analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

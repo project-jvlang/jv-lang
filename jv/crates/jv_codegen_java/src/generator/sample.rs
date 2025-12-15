@@ -956,7 +956,13 @@ impl JavaCodeGenerator {
         let (core_type, _) = Self::unwrap_optional_java_type(java_type);
 
         match (core_schema, core_type) {
-            (Schema::Object { fields, required: _ }, JavaType::Reference { name, .. }) => {
+            (
+                Schema::Object {
+                    fields,
+                    required: _,
+                },
+                JavaType::Reference { name, .. },
+            ) => {
                 if !map.contains_key(name) {
                     map.insert(
                         name.clone(),

@@ -131,7 +131,6 @@ fn merge_trivia(target: &mut TokenTrivia, trivia: &[Trivia], line: usize, column
 /// トリビアを既存トークンへ付与する。
 pub fn attach_trivia(token: &mut LegacyToken, trivia: &[Trivia]) {
     let (line, column) = {
-        
         token
             .leading_trivia
             .passthrough_comments

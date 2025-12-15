@@ -41,15 +41,18 @@ impl PendingWhenTracker {
                 }
                 _ => {}
             },
-            TokenType::RightParen => if let Some(PendingWhenState::InSubject {
+            TokenType::RightParen => {
+                if let Some(PendingWhenState::InSubject {
                     ref mut paren_depth,
-                }) = self.state {
-                if *paren_depth > 1 {
-                    *paren_depth -= 1;
-                } else {
-                    self.state = Some(PendingWhenState::AwaitingBrace);
+                }) = self.state
+                {
+                    if *paren_depth > 1 {
+                        *paren_depth -= 1;
+                    } else {
+                        self.state = Some(PendingWhenState::AwaitingBrace);
+                    }
                 }
-            },
+            }
             TokenType::LeftBrace => {
                 let should_enter = matches!(
                     self.state,

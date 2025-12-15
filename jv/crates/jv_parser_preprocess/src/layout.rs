@@ -140,9 +140,10 @@ impl LayoutStage {
                     }
                     if let Some(ctx) = stack.last_mut() {
                         if let SequenceContextKind::When = ctx.kind
-                            && ctx.when_bracket_depth > 0 {
-                                ctx.when_bracket_depth -= 1;
-                            }
+                            && ctx.when_bracket_depth > 0
+                        {
+                            ctx.when_bracket_depth -= 1;
+                        }
                         ctx.prev_was_separator = false;
                         ctx.last_explicit_separator = None;
                     }
@@ -168,9 +169,10 @@ impl LayoutStage {
                     }
                     if let Some(ctx) = stack.last_mut() {
                         if let SequenceContextKind::When = ctx.kind
-                            && ctx.when_paren_depth > 0 {
-                                ctx.when_paren_depth -= 1;
-                            }
+                            && ctx.when_paren_depth > 0
+                        {
+                            ctx.when_paren_depth -= 1;
+                        }
                         ctx.prev_was_separator = false;
                         ctx.last_explicit_separator = None;
                     }
@@ -179,11 +181,11 @@ impl LayoutStage {
                     if let Some(ctx) = stack.last_mut() {
                         if let SequenceContextKind::When = ctx.kind
                             && ctx.when_brace_depth == 1
-                                && ctx.when_paren_depth == 0
-                                && ctx.when_bracket_depth == 0
-                            {
-                                ctx.when_in_branch_body = true;
-                            }
+                            && ctx.when_paren_depth == 0
+                            && ctx.when_bracket_depth == 0
+                        {
+                            ctx.when_in_branch_body = true;
+                        }
                         ctx.prev_was_separator = false;
                         ctx.last_explicit_separator = None;
                     }
@@ -215,32 +217,35 @@ impl LayoutStage {
                     if starts_when_block {
                         stack.push(SequenceContext::new_when());
                     } else if let Some(ctx) = stack.last_mut()
-                        && let SequenceContextKind::When = ctx.kind {
-                            ctx.when_brace_depth = ctx.when_brace_depth.saturating_add(1);
-                        }
+                        && let SequenceContextKind::When = ctx.kind
+                    {
+                        ctx.when_brace_depth = ctx.when_brace_depth.saturating_add(1);
+                    }
                 }
                 TokenType::RightBrace => {
                     let mut handled_when = false;
                     let mut popped_when = false;
 
                     if let Some(ctx) = stack.last_mut()
-                        && let SequenceContextKind::When = ctx.kind {
-                            handled_when = true;
-                            if ctx.when_brace_depth > 1 {
-                                ctx.when_brace_depth -= 1;
-                                ctx.prev_was_separator = false;
-                                ctx.last_explicit_separator = None;
-                            } else {
-                                stack.pop();
-                                popped_when = true;
-                            }
-                        }
-
-                    if (popped_when || !handled_when)
-                        && let Some(ctx) = stack.last_mut() {
+                        && let SequenceContextKind::When = ctx.kind
+                    {
+                        handled_when = true;
+                        if ctx.when_brace_depth > 1 {
+                            ctx.when_brace_depth -= 1;
                             ctx.prev_was_separator = false;
                             ctx.last_explicit_separator = None;
+                        } else {
+                            stack.pop();
+                            popped_when = true;
                         }
+                    }
+
+                    if (popped_when || !handled_when)
+                        && let Some(ctx) = stack.last_mut()
+                    {
+                        ctx.prev_was_separator = false;
+                        ctx.last_explicit_separator = None;
+                    }
                 }
                 TokenType::StringStart | TokenType::StringMid | TokenType::StringEnd => {
                     if let Some(ctx) = stack.last_mut() {
@@ -376,9 +381,10 @@ fn is_sequence_layout_candidate(
     next_token: Option<&Token>,
 ) -> bool {
     if let Some(prev) = prev_token
-        && requires_right_operand(prev) {
-            return false;
-        }
+        && requires_right_operand(prev)
+    {
+        return false;
+    }
 
     match current {
         TokenType::Plus | TokenType::Minus => {

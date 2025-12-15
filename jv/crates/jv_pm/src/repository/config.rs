@@ -61,7 +61,6 @@ pub enum AuthType {
     Token,
 }
 
-
 /// グループフィルタ。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct FilterConfig {

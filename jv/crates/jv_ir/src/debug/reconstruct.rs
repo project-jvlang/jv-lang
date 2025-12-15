@@ -724,10 +724,7 @@ impl<'a> ReconstructionContext<'a> {
                 return_type,
                 ..
             } => TypeAnnotation::Function {
-                params: param_types
-                    .iter()
-                    .map(Self::convert_java_type)
-                    .collect(),
+                params: param_types.iter().map(Self::convert_java_type).collect(),
                 return_type: Box::new(Self::convert_java_type(return_type)),
             },
             JavaType::Wildcard { kind, bound } => {

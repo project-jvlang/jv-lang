@@ -7,8 +7,7 @@ use crate::types::*;
 use serde::{Deserialize, Serialize};
 
 /// Origin of a `val` binding indicating how the declaration was introduced.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ValBindingOrigin {
     /// Declaration explicitly used the `val` keyword.
     #[default]
@@ -18,7 +17,6 @@ pub enum ValBindingOrigin {
     /// Declaration was inferred while providing an explicit type annotation.
     ImplicitTyped,
 }
-
 
 /// Class/interface property
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

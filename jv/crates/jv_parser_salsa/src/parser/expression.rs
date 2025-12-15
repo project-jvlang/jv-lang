@@ -1,6 +1,9 @@
 use crate::lexer::TokenKind;
 
-use super::{OwnedToken, ParserContext, SyntaxKind, recovery::recover_statement};
+use super::{
+    DiagnosticSeverity, OwnedToken, ParseEvent, ParserContext, ParserDiagnostic, SyntaxKind,
+    recovery::recover_statement,
+};
 
 /// Pratt パーサーのコア実装。
 pub fn parse_expression_bp(ctx: &mut ParserContext, min_bp: u8) -> bool {
@@ -15,9 +18,52 @@ pub fn parse_expression_bp(ctx: &mut ParserContext, min_bp: u8) -> bool {
     }
 
     while let Some(op_tok) = ctx.peek(0).cloned() {
-
         if op_tok.kind == TokenKind::Less && should_parse_type_args(ctx) {
             consume_type_args(ctx);
+            continue;
+        }
+
+        if op_tok.kind == TokenKind::At {
+            // 単位リテラル: `42 @ ℃` のような `@` 後置を式として許容する。
+            // 記号が Identifier としてトークナイズされないケースもあるため、
+            // ここでは最小限のトークン消費で構文エラーを避ける。
+            let (l_bp, _) = (8u8, 9u8);
+            if l_bp < min_bp {
+                break;
+            }
+            ctx.bump(); // @
+            ctx.bump_while(|kind| {
+                matches!(
+                    kind,
+                    TokenKind::Whitespace
+                        | TokenKind::Newline
+                        | TokenKind::LayoutComma
+                        | TokenKind::FieldNameLabel
+                        | TokenKind::LineComment
+                        | TokenKind::BlockComment
+                        | TokenKind::JavaDocComment
+                )
+            });
+            match ctx.peek_kind() {
+                Some(TokenKind::LeftBracket) => {
+                    // `@[K]` のような角括弧シンボルを許容する。
+                    ctx.bump(); // [
+                    while !ctx.is_eof() && ctx.peek_kind() != Some(TokenKind::RightBracket) {
+                        ctx.bump();
+                    }
+                    if ctx.peek_kind() == Some(TokenKind::RightBracket) {
+                        ctx.bump();
+                    } else {
+                        ctx.error("単位シンボルの `]` が必要です");
+                    }
+                }
+                Some(TokenKind::Identifier | TokenKind::Invalid) => {
+                    ctx.bump();
+                }
+                _ => {
+                    ctx.error("単位シンボルが必要です");
+                }
+            }
             continue;
         }
 
@@ -30,7 +76,7 @@ pub fn parse_expression_bp(ctx: &mut ParserContext, min_bp: u8) -> bool {
             continue;
         }
 
-        if is_postfix(&op_tok) {
+        if is_postfix(ctx, &op_tok) {
             ok = parse_postfix(ctx) && ok;
             continue;
         }
@@ -44,7 +90,27 @@ pub fn parse_expression_bp(ctx: &mut ParserContext, min_bp: u8) -> bool {
 
 fn parse_prefix(ctx: &mut ParserContext) -> bool {
     match ctx.peek_kind() {
+        Some(TokenKind::When) => super::strategies::parse_when_statement(ctx),
+        Some(TokenKind::If) => {
+            let message = "JV3103: `if` expressions are not supported / `if` 式はサポートされていません。\n条件分岐は `when` 式を使用してください。Quick Fix: when.convert.if. / Use a `when` expression for branching. Quick Fix: when.convert.if. (--explain JV3103)";
+            let span = ctx.current_span();
+            ctx.events.push(ParseEvent::Error {
+                message: message.to_string(),
+                span,
+            });
+            ctx.diagnostics.push(ParserDiagnostic::new(
+                message,
+                DiagnosticSeverity::Warning,
+                span,
+            ));
+            recover_statement(ctx);
+            true
+        }
         Some(kind) if is_literal(kind) => {
+            ctx.bump();
+            true
+        }
+        Some(TokenKind::Underscore) => {
             ctx.bump();
             true
         }
@@ -52,9 +118,30 @@ fn parse_prefix(ctx: &mut ParserContext) -> bool {
             ctx.bump();
             true
         }
+        Some(TokenKind::ImplicitParam) => {
+            ctx.bump();
+            true
+        }
         Some(TokenKind::LeftParen) => {
             ctx.bump();
-            let _ = parse_expression_bp(ctx, 0);
+            loop {
+                ctx.bump_while(|kind| {
+                    matches!(
+                        kind,
+                        TokenKind::Whitespace
+                            | TokenKind::Newline
+                            | TokenKind::LayoutComma
+                            | TokenKind::FieldNameLabel
+                            | TokenKind::LineComment
+                            | TokenKind::BlockComment
+                            | TokenKind::JavaDocComment
+                    )
+                });
+                if ctx.is_eof() || ctx.peek_kind() == Some(TokenKind::RightParen) {
+                    break;
+                }
+                let _ = parse_expression_bp(ctx, 0);
+            }
             if ctx.peek_kind() == Some(TokenKind::RightParen) {
                 ctx.bump();
             }
@@ -66,7 +153,14 @@ fn parse_prefix(ctx: &mut ParserContext) -> bool {
                 ctx.bump_while(|kind| {
                     matches!(
                         kind,
-                        TokenKind::Comma | TokenKind::LayoutComma | TokenKind::Newline
+                        TokenKind::Whitespace
+                            | TokenKind::Newline
+                            | TokenKind::Comma
+                            | TokenKind::LayoutComma
+                            | TokenKind::FieldNameLabel
+                            | TokenKind::LineComment
+                            | TokenKind::BlockComment
+                            | TokenKind::JavaDocComment
                     )
                 });
                 if ctx.is_eof() || ctx.peek_kind() == Some(TokenKind::RightBracket) {
@@ -115,7 +209,14 @@ fn parse_postfix(ctx: &mut ParserContext) -> bool {
                 ctx.bump_while(|kind| {
                     matches!(
                         kind,
-                        TokenKind::Comma | TokenKind::LayoutComma | TokenKind::Newline
+                        TokenKind::Whitespace
+                            | TokenKind::Newline
+                            | TokenKind::Comma
+                            | TokenKind::LayoutComma
+                            | TokenKind::FieldNameLabel
+                            | TokenKind::LineComment
+                            | TokenKind::BlockComment
+                            | TokenKind::JavaDocComment
                     )
                 });
 
@@ -138,10 +239,25 @@ fn parse_postfix(ctx: &mut ParserContext) -> bool {
         }
         TokenKind::Dot => {
             ctx.bump(); // .
-            if ctx.peek_kind() == Some(TokenKind::Identifier) {
-                ctx.bump();
-            } else {
-                ctx.error("メンバ名が必要です");
+            match ctx.peek_kind() {
+                Some(TokenKind::Identifier) => {
+                    ctx.bump();
+                }
+                Some(TokenKind::ImplicitParam) => {
+                    ctx.bump();
+                }
+                Some(TokenKind::Underscore) => {
+                    // Positional tuple accessors like `._1()`.
+                    ctx.bump(); // _
+                    if ctx.peek_kind() == Some(TokenKind::Number) {
+                        ctx.bump();
+                    } else {
+                        ctx.error("メンバ名が必要です");
+                    }
+                }
+                _ => {
+                    ctx.error("メンバ名が必要です");
+                }
             }
             true
         }
@@ -155,7 +271,10 @@ fn parse_postfix(ctx: &mut ParserContext) -> bool {
                 } else {
                     ctx.error("インデックス式を `]` で閉じてください");
                 }
-            } else if ctx.peek_kind() == Some(TokenKind::Identifier) {
+            } else if matches!(
+                ctx.peek_kind(),
+                Some(TokenKind::Identifier | TokenKind::ImplicitParam)
+            ) {
                 ctx.bump();
             } else {
                 ctx.error("null 安全アクセスのターゲットが必要です");
@@ -201,15 +320,11 @@ fn is_prefix_operator(kind: TokenKind) -> bool {
     )
 }
 
-fn is_postfix(tok: &OwnedToken) -> bool {
+fn is_postfix(ctx: &ParserContext, tok: &OwnedToken) -> bool {
     matches!(
         tok.kind,
-        TokenKind::LeftParen
-            | TokenKind::Dot
-            | TokenKind::NullSafe
-            | TokenKind::LeftBracket
-            | TokenKind::LeftBrace
-    )
+        TokenKind::LeftParen | TokenKind::Dot | TokenKind::NullSafe | TokenKind::LeftBracket
+    ) || (tok.kind == TokenKind::LeftBrace && ctx.allow_trailing_block)
 }
 
 fn prefix_binding_power(kind: TokenKind) -> (u8, u8) {

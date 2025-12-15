@@ -36,9 +36,10 @@ fn infer_json_schema(data: &[u8]) -> Result<Schema, SchemaError> {
     })?;
 
     if let Some(array) = value.as_array()
-        && array.is_empty() {
-            return Err(SchemaError::EmptyDataset);
-        }
+        && array.is_empty()
+    {
+        return Err(SchemaError::EmptyDataset);
+    }
 
     Ok(infer_json_value_schema(&value))
 }
@@ -105,9 +106,7 @@ fn infer_json_array_schema(values: &[Value]) -> Schema {
     }
 
     Schema::Array {
-        element_type: Box::new(
-            element_schema.unwrap_or(Schema::Primitive(PrimitiveType::Null)),
-        ),
+        element_type: Box::new(element_schema.unwrap_or(Schema::Primitive(PrimitiveType::Null))),
     }
 }
 
@@ -1441,9 +1440,10 @@ fn compute_sha256(bytes: &[u8]) -> String {
 
 fn enforce_limit(request: &SampleFetchRequest, actual: u64) -> Result<(), SampleFetchError> {
     if let Some(limit) = request.max_bytes
-        && actual > limit {
-            return Err(SampleFetchError::SizeLimitExceeded { limit, actual });
-        }
+        && actual > limit
+    {
+        return Err(SampleFetchError::SizeLimitExceeded { limit, actual });
+    }
     Ok(())
 }
 

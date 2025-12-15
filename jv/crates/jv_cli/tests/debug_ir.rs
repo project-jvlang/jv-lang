@@ -167,7 +167,8 @@ fn write_ir_fixture() -> (tempfile::TempDir, PathBuf) {
 
 fn normalize_elapsed(root: &mut Value) {
     if let Some(stats) = root.get_mut("stats")
-        && let Some(elapsed) = stats.get_mut("elapsed_millis") {
-            *elapsed = Value::from(0);
-        }
+        && let Some(elapsed) = stats.get_mut("elapsed_millis")
+    {
+        *elapsed = Value::from(0);
+    }
 }

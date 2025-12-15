@@ -107,10 +107,7 @@ const CATEGORY_VARIANTS: &[&str] = &[
     "custom",
 ];
 
-fn parse_tagged_category<E>(
-    category: &str,
-    detail: Option<&Value>,
-) -> Result<MappingCategory, E>
+fn parse_tagged_category<E>(category: &str, detail: Option<&Value>) -> Result<MappingCategory, E>
 where
     E: de::Error,
 {

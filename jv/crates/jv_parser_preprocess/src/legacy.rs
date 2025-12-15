@@ -116,9 +116,10 @@ fn is_sequence_layout_candidate(
     next_token: Option<&Token>,
 ) -> bool {
     if let Some(prev) = prev_token
-        && requires_right_operand(prev) {
-            return false;
-        }
+        && requires_right_operand(prev)
+    {
+        return false;
+    }
 
     match token_type {
         TokenType::Plus | TokenType::Minus => {
@@ -233,60 +234,59 @@ pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
         }
         let mut next_call_state = allows_call_suffix(token_type_ref);
 
-        if !in_interpolation_expr
-            && let Some(ctx) = stack.last_mut() {
-                let eligible = match ctx.kind {
-                    SequenceContextKind::Array => {
-                        !matches!(token.token_type, TokenType::Comma | TokenType::RightBracket)
-                    }
-                    SequenceContextKind::Call => {
-                        !matches!(token.token_type, TokenType::Comma | TokenType::RightParen)
-                    }
-                    SequenceContextKind::When => is_when_layout_candidate(token_type_ref),
-                } && is_sequence_layout_candidate(
-                    prev_token_type.as_ref(),
-                    token_type_ref,
-                    next_token,
-                );
-                if eligible {
-                    let layout_needed = !ctx.prev_was_separator
-                        && (ctx.pending_layout || has_layout_trivia(&token.leading_trivia));
-                    if layout_needed {
-                        match ctx.kind {
-                            SequenceContextKind::Array => {
-                                let metadata = LayoutCommaMetadata {
-                                    sequence: LayoutSequenceKind::Array,
-                                    explicit_separator: ctx.last_explicit_separator.take(),
-                                };
-                                let mut synthetic = make_layout_comma_token(&token);
-                                synthetic
-                                    .metadata
-                                    .push(TokenMetadata::LayoutComma(metadata));
-                                result.push(synthetic);
-                            }
-                            SequenceContextKind::Call => {
-                                ctx.last_explicit_separator = None;
-                            }
-                            SequenceContextKind::When => {
-                                let metadata = LayoutCommaMetadata {
-                                    sequence: LayoutSequenceKind::When,
-                                    explicit_separator: None,
-                                };
-                                let mut synthetic = make_layout_comma_token(&token);
-                                synthetic
-                                    .metadata
-                                    .push(TokenMetadata::LayoutComma(metadata));
-                                result.push(synthetic);
-                            }
-                        }
-
-                        ctx.prev_was_separator = true;
-                    }
-                    ctx.pending_layout = false;
-                } else {
-                    ctx.pending_layout = false;
+        if !in_interpolation_expr && let Some(ctx) = stack.last_mut() {
+            let eligible = match ctx.kind {
+                SequenceContextKind::Array => {
+                    !matches!(token.token_type, TokenType::Comma | TokenType::RightBracket)
                 }
+                SequenceContextKind::Call => {
+                    !matches!(token.token_type, TokenType::Comma | TokenType::RightParen)
+                }
+                SequenceContextKind::When => is_when_layout_candidate(token_type_ref),
+            } && is_sequence_layout_candidate(
+                prev_token_type.as_ref(),
+                token_type_ref,
+                next_token,
+            );
+            if eligible {
+                let layout_needed = !ctx.prev_was_separator
+                    && (ctx.pending_layout || has_layout_trivia(&token.leading_trivia));
+                if layout_needed {
+                    match ctx.kind {
+                        SequenceContextKind::Array => {
+                            let metadata = LayoutCommaMetadata {
+                                sequence: LayoutSequenceKind::Array,
+                                explicit_separator: ctx.last_explicit_separator.take(),
+                            };
+                            let mut synthetic = make_layout_comma_token(&token);
+                            synthetic
+                                .metadata
+                                .push(TokenMetadata::LayoutComma(metadata));
+                            result.push(synthetic);
+                        }
+                        SequenceContextKind::Call => {
+                            ctx.last_explicit_separator = None;
+                        }
+                        SequenceContextKind::When => {
+                            let metadata = LayoutCommaMetadata {
+                                sequence: LayoutSequenceKind::When,
+                                explicit_separator: None,
+                            };
+                            let mut synthetic = make_layout_comma_token(&token);
+                            synthetic
+                                .metadata
+                                .push(TokenMetadata::LayoutComma(metadata));
+                            result.push(synthetic);
+                        }
+                    }
+
+                    ctx.prev_was_separator = true;
+                }
+                ctx.pending_layout = false;
+            } else {
+                ctx.pending_layout = false;
             }
+        }
 
         match token.token_type {
             TokenType::LeftBracket => {
@@ -375,9 +375,10 @@ pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
                 if starts_when_block {
                     stack.push(SequenceContext::new(SequenceContextKind::When));
                 } else if let Some(ctx) = stack.last_mut()
-                    && let SequenceContextKind::When = ctx.kind {
-                        ctx.when_brace_depth = ctx.when_brace_depth.saturating_add(1);
-                    }
+                    && let SequenceContextKind::When = ctx.kind
+                {
+                    ctx.when_brace_depth = ctx.when_brace_depth.saturating_add(1);
+                }
 
                 next_call_state = false;
                 result.push(token);
@@ -387,23 +388,25 @@ pub(super) fn run_legacy_preprocess(tokens: Vec<Token>) -> Vec<Token> {
                 let mut popped_when = false;
 
                 if let Some(ctx) = stack.last_mut()
-                    && let SequenceContextKind::When = ctx.kind {
-                        handled_when = true;
-                        if ctx.when_brace_depth > 1 {
-                            ctx.when_brace_depth -= 1;
-                            ctx.prev_was_separator = false;
-                            ctx.last_explicit_separator = None;
-                        } else {
-                            stack.pop();
-                            popped_when = true;
-                        }
-                    }
-
-                if (popped_when || !handled_when)
-                    && let Some(ctx) = stack.last_mut() {
+                    && let SequenceContextKind::When = ctx.kind
+                {
+                    handled_when = true;
+                    if ctx.when_brace_depth > 1 {
+                        ctx.when_brace_depth -= 1;
                         ctx.prev_was_separator = false;
                         ctx.last_explicit_separator = None;
+                    } else {
+                        stack.pop();
+                        popped_when = true;
                     }
+                }
+
+                if (popped_when || !handled_when)
+                    && let Some(ctx) = stack.last_mut()
+                {
+                    ctx.prev_was_separator = false;
+                    ctx.last_explicit_separator = None;
+                }
 
                 result.push(token);
             }

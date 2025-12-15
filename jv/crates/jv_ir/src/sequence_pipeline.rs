@@ -570,10 +570,7 @@ fn lower_sequence_source(
             let source_ir = transform_expression(other, context)?;
             let inferred_type = extract_java_type(&source_ir);
 
-            if inferred_type
-                .as_ref()
-                .is_some_and(is_java_stream_type)
-            {
+            if inferred_type.as_ref().is_some_and(is_java_stream_type) {
                 let element_hint = inferred_type.as_ref().and_then(stream_element_hint);
 
                 return Ok(SequenceSource::JavaStream {
@@ -931,9 +928,10 @@ fn is_number_like_type(name: &str) -> bool {
 
 fn infer_iterable_like_type(expr: &IrExpression) -> Option<JavaType> {
     if let Some(java_type) = extract_java_type(expr)
-        && is_iterable_like_java_type(&java_type) {
-            return Some(java_type);
-        }
+        && is_iterable_like_java_type(&java_type)
+    {
+        return Some(java_type);
+    }
 
     match expr {
         IrExpression::Conditional {
@@ -1054,17 +1052,20 @@ fn infer_iterable_like_from_method_call(
 
     if let Some(target) = resolved_target
         && let Some(owner) = target.owner.as_deref()
-            && is_iterable_like_name(owner) && is_iterable_factory_method(owner, method_name) {
-                return Some(build_iterable_type_hint(owner, java_type, args));
-            }
+        && is_iterable_like_name(owner)
+        && is_iterable_factory_method(owner, method_name)
+    {
+        return Some(build_iterable_type_hint(owner, java_type, args));
+    }
 
     if let Some(receiver_expr) = receiver
         && let Some(receiver_type) = extract_java_type(receiver_expr)
-            && is_iterable_like_java_type(&receiver_type)
-                && let Some(owner) = iterable_type_name(&receiver_type)
-                    && is_iterable_factory_method(owner, method_name) {
-                        return Some(build_iterable_type_hint(owner, java_type, args));
-                    }
+        && is_iterable_like_java_type(&receiver_type)
+        && let Some(owner) = iterable_type_name(&receiver_type)
+        && is_iterable_factory_method(owner, method_name)
+    {
+        return Some(build_iterable_type_hint(owner, java_type, args));
+    }
 
     None
 }
@@ -1102,12 +1103,13 @@ fn build_iterable_type_hint(owner: &str, java_type: &JavaType, args: &[IrExpress
         generic_args: existing,
         ..
     } = java_type
-        && !existing.is_empty() {
-            return JavaType::Reference {
-                name: owner.to_string(),
-                generic_args: existing.clone(),
-            };
-        }
+        && !existing.is_empty()
+    {
+        return JavaType::Reference {
+            name: owner.to_string(),
+            generic_args: existing.clone(),
+        };
+    }
 
     let element_type = args
         .iter()
@@ -2372,27 +2374,27 @@ impl ListTerminalEnforcer {
     fn visit_expression(&mut self, expr: &mut IrExpression, expected: Option<&JavaType>) {
         if let Some(expected_type) = expected
             && Self::is_list_type(expected_type)
-                && let IrExpression::SequencePipeline {
-                    pipeline,
-                    java_type,
-                    ..
-                } = expr
-                {
-                    if pipeline.terminal.is_none() {
-                        let terminal = SequenceTerminal {
-                            kind: SequenceTerminalKind::ToList,
-                            evaluation: SequenceTerminalEvaluation::Collector,
-                            requires_non_empty_source: false,
-                            specialization_hint: None,
-                            canonical_adapter: None,
-                            span: pipeline.span.clone(),
-                        };
-                        pipeline.terminal = Some(terminal);
-                        pipeline.lazy = false;
-                        pipeline.recompute_shape();
-                    }
-                    *java_type = expected_type.clone();
-                }
+            && let IrExpression::SequencePipeline {
+                pipeline,
+                java_type,
+                ..
+            } = expr
+        {
+            if pipeline.terminal.is_none() {
+                let terminal = SequenceTerminal {
+                    kind: SequenceTerminalKind::ToList,
+                    evaluation: SequenceTerminalEvaluation::Collector,
+                    requires_non_empty_source: false,
+                    specialization_hint: None,
+                    canonical_adapter: None,
+                    span: pipeline.span.clone(),
+                };
+                pipeline.terminal = Some(terminal);
+                pipeline.lazy = false;
+                pipeline.recompute_shape();
+            }
+            *java_type = expected_type.clone();
+        }
 
         match expr {
             IrExpression::SequencePipeline { .. }

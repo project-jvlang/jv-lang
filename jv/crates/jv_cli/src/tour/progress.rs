@@ -12,8 +12,7 @@ use super::cli::SectionId;
 const STORAGE_VERSION: u8 = 1;
 const CERTIFICATE_TITLE: &str = "jv言語ツアー達成証";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord, Default)]
 pub enum SectionStatus {
     #[serde(rename = "not_started")]
     #[default]
@@ -23,7 +22,6 @@ pub enum SectionStatus {
     #[serde(rename = "completed")]
     Completed,
 }
-
 
 impl SectionStatus {
     pub fn icon(self) -> &'static str {
@@ -371,11 +369,7 @@ impl ProgressTracker {
     }
 
     pub fn mark_section_started(&mut self, section: SectionId) -> Result<()> {
-        let entry = self
-            .state
-            .sections
-            .entry(section)
-            .or_default();
+        let entry = self.state.sections.entry(section).or_default();
         if entry.status == SectionStatus::NotStarted {
             entry.status = SectionStatus::InProgress;
             entry.started_at = Some(Utc::now());
@@ -403,11 +397,7 @@ impl ProgressTracker {
             }
         };
 
-        let entry = self
-            .state
-            .sections
-            .entry(section)
-            .or_default();
+        let entry = self.state.sections.entry(section).or_default();
 
         if entry.quiz.passed {
             return Ok(QuizOutcome {
@@ -443,17 +433,18 @@ impl ProgressTracker {
         let selected = parse_choice(trimmed);
 
         if let Some(answer) = selected
-            && answer == question.answer {
-                entry.quiz.passed = true;
-                self.persist()?;
-                return Ok(QuizOutcome {
-                    passed: true,
-                    feedback: vec![
-                        "🎉 正解です！セクションを完了として記録します。".to_string(),
-                        question.explanation.to_string(),
-                    ],
-                });
-            }
+            && answer == question.answer
+        {
+            entry.quiz.passed = true;
+            self.persist()?;
+            return Ok(QuizOutcome {
+                passed: true,
+                feedback: vec![
+                    "🎉 正解です！セクションを完了として記録します。".to_string(),
+                    question.explanation.to_string(),
+                ],
+            });
+        }
 
         self.persist()?;
         Ok(QuizOutcome {
@@ -468,11 +459,7 @@ impl ProgressTracker {
 
     pub fn complete_section(&mut self, section: SectionId) -> Result<CompletionOutcome> {
         let (completed_at, existing_note, needs_note) = {
-            let entry = self
-                .state
-                .sections
-                .entry(section)
-                .or_default();
+            let entry = self.state.sections.entry(section).or_default();
 
             if entry.status != SectionStatus::Completed {
                 entry.status = SectionStatus::Completed;
@@ -488,13 +475,12 @@ impl ProgressTracker {
 
         let mut note_path = existing_note;
 
-        if needs_note
-            && let Some(generated) = self.create_learning_note(section, completed_at)? {
-                if let Some(entry) = self.state.sections.get_mut(&section) {
-                    entry.note_path = Some(generated.clone());
-                }
-                note_path = Some(generated);
+        if needs_note && let Some(generated) = self.create_learning_note(section, completed_at)? {
+            if let Some(entry) = self.state.sections.get_mut(&section) {
+                entry.note_path = Some(generated.clone());
             }
+            note_path = Some(generated);
+        }
 
         let achievements = self.update_achievements();
         let certificate = self.ensure_certificate();
@@ -524,27 +510,30 @@ impl ProgressTracker {
                 AchievementId::FirstSection,
                 "ファーストステップ",
                 "初めてのセクションを完了しました。継続して学習を進めましょう！",
-            ) {
-                newly_awarded.push(record);
-            }
+            )
+        {
+            newly_awarded.push(record);
+        }
 
         if completed >= total / 2
             && let Some(record) = self.ensure_achievement(
                 AchievementId::HalfMilestone,
                 "ミッドウェイヒーロー",
                 "全セクションの半分に到達しました。もうひと踏ん張り！",
-            ) {
-                newly_awarded.push(record);
-            }
+            )
+        {
+            newly_awarded.push(record);
+        }
 
         if completed == total
             && let Some(record) = self.ensure_achievement(
                 AchievementId::FullCompletion,
                 "ツアーコンプリート",
                 "全てのセクションを完了し、jv言語の主要機能をマスターしました。",
-            ) {
-                newly_awarded.push(record);
-            }
+            )
+        {
+            newly_awarded.push(record);
+        }
 
         if self
             .state
@@ -555,9 +544,10 @@ impl ProgressTracker {
                 AchievementId::QuizMaster,
                 "クイズマスター",
                 "全ての理解度チェックに合格しました。知識が確かなものになりました！",
-            ) {
-                newly_awarded.push(record);
-            }
+            )
+        {
+            newly_awarded.push(record);
+        }
 
         newly_awarded
     }

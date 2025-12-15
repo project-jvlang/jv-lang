@@ -263,14 +263,15 @@ pub fn transform_statement(
         } => {
             if let Some(binding_name) =
                 infer_implicit_binding_name(binding_pattern.as_ref(), &target)
-                && context.lookup_variable(&binding_name).is_none() {
-                    return Ok(vec![desugar_implicit_val_assignment(
-                        binding_name,
-                        value,
-                        span,
-                        context,
-                    )?]);
-                }
+                && context.lookup_variable(&binding_name).is_none()
+            {
+                return Ok(vec![desugar_implicit_val_assignment(
+                    binding_name,
+                    value,
+                    span,
+                    context,
+                )?]);
+            }
 
             let ir_target = transform_expression(target, context)?;
             let java_type = extract_java_type(&ir_target).ok_or_else(|| {
@@ -392,9 +393,10 @@ fn desugar_pattern_val_declaration(
         if let Some(record_type) = context.tuple_record_java_type(&tuple_span) {
             tuple_java_type = record_type;
         } else if let IrExpression::MethodCall { method_name, .. } = &ir_initializer
-            && let Some(record_type) = context.tuple_return_type(method_name) {
-                tuple_java_type = record_type;
-            }
+            && let Some(record_type) = context.tuple_return_type(method_name)
+        {
+            tuple_java_type = record_type;
+        }
     }
 
     let mut statements = Vec::new();
@@ -437,9 +439,10 @@ fn lower_binding_pattern_elements(
             ir_modifiers.is_final = true;
             let mut java_type = extract_java_type(&value_expr).unwrap_or_else(JavaType::object);
             if java_type == JavaType::object()
-                && let Some(hint) = context.lookup_variable(&name).cloned() {
-                    java_type = hint;
-                }
+                && let Some(hint) = context.lookup_variable(&name).cloned()
+            {
+                java_type = hint;
+            }
             context.add_variable(name.clone(), java_type.clone());
             Ok(vec![IrStatement::VariableDeclaration {
                 name,
@@ -665,9 +668,10 @@ fn should_attach_trailing_comment(statement: &IrStatement, comment_span: &Span) 
     }
 
     if let Some(span) = ir_statement_span(base)
-        && span.end_line == comment_span.start_line {
-            return comment_span.start_column >= span.end_column;
-        }
+        && span.end_line == comment_span.start_line
+    {
+        return comment_span.start_column >= span.end_column;
+    }
 
     false
 }
@@ -816,12 +820,13 @@ pub fn transform_expression(
     match expr {
         Expression::Literal(lit, span) => {
             if let Literal::String(value) = &lit
-                && value.contains('\n') {
-                    return Ok(IrExpression::TextBlock {
-                        content: value.clone(),
-                        span: span.clone(),
-                    });
-                }
+                && value.contains('\n')
+            {
+                return Ok(IrExpression::TextBlock {
+                    content: value.clone(),
+                    span: span.clone(),
+                });
+            }
             if let Literal::Regex(regex) = &lit {
                 return Ok(IrExpression::RegexPattern {
                     pattern: regex.pattern.clone(),
@@ -1133,21 +1138,22 @@ pub fn transform_expression(
                 object: object.clone(),
                 property: property.clone(),
                 span: span.clone(),
-            })
-                && !segments.is_empty() && context.lookup_variable(&segments[0]).is_none() {
-                    let name = segments.join(".");
-                    let java_type = context.lookup_variable(&name).cloned().unwrap_or_else(|| {
-                        JavaType::Reference {
-                            name: name.clone(),
-                            generic_args: vec![],
-                        }
-                    });
-                    return Ok(IrExpression::Identifier {
-                        name,
-                        java_type,
-                        span,
-                    });
-                }
+            }) && !segments.is_empty()
+                && context.lookup_variable(&segments[0]).is_none()
+            {
+                let name = segments.join(".");
+                let java_type = context.lookup_variable(&name).cloned().unwrap_or_else(|| {
+                    JavaType::Reference {
+                        name: name.clone(),
+                        generic_args: vec![],
+                    }
+                });
+                return Ok(IrExpression::Identifier {
+                    name,
+                    java_type,
+                    span,
+                });
+            }
 
             let receiver_expr = transform_expression(*object, context)?;
             let field_name = property;
@@ -1156,10 +1162,11 @@ pub fn transform_expression(
             let mut is_record_component = false;
 
             if let JavaType::Reference { name, .. } = &receiver_type
-                && let Some(component_type) = context.record_component_type(name, &field_name) {
-                    field_java_type = component_type;
-                    is_record_component = true;
-                }
+                && let Some(component_type) = context.record_component_type(name, &field_name)
+            {
+                field_java_type = component_type;
+                is_record_component = true;
+            }
 
             Ok(IrExpression::FieldAccess {
                 receiver: Box::new(receiver_expr),
@@ -1302,11 +1309,11 @@ fn lower_call_expression(
             }
 
             if let Some(param_types) = context.function_signature(&name)
-                && param_types.len() == ir_args.len() {
-                    let param_types_vec: Vec<JavaType> = param_types.to_vec();
-                    ir_args =
-                        adjust_call_arguments_for_signature(ir_args, &param_types_vec, context);
-                }
+                && param_types.len() == ir_args.len()
+            {
+                let param_types_vec: Vec<JavaType> = param_types.to_vec();
+                ir_args = adjust_call_arguments_for_signature(ir_args, &param_types_vec, context);
+            }
 
             let resolved_type = context.lookup_variable(&name).cloned();
 
@@ -1342,26 +1349,28 @@ fn lower_call_expression(
                 .or(resolved_type.clone())
                 .unwrap_or_else(JavaType::object);
 
-            if !has_signature && tuple_return.is_none()
-                && let Some((method_name, return_type)) = functional_interface_method(&java_type) {
-                    let receiver = IrExpression::Identifier {
-                        name: name.clone(),
-                        java_type: java_type.clone(),
-                        span: span.clone(),
-                    };
-                    let mut call = IrExpression::MethodCall {
-                        receiver: Some(Box::new(receiver)),
-                        method_name,
-                        java_name: None,
-                        resolved_target: None,
-                        args: ir_args,
-                        argument_style,
-                        java_type: return_type,
-                        span,
-                    };
-                    register_call_metadata(context, &mut call, None);
-                    return Ok(call);
-                }
+            if !has_signature
+                && tuple_return.is_none()
+                && let Some((method_name, return_type)) = functional_interface_method(&java_type)
+            {
+                let receiver = IrExpression::Identifier {
+                    name: name.clone(),
+                    java_type: java_type.clone(),
+                    span: span.clone(),
+                };
+                let mut call = IrExpression::MethodCall {
+                    receiver: Some(Box::new(receiver)),
+                    method_name,
+                    java_name: None,
+                    resolved_target: None,
+                    args: ir_args,
+                    argument_style,
+                    java_type: return_type,
+                    span,
+                };
+                register_call_metadata(context, &mut call, None);
+                return Ok(call);
+            }
 
             let mut call = IrExpression::MethodCall {
                 receiver: None,
@@ -1735,7 +1744,8 @@ fn functional_interface_method(java_type: &JavaType) -> Option<(String, JavaType
             )),
             "java.util.function.Consumer" => Some(("accept".to_string(), JavaType::Void)),
             "java.util.function.Supplier" => {
-                let return_type = generic_args.first()
+                let return_type = generic_args
+                    .first()
                     .cloned()
                     .unwrap_or_else(JavaType::object);
                 Some(("get".to_string(), return_type))

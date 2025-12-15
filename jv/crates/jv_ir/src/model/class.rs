@@ -708,11 +708,12 @@ impl<'a> LoggerPlanCollector<'a> {
             self.canonical = Some(plan.logger_field);
             self.primary_span = Some(plan.span.clone());
         } else if let Some(canonical) = self.canonical
-            && plan.logger_field != canonical {
-                self.duplicates.push(plan.logger_field);
-                self.used_ids.remove(&plan.logger_field);
-                plan.logger_field = canonical;
-            }
+            && plan.logger_field != canonical
+        {
+            self.duplicates.push(plan.logger_field);
+            self.used_ids.remove(&plan.logger_field);
+            plan.logger_field = canonical;
+        }
 
         plan.class_id = Some(self.class_id.clone());
         self.used_ids.insert(plan.logger_field);

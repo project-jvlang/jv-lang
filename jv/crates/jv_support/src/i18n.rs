@@ -1,8 +1,7 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LocaleCode {
     En,
     #[default]
@@ -17,7 +16,6 @@ impl LocaleCode {
         }
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct TemplateCatalog {

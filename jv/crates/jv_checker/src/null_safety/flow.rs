@@ -72,9 +72,7 @@ impl<'ctx> FlowSolver<'ctx> {
         worklist.push_back(self.graph.entry());
 
         while let Some(node_id) = worklist.pop_front() {
-            let state_in = in_states
-                .remove(&node_id)
-                .unwrap_or_default();
+            let state_in = in_states.remove(&node_id).unwrap_or_default();
 
             let mut state_out = state_in.clone();
             self.apply_constraints(node_id, &mut state_out);
@@ -102,9 +100,7 @@ impl<'ctx> FlowSolver<'ctx> {
                     .cloned()
                     .unwrap_or_else(FlowStateSnapshot::new);
                 apply_edge_kind(&edge.kind, &mut next_state);
-                let entry = in_states
-                    .entry(edge.to)
-                    .or_default();
+                let entry = in_states.entry(edge.to).or_default();
                 let merged = entry.merge_with(&next_state);
                 if merged || changed {
                     worklist.push_back(edge.to);
@@ -721,7 +717,6 @@ struct ConditionAssumptions {
     false_assumption: Option<BranchAssumption>,
 }
 
-
 fn detect_null_comparison(condition: &Expression) -> ConditionAssumptions {
     let mut assumptions = ConditionAssumptions::default();
 
@@ -758,31 +753,32 @@ fn detect_null_comparison(condition: &Expression) -> ConditionAssumptions {
                         }
                     }
                 } else if let Some(identifier) = extract_identifier(right)
-                    && is_null_literal(left) {
-                        match op {
-                            BinaryOp::Equal => {
-                                assumptions.true_assumption = Some(BranchAssumption::Equals {
-                                    variable: identifier.clone(),
-                                    state: NullabilityKind::Nullable,
-                                });
-                                assumptions.false_assumption = Some(BranchAssumption::NotEquals {
-                                    variable: identifier,
-                                    state: NullabilityKind::NonNull,
-                                });
-                            }
-                            BinaryOp::NotEqual => {
-                                assumptions.true_assumption = Some(BranchAssumption::NotEquals {
-                                    variable: identifier.clone(),
-                                    state: NullabilityKind::NonNull,
-                                });
-                                assumptions.false_assumption = Some(BranchAssumption::Equals {
-                                    variable: identifier,
-                                    state: NullabilityKind::Nullable,
-                                });
-                            }
-                            _ => {}
+                    && is_null_literal(left)
+                {
+                    match op {
+                        BinaryOp::Equal => {
+                            assumptions.true_assumption = Some(BranchAssumption::Equals {
+                                variable: identifier.clone(),
+                                state: NullabilityKind::Nullable,
+                            });
+                            assumptions.false_assumption = Some(BranchAssumption::NotEquals {
+                                variable: identifier,
+                                state: NullabilityKind::NonNull,
+                            });
                         }
+                        BinaryOp::NotEqual => {
+                            assumptions.true_assumption = Some(BranchAssumption::NotEquals {
+                                variable: identifier.clone(),
+                                state: NullabilityKind::NonNull,
+                            });
+                            assumptions.false_assumption = Some(BranchAssumption::Equals {
+                                variable: identifier,
+                                state: NullabilityKind::Nullable,
+                            });
+                        }
+                        _ => {}
                     }
+                }
             }
             BinaryOp::Is => {
                 if let Some(identifier) = extract_identifier(left) {
@@ -874,10 +870,8 @@ fn classify_expression(
         }
         Expression::NullSafeMemberAccess { object, span, .. } => {
             let object_info = classify_expression(builder, object);
-            let outcome = OperatorSemantics::null_safe_member_access(
-                object_info.to_operand(),
-                span.clone(),
-            );
+            let outcome =
+                OperatorSemantics::null_safe_member_access(object_info.to_operand(), span.clone());
             ExpressionInfo::new(apply_operator_outcome(builder, outcome))
         }
         Expression::NullSafeIndexAccess {
@@ -1383,9 +1377,11 @@ mod tests {
 
         assert_eq!(assigned_states.len(), 1);
         assert_eq!(assigned_states[0], NullabilityKind::Nullable);
-        assert!(graph.hints().iter().any(|hint| {
-            matches!(hint.strategy, JavaLoweringStrategy::NullSafeMemberAccess)
-        }));
+        assert!(
+            graph.hints().iter().any(|hint| {
+                matches!(hint.strategy, JavaLoweringStrategy::NullSafeMemberAccess)
+            })
+        );
     }
 
     #[test]
@@ -1432,10 +1428,12 @@ mod tests {
 
         assert_eq!(assigned_states.len(), 1);
         assert_eq!(assigned_states[0], NullabilityKind::NonNull);
-        assert!(graph
-            .hints()
-            .iter()
-            .any(|hint| matches!(hint.strategy, JavaLoweringStrategy::ElvisOperator)));
+        assert!(
+            graph
+                .hints()
+                .iter()
+                .any(|hint| matches!(hint.strategy, JavaLoweringStrategy::ElvisOperator))
+        );
     }
 
     #[test]

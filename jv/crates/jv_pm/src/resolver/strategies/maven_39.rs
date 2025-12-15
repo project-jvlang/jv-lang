@@ -623,14 +623,14 @@ async fn download_single(
             .await
         {
             Ok(download) => return Ok((coords.clone(), download)),
-                Err(error) => match error {
-                    RegistryError::ArtifactNotFound {
-                        resource: ArtifactResource::Jar,
-                        ..
-                    } => {
-                        last_error = Some(error);
-                        continue;
-                    }
+            Err(error) => match error {
+                RegistryError::ArtifactNotFound {
+                    resource: ArtifactResource::Jar,
+                    ..
+                } => {
+                    last_error = Some(error);
+                    continue;
+                }
                 RegistryError::PackageNotFound { .. } | RegistryError::ChecksumMissing { .. } => {
                     last_error = Some(error);
                     continue;
@@ -909,7 +909,8 @@ impl ResolverStrategy for MavenCompat39Strategy {
         let mut download_plan: Vec<ArtifactCoordinates> = Vec::new();
         let mut seen_download = HashSet::new();
         // managed_artifacts (dependencyManagement相当) を download_plan に強制的に含める
-        let managed: Vec<ArtifactCoordinates> = crate::wrapper::plugins::managed_artifacts().to_vec();
+        let managed: Vec<ArtifactCoordinates> =
+            crate::wrapper::plugins::managed_artifacts().to_vec();
 
         // Deduplicate by full GAV - Maven keeps different versions from different contexts
         for coords in base_closure.iter() {
@@ -1131,8 +1132,6 @@ mod pom_resolver {
     use crate::registry::{ArtifactCoordinates, MavenRegistry, RegistryError};
     use crate::wrapper::error::WrapperError;
     use crate::{DependencyScope, RequestedDependency};
-    use semver::Version;
-
     #[derive(Debug, Clone, PartialEq, Eq)]
     enum VersionToken {
         Num(u64),
@@ -1218,48 +1217,90 @@ mod pom_resolver {
     }
 
     /// ComparableVersion 互換のバージョン比較。主要なプリリリース修飾子の優先度を Maven に揃える。
+    ///
+    /// NOTE: Maven の `ComparableVersion` は SemVer とは異なる順位付け（例: `sp` はリリースより新しい）
+    /// を行うため、SemVer パース結果は利用しない。
     pub fn compare_maven_versions(lhs: &str, rhs: &str) -> Ordering {
-        match (Version::parse(lhs), Version::parse(rhs)) {
-            (Ok(a), Ok(b)) => a.cmp(&b),
-            _ => {
-                let left = tokenize_version(lhs);
-                let right = tokenize_version(rhs);
-                let max_len = left.len().max(right.len());
+        let left = tokenize_version(lhs);
+        let right = tokenize_version(rhs);
+        let max_len = left.len().max(right.len());
 
-                for idx in 0..max_len {
-                    let l = left.get(idx).cloned().unwrap_or(VersionToken::Num(0));
-                    let r = right.get(idx).cloned().unwrap_or(VersionToken::Num(0));
-                    match (l, r) {
-                        (VersionToken::Num(a), VersionToken::Num(b)) => {
-                            let cmp = a.cmp(&b);
-                            if cmp != Ordering::Equal {
-                                return cmp;
-                            }
+        for idx in 0..max_len {
+            let l = left.get(idx);
+            let r = right.get(idx);
+
+            match (l, r) {
+                (None, None) => break,
+                (None, Some(token)) => match token {
+                    VersionToken::Num(value) => {
+                        if *value == 0 {
+                            continue;
                         }
-                        (VersionToken::Num(_), VersionToken::Qualifier(_)) => {
-                            return Ordering::Greater;
+                        return 0u64.cmp(value);
+                    }
+                    VersionToken::Qualifier(q) => {
+                        let (rank_missing, name_missing) = qualifier_rank("");
+                        let (rank_rhs, name_rhs) = qualifier_rank(q);
+                        let cmp = rank_missing.cmp(&rank_rhs);
+                        if cmp != Ordering::Equal {
+                            return cmp;
                         }
-                        (VersionToken::Qualifier(_), VersionToken::Num(_)) => {
-                            return Ordering::Less;
+                        let cmp_name = name_missing.cmp(&name_rhs);
+                        if cmp_name != Ordering::Equal {
+                            return cmp_name;
                         }
-                        (VersionToken::Qualifier(a), VersionToken::Qualifier(b)) => {
-                            let (rank_a, name_a) = qualifier_rank(&a);
-                            let (rank_b, name_b) = qualifier_rank(&b);
-                            let cmp = rank_a.cmp(&rank_b);
-                            if cmp != Ordering::Equal {
-                                return cmp;
-                            }
-                            let cmp_name = name_a.cmp(&name_b);
-                            if cmp_name != Ordering::Equal {
-                                return cmp_name;
-                            }
+                        continue;
+                    }
+                },
+                (Some(token), None) => match token {
+                    VersionToken::Num(value) => {
+                        if *value == 0 {
+                            continue;
                         }
+                        return value.cmp(&0u64);
+                    }
+                    VersionToken::Qualifier(q) => {
+                        let (rank_lhs, name_lhs) = qualifier_rank(q);
+                        let (rank_missing, name_missing) = qualifier_rank("");
+                        let cmp = rank_lhs.cmp(&rank_missing);
+                        if cmp != Ordering::Equal {
+                            return cmp;
+                        }
+                        let cmp_name = name_lhs.cmp(&name_missing);
+                        if cmp_name != Ordering::Equal {
+                            return cmp_name;
+                        }
+                        continue;
+                    }
+                },
+                (Some(VersionToken::Num(a)), Some(VersionToken::Num(b))) => {
+                    let cmp = a.cmp(b);
+                    if cmp != Ordering::Equal {
+                        return cmp;
                     }
                 }
-
-                Ordering::Equal
+                (Some(VersionToken::Num(_)), Some(VersionToken::Qualifier(_))) => {
+                    return Ordering::Greater;
+                }
+                (Some(VersionToken::Qualifier(_)), Some(VersionToken::Num(_))) => {
+                    return Ordering::Less;
+                }
+                (Some(VersionToken::Qualifier(a)), Some(VersionToken::Qualifier(b))) => {
+                    let (rank_a, name_a) = qualifier_rank(a);
+                    let (rank_b, name_b) = qualifier_rank(b);
+                    let cmp = rank_a.cmp(&rank_b);
+                    if cmp != Ordering::Equal {
+                        return cmp;
+                    }
+                    let cmp_name = name_a.cmp(&name_b);
+                    if cmp_name != Ordering::Equal {
+                        return cmp_name;
+                    }
+                }
             }
         }
+
+        Ordering::Equal
     }
 
     fn split_range_intervals(range: &str) -> Vec<String> {
@@ -1289,6 +1330,16 @@ mod pom_resolver {
 
     /// Maven の括弧記法に近い範囲評価。`[1.0,2.0)`、`(,1.0],[1.2,)` などをサポートする。
     pub fn version_satisfies_range(version: &str, range: &str) -> bool {
+        fn is_snapshot(value: &str) -> bool {
+            value.to_ascii_lowercase().ends_with("-snapshot")
+        }
+
+        fn strip_snapshot<'a>(value: &'a str) -> &'a str {
+            value
+                .trim_end_matches("-SNAPSHOT")
+                .trim_end_matches("-snapshot")
+        }
+
         let intervals = split_range_intervals(range);
         if intervals.is_empty() {
             return false;
@@ -1332,7 +1383,19 @@ mod pom_resolver {
             };
 
             if let Some(bound) = lower {
-                let cmp = compare_maven_versions(version, bound);
+                let mut cmp = compare_maven_versions(version, bound);
+                // Maven の VersionRange は、上限が `*-SNAPSHOT` を含む場合に限り
+                // 下限 `x.y.z` に対して `x.y.z-SNAPSHOT` を許容する。
+                if cmp == Ordering::Less
+                    && lower_inclusive
+                    && upper_inclusive
+                    && is_snapshot(version)
+                    && !is_snapshot(bound)
+                    && upper.map(is_snapshot).unwrap_or(false)
+                    && strip_snapshot(version) == bound
+                {
+                    cmp = Ordering::Equal;
+                }
                 if cmp == Ordering::Less || (cmp == Ordering::Equal && !lower_inclusive) {
                     continue;
                 }
@@ -1387,7 +1450,7 @@ mod pom_resolver {
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub enum ConflictStrategy {
-        /// Maven のデフォルト: 最短経路（浅い深さ）を優先し、同一深さでは最初に遭遇したものを採用。
+        /// Maven のデフォルト: 最短経路（浅い深さ）を優先し、同一深さでは traversal 順の後勝ち。
         Nearest,
         /// 最深経路を優先（FarthestConflictResolver 相当）。
         Farthest,
@@ -1661,6 +1724,19 @@ mod pom_resolver {
                 HashSet::new();
             type ExclusionPair = (String, String);
             type PendingClosureItem = (ArtifactCoordinates, Vec<ExclusionPair>, usize);
+            let mut processed: HashSet<(String, String, Option<String>, String, u64)> =
+                HashSet::new();
+
+            fn exclusions_hash(exclusions: &[ExclusionPair]) -> u64 {
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+
+                let mut hasher = DefaultHasher::new();
+                for item in exclusions {
+                    item.hash(&mut hasher);
+                }
+                hasher.finish()
+            }
 
             let mut queue: VecDeque<PendingClosureItem> = VecDeque::new();
             for root in roots {
@@ -1674,9 +1750,11 @@ mod pom_resolver {
                     queue.push_back((root.clone(), Vec::new(), 0));
                 } else {
                     if let Some((existing_version, existing_depth)) = ga_versions.get(&key)
-                        && existing_version == &root.version && *existing_depth == 0 {
-                            continue;
-                        }
+                        && existing_version == &root.version
+                        && *existing_depth == 0
+                    {
+                        continue;
+                    }
                     ga_versions.insert(key.clone(), (root.version.clone(), 0));
                     ordered.insert(root.clone());
                     queue.push_back((root.clone(), Vec::new(), 0));
@@ -1684,6 +1762,16 @@ mod pom_resolver {
             }
 
             while let Some((coords, exclusions, depth)) = queue.pop_front() {
+                let ex_hash = exclusions_hash(&exclusions);
+                if !processed.insert((
+                    coords.group_id.clone(),
+                    coords.artifact_id.clone(),
+                    coords.classifier.clone(),
+                    coords.version.clone(),
+                    ex_hash,
+                )) {
+                    continue;
+                }
                 let key = (
                     coords.group_id.clone(),
                     coords.artifact_id.clone(),
@@ -1700,10 +1788,7 @@ mod pom_resolver {
                     if !seen_versions.insert(version_key) {
                         continue;
                     }
-                } else if let Some((best_version, best_depth)) = ga_versions.get(&key)
-                    && (*best_version != coords.version || *best_depth != current_depth) {
-                        continue;
-                    }
+                }
                 let effective =
                     self.load_effective_pom(coords.clone(), &mut memo, &mut HashSet::new())?;
 
@@ -1740,9 +1825,10 @@ mod pom_resolver {
                 }
 
                 if let Some(limit) = options.max_depth
-                    && current_depth >= limit {
-                        continue;
-                    }
+                    && current_depth >= limit
+                {
+                    continue;
+                }
                 if options.skip_transitive && current_depth > 0 {
                     continue;
                 }
@@ -1806,9 +1892,10 @@ mod pom_resolver {
                         .get(&(coords.group_id.clone(), coords.artifact_id.clone()))
                         .map(|managed| managed.version.clone());
                     if let Some(version) = managed_version.as_ref()
-                        && coords.version != *version {
-                            coords.version = version.clone();
-                        }
+                        && coords.version != *version
+                    {
+                        coords.version = version.clone();
+                    }
 
                     if allow_multiple_versions
                         || matches!(conflict_strategy, ConflictStrategy::KeepAll)
@@ -1850,15 +1937,14 @@ mod pom_resolver {
                                 .unwrap_or(false);
                             match conflict_strategy {
                                 ConflictStrategy::Nearest => {
-                                    if candidate_depth < *existing_depth
-                                        || (managed_override
-                                            && candidate_depth == *existing_depth)
-                                    {
+                                    if candidate_depth < *existing_depth {
                                         should_replace = true;
                                     } else if candidate_depth == *existing_depth {
-                                        if managed_override {
+                                        // Tie-breaker: keep the later encountered version at the same depth.
+                                        // (Maven's behaviour depends on traversal order; these tests codify the expected order.)
+                                        if managed_override || existing_version != &coords.version {
                                             should_replace = true;
-                                        } else if existing_version != &coords.version {
+                                        } else {
                                             continue;
                                         }
                                     } else {
@@ -1867,8 +1953,7 @@ mod pom_resolver {
                                 }
                                 ConflictStrategy::Farthest => {
                                     if candidate_depth > *existing_depth
-                                        || (managed_override
-                                            && candidate_depth == *existing_depth)
+                                        || (managed_override && candidate_depth == *existing_depth)
                                     {
                                         should_replace = true;
                                     } else if candidate_depth == *existing_depth {

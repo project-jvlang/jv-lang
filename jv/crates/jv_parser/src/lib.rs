@@ -19,7 +19,9 @@ pub struct Parser;
 impl Parser {
     /// ソースコードを解析し、`FrontendOutput` を生成する。
     pub fn parse(input: &str) -> Result<FrontendOutput, ParseError> {
-        let pipeline = SalsaPipeline::default();
+        // Parsing should stay lightweight; JDK symbol indexing is handled by downstream
+        // tooling (CLI/LSP) when needed.
+        let pipeline = SalsaPipeline::new_without_jdk();
         pipeline.parse(input)
     }
 

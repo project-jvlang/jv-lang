@@ -396,11 +396,12 @@ impl PatternFactsBridge {
 
         if let Some(facts) = context.facts()
             && let Some(signature) = facts.function_signature(function_name)
-                && let FactsTypeVariant::Function(param_types, _) = signature.body.variant() {
-                    for (parameter, ty) in parameters.iter().zip(param_types.iter()) {
-                        scope.insert(parameter.name.clone(), NullabilityKind::from_facts_type(ty));
-                    }
-                }
+            && let FactsTypeVariant::Function(param_types, _) = signature.body.variant()
+        {
+            for (parameter, ty) in parameters.iter().zip(param_types.iter()) {
+                scope.insert(parameter.name.clone(), NullabilityKind::from_facts_type(ty));
+            }
+        }
 
         for parameter in parameters {
             if scope.contains_key(&parameter.name) {

@@ -174,6 +174,7 @@ fun labeled(first: Int, second: Int): (Int Int) {
     )
 }
 "#;
+
     let チェッカー = 型チェック済み(ソース);
 
     let プラン一覧 = チェッカー.tuple_record_plans();

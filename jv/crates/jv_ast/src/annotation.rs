@@ -166,15 +166,16 @@ pub fn detect_reserved_conflicts<'a>(
             }
 
             if reserved_uses.len() > 1
-                && let Some(first) = reserved_uses.first() {
-                    for duplicate in reserved_uses.iter().skip(1) {
-                        conflicts.push(ReservedAnnotationConflict {
-                            primary: first,
-                            secondary: Some(*duplicate),
-                            kind: ReservedConflictKind::DuplicateUsage,
-                        });
-                    }
+                && let Some(first) = reserved_uses.first()
+            {
+                for duplicate in reserved_uses.iter().skip(1) {
+                    conflicts.push(ReservedAnnotationConflict {
+                        primary: first,
+                        secondary: Some(*duplicate),
+                        kind: ReservedConflictKind::DuplicateUsage,
+                    });
                 }
+            }
 
             for annotation in shadowing {
                 conflicts.push(ReservedAnnotationConflict {

@@ -11,7 +11,7 @@ fn 解析結果(ソース: &str) -> (jv_ast::Program, FrontendDiagnostics) {
 }
 
 fn 最終診断一覧(
-    診断: &FrontendDiagnostics,
+    診断: &FrontendDiagnostics
 ) -> impl Iterator<Item = &jv_parser::Diagnostic> {
     診断.final_diagnostics().iter()
 }

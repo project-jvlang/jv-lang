@@ -168,20 +168,21 @@ impl MethodRegistry {
         for call in &self.calls {
             let group_key = GroupKey::new(call.owner.clone(), call.method_name.clone());
             if let Some(candidate_indices) = groups.get(&group_key)
-                && let Some(idx) = self.select_candidate(candidate_indices, call) {
-                    let decl = &self.declarations[idx];
-                    let rename = MethodRename {
-                        java_name: decl.final_java_name.clone(),
-                        owner: decl.owner.clone(),
-                        original_name: decl.original_name.clone(),
-                        erased_parameters: decl.erased_parameters.clone(),
-                    };
+                && let Some(idx) = self.select_candidate(candidate_indices, call)
+            {
+                let decl = &self.declarations[idx];
+                let rename = MethodRename {
+                    java_name: decl.final_java_name.clone(),
+                    owner: decl.owner.clone(),
+                    original_name: decl.original_name.clone(),
+                    erased_parameters: decl.erased_parameters.clone(),
+                };
 
-                    resolution
-                        .call_updates
-                        .insert(SpanKey::from(&call.span), rename);
-                    continue;
-                }
+                resolution
+                    .call_updates
+                    .insert(SpanKey::from(&call.span), rename);
+                continue;
+            }
 
             let rename = MethodRename {
                 java_name: call.method_name.clone(),

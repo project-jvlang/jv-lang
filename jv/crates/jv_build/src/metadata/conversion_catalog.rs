@@ -373,9 +373,10 @@ impl ConversionCatalogCache {
 
     fn insert(&mut self, key: CatalogCacheKey, catalog: Arc<ConversionCatalog>) {
         if self.entries.len() >= self.capacity
-            && let Some(oldest) = self.order.pop_front() {
-                self.entries.remove(&oldest);
-            }
+            && let Some(oldest) = self.order.pop_front()
+        {
+            self.entries.remove(&oldest);
+        }
         self.order.push_back(key.clone());
         self.entries.insert(key, catalog);
     }

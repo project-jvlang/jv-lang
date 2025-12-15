@@ -37,3 +37,23 @@ fn respects_basic_precedence() {
         "lexing errors should be empty for expression test"
     );
 }
+
+#[test]
+fn accepts_positional_tuple_accessor_after_dot() {
+    let tokens = vec![
+        tok(TokenKind::Identifier, "tuple"),
+        tok(TokenKind::Dot, "."),
+        tok(TokenKind::Underscore, "_"),
+        tok(TokenKind::Number, "1"),
+        tok(TokenKind::LeftParen, "("),
+        tok(TokenKind::RightParen, ")"),
+        tok(TokenKind::Eof, ""),
+    ];
+
+    let result = parse(tokens);
+    assert!(
+        result.output.diagnostics.is_empty(),
+        "unexpected diagnostics: {:?}",
+        result.output.diagnostics
+    );
+}

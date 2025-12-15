@@ -216,7 +216,6 @@ fn format_suggestions(suggestions: &[String]) -> String {
         return String::new();
     }
 
-    
     suggestions
         .iter()
         .map(|suggestion| format!("\n  提案: {suggestion}"))
@@ -739,15 +738,16 @@ pub mod pipeline {
         embedded_stdlib::rewrite_collection_property_access(&mut program);
         let parse_duration = parse_start.elapsed();
 
-        warnings.extend(sequence_warnings::collect_sequence_warnings(&program));
+        let sequence_warnings = sequence_warnings::collect_sequence_warnings(&program);
+        if sequence_warnings
+            .iter()
+            .any(|warning| warning.starts_with("JV2101") || warning.starts_with("JV2102"))
+        {
+            return Err(anyhow!(sequence_warnings.join("\n")));
+        }
+        warnings.extend(sequence_warnings);
 
-        let import_cache_dir = plan
-            .root
-            .root_dir()
-            .join("target")
-            .join("jv")
-            .join("symbol-index");
-        let index_cache = SymbolIndexCache::new(import_cache_dir);
+        let index_cache = SymbolIndexCache::new(resolve_symbol_index_cache_dir(plan));
         let build_context = SymbolBuildContext::from_config(&plan.build_config);
         let builder = SymbolIndexBuilder::new(&build_context);
         let mut symbol_index = builder
@@ -829,12 +829,13 @@ pub mod pipeline {
             }
             Err(errors) => {
                 if let Some(diagnostic) = errors.iter().find_map(from_check_error)
-                    && options.check {
-                        return Err(tooling_failure(
-                            entrypoint,
-                            diagnostic.with_strategy(DiagnosticStrategy::Deferred),
-                        ));
-                    }
+                    && options.check
+                {
+                    return Err(tooling_failure(
+                        entrypoint,
+                        diagnostic.with_strategy(DiagnosticStrategy::Deferred),
+                    ));
+                }
                 if options.check {
                     let details = errors
                         .iter()
@@ -1630,6 +1631,22 @@ pub mod pipeline {
 
         prepared_output.mark_success();
         Ok(())
+    }
+
+    fn resolve_symbol_index_cache_dir(plan: &BuildPlan) -> PathBuf {
+        if let Ok(dir) = std::env::var("JV_CACHE_DIR") {
+            return PathBuf::from(dir);
+        }
+
+        if let Ok(dir) = std::env::var("CARGO_TARGET_DIR") {
+            return PathBuf::from(dir).join("jv").join("symbol-index");
+        }
+
+        plan.root
+            .root_dir()
+            .join("target")
+            .join("jv")
+            .join("symbol-index")
     }
 
     /// Package generated outputs into a JAR or native binary.

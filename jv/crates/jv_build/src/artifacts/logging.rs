@@ -192,9 +192,7 @@ fn endpoint(config: &LoggingConfig) -> &str {
         .unwrap_or("http://localhost:4317")
 }
 
-fn sorted_entries(
-    map: &std::collections::HashMap<String, String>,
-) -> Vec<(&str, &str)> {
+fn sorted_entries(map: &std::collections::HashMap<String, String>) -> Vec<(&str, &str)> {
     let mut entries: Vec<(&str, &str)> =
         map.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     entries.sort_by(|left, right| left.0.cmp(right.0));

@@ -101,10 +101,7 @@ fn rewrite_assertion_statement(
             }
             other_expr => {
                 let java_type = extract_java_type(&other_expr);
-                let bool_like = java_type
-                    .as_ref()
-                    .map(is_boolean_type)
-                    .unwrap_or(false);
+                let bool_like = java_type.as_ref().map(is_boolean_type).unwrap_or(false);
 
                 if bool_like {
                     patterns.push(AssertionPattern::Truthy {
@@ -115,11 +112,7 @@ fn rewrite_assertion_statement(
                         expr: build_assertion_call("assertTrue", vec![other_expr], &span),
                         span,
                     })
-                } else if java_type
-                    .as_ref()
-                    .map(is_void_type)
-                    .unwrap_or(true)
-                {
+                } else if java_type.as_ref().map(is_void_type).unwrap_or(true) {
                     Ok(IrStatement::Expression {
                         expr: other_expr,
                         span,

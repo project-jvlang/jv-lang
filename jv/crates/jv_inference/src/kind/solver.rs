@@ -225,10 +225,7 @@ impl KindSolver {
 
         let mut assignments = HashMap::new();
         for (parameter, state) in states {
-            let resolved = state
-                .resolved
-                .or(state.annotation)
-                .unwrap_or(Kind::Star);
+            let resolved = state.resolved.or(state.annotation).unwrap_or(Kind::Star);
             assignments.insert(parameter, resolved);
         }
 

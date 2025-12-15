@@ -212,9 +212,10 @@ impl EmitterStage for Emitter {
 
         let mut trivia = normalized.raw.trivia.clone().unwrap_or_default();
         if let Some(carry) = Self::extract_comment_carry(&mut metadata)
-            && !trivia.comments {
-                Self::merge_comment_carry(&mut trivia, carry);
-            }
+            && !trivia.comments
+        {
+            Self::merge_comment_carry(&mut trivia, carry);
+        }
 
         let span_start = normalized.raw.span.start;
         let mut tokens = match emission_plan {

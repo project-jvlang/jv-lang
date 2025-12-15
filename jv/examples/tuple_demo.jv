@@ -1,67 +1,58 @@
 fun main(): Unit {
-    val divmodResult = divmod(27 4)
-    val (quotient remainder) = divmodResult
-    println("divmod(27, 4) -> quotient=${quotient} remainder=${remainder}")
+    val div = divmod(27 4)
+    val divQuotient = div.quotient()
+    val divRemainder = div.remainder()
+    println("divmod(27, 4) -> quotient=${divQuotient} remainder=${divRemainder}")
 
-    val [squareQuotient squareRemainder] = divmodResult
-    println("square bracket destructuring -> quotient=${squareQuotient} remainder=${squareRemainder}")
-
-    val findUserResult = findUser(9)
-    val (user found) = findUserResult
-    println("findUser(9) -> name=${user.name} found=${found}")
-
-    val [userFromBracket foundFromBracket] = findUserResult
-    println("[] destructuring on user -> name=${userFromBracket.name} found=${foundFromBracket}")
+    val user = findUser(1)
+    val userId = user.userId()
+    val userName = user.userName()
+    println("findUser(1) -> id=${userId} name=${userName}")
 
     val stats = calculateStats(9 2 5)
-    val (minValue maxValue totalSum) = stats
+    val minValue = stats.minValue()
+    val maxValue = stats.maxValue()
+    val totalSum = stats.totalSum()
     println("calculateStats(9, 2, 5) -> min=${minValue} max=${maxValue} total=${totalSum}")
 
-    val fallbackValue = 99
     val labelPriority = (
-        quotient // commentPrimary
-        fallbackValue
-        42
+        // commentPrimary
+        "primary"
+        // commentSecondary
+        2
+        99
     )
-    println(
-        "label priority -> comment=${labelPriority.commentPrimary()} identifier=${labelPriority.fallbackValue()} literal=${labelPriority._3()}"
-    )
+    println("labelPriority third=${labelPriority._3()}")
 }
-
-data User(id: Int, name: String)
 
 fun divmod(dividend: Int, divisor: Int): (Int Int) {
     val quotient: Int = dividend / divisor
     val remainder: Int = dividend % divisor
-
     return (
         quotient // quotient
         remainder // remainder
     )
 }
 
-fun findUser(id: Int): (User Bool) {
-    val candidate: User = when (id) {
-        9 -> User(9 "Bob")
-        else -> User(id "Unknown")
+fun findUser(id: Int): (Int String) {
+    val name = when (id == 1) {
+        true -> "Alice"
+        false -> "Unknown"
     }
-    val found = id == 9
-
     return (
-        candidate // user
-        found // found
+        id // userId
+        name // userName
     )
 }
 
 fun calculateStats(a: Int, b: Int, c: Int): (Int Int Int) {
-    val minValue: Int = minOfInt(minOfInt(a b) c)
-    val maxValue: Int = maxOfInt(maxOfInt(a b) c)
+    val minCandidate: Int = minOfInt(minOfInt(a b) c)
+    val maxCandidate: Int = maxOfInt(maxOfInt(a b) c)
     val total: Int = a + b + c
-
     return (
-        minValue // min
-        maxValue // max
-        total // total
+        minCandidate // minValue
+        maxCandidate // maxValue
+        total // totalSum
     )
 }
 

@@ -280,10 +280,11 @@ impl ConstraintSolver {
         let _profiling_guard = profiling::start("jv_inference::constraint_solver.solve");
         while let Some(constraint) = constraints.pop() {
             if let Some(fingerprint) = ConstraintFingerprint::from_kind(&constraint.kind)
-                && !self.seen_constraints.insert(fingerprint) {
-                    self.telemetry.record_pruned();
-                    continue;
-                }
+                && !self.seen_constraints.insert(fingerprint)
+            {
+                self.telemetry.record_pruned();
+                continue;
+            }
 
             self.telemetry.constraints_processed += 1;
             self.process_constraint(constraint)?;
@@ -299,9 +300,7 @@ impl ConstraintSolver {
         bindings.sort_by_key(|binding| binding.id.to_raw());
 
         let residual = constraints.drain();
-        let value_restrictions = graph
-            .map(value_restriction_components)
-            .unwrap_or_default();
+        let value_restrictions = graph.map(value_restriction_components).unwrap_or_default();
 
         Ok(SolveOutcome::new(
             bindings,
@@ -475,9 +474,10 @@ impl ConstraintSolver {
 
     fn prune(&self, ty: TypeKind) -> TypeKind {
         if let TypeVariant::Variable(id) = ty.variant().clone()
-            && let Some(replacement) = self.substitutions.get(&id) {
-                return self.prune(replacement.clone());
-            }
+            && let Some(replacement) = self.substitutions.get(&id)
+        {
+            return self.prune(replacement.clone());
+        }
         ty
     }
 }

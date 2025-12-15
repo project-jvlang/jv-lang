@@ -31,6 +31,7 @@ pub use resource::{DeferStrategy, UseStrategy};
 pub use test::TestStrategy;
 pub use unit::UnitTypeDefStrategy;
 pub use when::WhenStrategy;
+pub(crate) use when::parse_when_statement;
 
 /// ステートメント戦略トレイト。
 pub trait StatementStrategy: Sync {

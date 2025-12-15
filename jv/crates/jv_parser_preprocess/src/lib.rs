@@ -121,9 +121,7 @@ mod tests {
             .expect("lex interpolation source")
     }
 
-    fn interpolation_metadata(
-        tokens: &[Token],
-    ) -> Option<&Vec<StringInterpolationSegment>> {
+    fn interpolation_metadata(tokens: &[Token]) -> Option<&Vec<StringInterpolationSegment>> {
         tokens.iter().find_map(|token| {
             token.metadata.iter().find_map(|metadata| match metadata {
                 TokenMetadata::StringInterpolation { segments } => Some(segments),

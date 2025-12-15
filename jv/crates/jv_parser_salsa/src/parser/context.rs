@@ -16,6 +16,7 @@ pub struct ParserContext {
     pub(crate) brace_depth: usize,
     pub(crate) bracket_depth: usize,
     pub(crate) angle_depth: usize,
+    pub(crate) allow_trailing_block: bool,
 }
 
 impl ParserContext {
@@ -31,6 +32,7 @@ impl ParserContext {
             brace_depth: 0,
             bracket_depth: 0,
             angle_depth: 0,
+            allow_trailing_block: true,
         }
     }
 
@@ -57,17 +59,29 @@ impl ParserContext {
     /// ステートメント列を解析する。terminator が指定されている場合、そのトークンに遭遇した時点で終了する。
     pub(crate) fn parse_statement_list(&mut self, terminator: Option<TokenKind>) {
         while !self.is_eof() {
+            self.bump_while(|kind| {
+                matches!(
+                    kind,
+                    TokenKind::Whitespace
+                        | TokenKind::Newline
+                        | TokenKind::LayoutComma
+                        | TokenKind::FieldNameLabel
+                        | TokenKind::LineComment
+                        | TokenKind::BlockComment
+                        | TokenKind::JavaDocComment
+                )
+            });
             if let Some(term) = terminator
-                && self.peek_kind() == Some(term) {
-                    break;
-                }
+                && self.peek_kind() == Some(term)
+            {
+                break;
+            }
             let before = self.cursor;
-            if !self.parse_single_statement()
-                && before == self.cursor {
-                    // 進まない場合はエラーとしてリカバリ。
-                    self.error("予期しないトークンです");
-                    recover_statement(self);
-                }
+            if !self.parse_single_statement() && before == self.cursor {
+                // 進まない場合はエラーとしてリカバリ。
+                self.error("予期しないトークンです");
+                recover_statement(self);
+            }
         }
     }
 
@@ -196,6 +210,18 @@ impl ParserContext {
 
     /// Pratt パーサーのエントリポイント。
     pub fn parse_expression(&mut self) -> bool {
+        self.bump_while(|kind| {
+            matches!(
+                kind,
+                TokenKind::Whitespace
+                    | TokenKind::Newline
+                    | TokenKind::LayoutComma
+                    | TokenKind::FieldNameLabel
+                    | TokenKind::LineComment
+                    | TokenKind::BlockComment
+                    | TokenKind::JavaDocComment
+            )
+        });
         expression::parse_expression_bp(self, 0)
     }
 
@@ -206,7 +232,9 @@ impl ParserContext {
         }
         self.start_node(SyntaxKind::Block);
         self.bump(); // consume '{'
+        self.start_node(SyntaxKind::StatementList);
         self.parse_statement_list(Some(TokenKind::RightBrace));
+        self.finish_node(); // StatementList
         if self.peek_kind() == Some(TokenKind::RightBrace) {
             self.bump();
         } else {

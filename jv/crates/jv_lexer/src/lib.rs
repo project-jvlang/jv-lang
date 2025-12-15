@@ -165,8 +165,7 @@ impl TokenTrivia {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum JsonConfidence {
     #[default]
     None,
@@ -174,7 +173,6 @@ pub enum JsonConfidence {
     Medium,
     High,
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum StringDelimiterKind {

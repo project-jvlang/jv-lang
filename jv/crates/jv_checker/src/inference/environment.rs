@@ -217,10 +217,7 @@ fn substitute_type(ty: &TypeKind, subs: &HashMap<TypeId, TypeKind>) -> TypeKind 
         TypeKind::Boxed(primitive) => TypeKind::Boxed(*primitive),
         TypeKind::Reference(name) => TypeKind::Reference(name.clone()),
         TypeKind::Optional(inner) => TypeKind::Optional(Box::new(substitute_type(inner, subs))),
-        TypeKind::Variable(id) => subs
-            .get(id)
-            .cloned()
-            .unwrap_or(TypeKind::Variable(*id)),
+        TypeKind::Variable(id) => subs.get(id).cloned().unwrap_or(TypeKind::Variable(*id)),
         TypeKind::Function(params, ret) => TypeKind::Function(
             params
                 .iter()

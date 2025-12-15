@@ -45,7 +45,7 @@ fn lowers_binary_expression_with_precedence() {
 
 #[test]
 fn lowers_call_and_member_access() {
-    let exprs = lower_source("foo.bar(1, 2)");
+    let exprs = lower_source("foo.bar(1 2)");
     let expr = exprs.first().expect("should lower expression");
     match expr {
         Expression::Call { function, args, .. } => {

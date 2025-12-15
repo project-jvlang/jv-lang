@@ -115,13 +115,16 @@ pub fn parse_class(bytes: &[u8]) -> Result<ParsedClass, ClassParseError> {
 
         if is_static {
             if name != "<clinit>"
-                && let Ok(signature) = parse_method_descriptor(descriptor) {
-                    static_methods.push((name.to_string(), signature));
-                }
-        } else if is_accessible && name != "<init>"
-            && let Ok(signature) = parse_method_descriptor(descriptor) {
-                instance_methods.push((name.to_string(), signature));
+                && let Ok(signature) = parse_method_descriptor(descriptor)
+            {
+                static_methods.push((name.to_string(), signature));
             }
+        } else if is_accessible
+            && name != "<init>"
+            && let Ok(signature) = parse_method_descriptor(descriptor)
+        {
+            instance_methods.push((name.to_string(), signature));
+        }
 
         skip_attributes(&mut reader, attributes_count)?;
     }

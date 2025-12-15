@@ -127,21 +127,27 @@ fun Stream<Double>.sum(): Double {
  */
 fun <T> Stream<T>.sumIntFamily(): Int
     where T : int, T : char, T : short {
-    return this
-        .mapToInt { candidate ->
-            when (candidate is Character) {
-                true -> candidate.toString().codePointAt(0)
-                else -> (candidate as Number).intValue()
-            }
+    val elements: List<T> = this.toListStream()
+    var total = 0
+    for (candidate in elements) {
+        val numericValue: Int = when (candidate is Character) {
+            true -> (candidate as Character).charValue()
+            else -> (candidate as Number).intValue()
         }
-        .sum()
+        total = total + numericValue
+    }
+    return total
 }
 
 fun <T> Stream<T>.sumLongFamily(): Long
     where T : long {
-    return this
-        .mapToLong { candidate -> (candidate as Number).longValue() }
-        .sum()
+    val elements: List<T> = this.toListStream()
+    var total = 0L
+    for (candidate in elements) {
+        val numeric = candidate as Number
+        total = total + numeric.longValue()
+    }
+    return total
 }
 
 fun <T> Stream<T>.sumFloatFamily(): Float
@@ -175,15 +181,15 @@ fun <T> Iterable<T>.filter(predicate: (T) -> Boolean): Stream<T> {
 }
 
 fun <T> Iterable<T>.take(count: Int): Stream<T> {
-    return this.toStream().limit(count)
+    return Sequence.take(Sequence.toStream(this) count)
 }
 
 fun <T> Iterable<T>.drop(count: Int): Stream<T> {
-    return this.toStream().skip(count)
+    return Sequence.drop(Sequence.toStream(this) count)
 }
 
 fun <T, R> Iterable<T>.flatMapIterable(transform: (T) -> Iterable<R>): Stream<R> {
-    return this.toStream().flatMap { value -> transform(value).toStream() }
+    return Sequence.flatMapIterable(Sequence.toStream(this) transform)
 }
 
 fun <T, R> Iterable<T>.flatMapStream(transform: (T) -> Stream<R>): Stream<R> {
@@ -195,28 +201,23 @@ fun <T : Comparable<T>> Iterable<T>.sorted(): Stream<T> {
 }
 
 fun <T, R : Comparable<R>> Iterable<T>.sortedBy(selector: (T) -> R): Stream<T> {
-    return this.toStream().sorted { left right ->
-        selector(left).compareTo(selector(right))
-    }
+    return Sequence.sortedBy(Sequence.toStream(this) selector)
 }
 
 fun <T> Iterable<T>.toList(): List<T> {
-    return this.toStream().toListStream()
+    return Sequence.toListStream(Sequence.toStream(this))
 }
 
 fun <T, R> Iterable<T>.fold(initial: R, operation: (R, T) -> R): R {
-    return this.toStream().fold(
-        initial
-        operation
-    )
+    return Sequence.fold(Sequence.toStream(this) initial operation)
 }
 
 fun <T> Iterable<T>.reduce(operation: (T, T) -> T): Optional<T> {
-    return this.toStream().reduce(operation)
+    return Sequence.reduce(Sequence.toStream(this) operation)
 }
 
 fun <T> Iterable<T>.countElements(): Long {
-    return this.toStream().count()
+    return Sequence.countElements(Sequence.toStream(this))
 }
 
 fun Iterable<Byte>.sum(): Int {
@@ -261,7 +262,7 @@ fun <T, K, V> Iterable<T>.associate(transform: (T) -> Map.Entry<K, V>): Map<K, V
     val result = LinkedHashMap<K, V>()
     for (element in this) {
         val entry = transform(element)
-        result.put(entry.getKey(), entry.getValue())
+        result.put(entry.getKey() entry.getValue())
     }
     return result
 }

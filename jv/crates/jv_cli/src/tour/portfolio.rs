@@ -350,11 +350,12 @@ fn build_project_readme(project: &Project, artifact: &JarArtifact) -> String {
                 content.push_str(&format!("- {}\n", item));
             }
             if let Some(code) = step.code
-                && !code.trim().is_empty() {
-                    content.push_str("\n```jv\n");
-                    content.push_str(code.trim());
-                    content.push_str("\n```\n");
-                }
+                && !code.trim().is_empty()
+            {
+                content.push_str("\n```jv\n");
+                content.push_str(code.trim());
+                content.push_str("\n```\n");
+            }
             if !step.verification.is_empty() {
                 content.push_str("\n検証コマンド:\n");
                 for command in step.verification {

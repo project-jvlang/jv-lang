@@ -4,7 +4,7 @@ use super::facts::{
 };
 use jv_ast::Span;
 use jv_ast::expression::ImplicitWhenEnd;
-use jv_ast::{Expression, Literal, Pattern};
+use jv_ast::{BinaryOp, Expression, Literal, Pattern};
 
 /// Produces branch-level narrowing snapshots for a `when` expression.
 pub fn analyze(expression: &Expression) -> NarrowingFacts {
@@ -53,6 +53,11 @@ pub fn analyze(expression: &Expression) -> NarrowingFacts {
             has_narrowing = true;
             snapshot.set_guard_span(expression_span(guard).cloned());
             snapshot.mark_guard_evaluated();
+            if let Some(name) = subject_name.as_ref()
+                && guard_implies_non_null(guard, name)
+            {
+                snapshot.push_on_match(NarrowedBinding::new(name, NarrowedNullability::NonNull));
+            }
         }
 
         // Only record snapshots that actually narrow types or have guards
@@ -96,12 +101,22 @@ fn extract_identifier(expr: &Expression) -> Option<&str> {
     }
 }
 
+fn guard_implies_non_null(expr: &Expression, subject: &str) -> bool {
+    match expr {
+        Expression::Binary { op, left, .. } if *op == BinaryOp::Is => {
+            matches!(left.as_ref(), Expression::Identifier(name, _) if name == subject)
+        }
+        _ => false,
+    }
+}
+
 fn fallback_span(
     else_expr: Option<&Expression>,
     implicit_end: &Option<ImplicitWhenEnd>,
 ) -> Option<Span> {
-    else_expr
-        .and_then(expression_span)
-        .cloned()
-        .or_else(|| implicit_end.as_ref().map(|ImplicitWhenEnd::Unit { span }| span.clone()))
+    else_expr.and_then(expression_span).cloned().or_else(|| {
+        implicit_end
+            .as_ref()
+            .map(|ImplicitWhenEnd::Unit { span }| span.clone())
+    })
 }

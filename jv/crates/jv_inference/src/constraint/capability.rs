@@ -97,13 +97,13 @@ impl<'env> CapabilityDictionaryResolver<'env> {
             && let Some(implementation) = candidates
                 .iter()
                 .find(|entry| entry.implementor.as_str() == preferred)
-            {
-                return Ok(CapabilitySolution::new(
-                    implementation.implementor.clone(),
-                    implementation.binding_type.clone(),
-                    implementation.dispatch,
-                ));
-            }
+        {
+            return Ok(CapabilitySolution::new(
+                implementation.implementor.clone(),
+                implementation.binding_type.clone(),
+                implementation.dispatch,
+            ));
+        }
 
         if candidates.is_empty() {
             return Err(CapabilityResolutionError::NotFound {

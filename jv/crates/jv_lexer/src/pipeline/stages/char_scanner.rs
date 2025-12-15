@@ -241,22 +241,19 @@ impl CharScanner {
         Ok(())
     }
 
-    fn consume_radix_digits(
-        &mut self,
-        source: &str,
-        radix: u32,
-    ) -> Result<bool, LexError> {
+    fn consume_radix_digits(&mut self, source: &str, radix: u32) -> Result<bool, LexError> {
         let mut consumed_digit = false;
         let mut last_was_underscore = false;
 
         while let Some(ch) = self.peek_char_from(source) {
             if ch == '_' {
                 if let Some(next) = self.peek_char_offset(source, 1)
-                    && next.is_digit(radix) {
-                        self.advance_char(ch, source)?;
-                        last_was_underscore = true;
-                        continue;
-                    }
+                    && next.is_digit(radix)
+                {
+                    self.advance_char(ch, source)?;
+                    last_was_underscore = true;
+                    continue;
+                }
                 return Err(LexError::UnexpectedChar(
                     '_',
                     self.position.line,
@@ -393,11 +390,12 @@ impl CharScanner {
                 }
                 '_' => {
                     if let Some(next) = self.peek_char_offset(source, 1)
-                        && next.is_ascii_digit() {
-                            self.advance_char(ch, source)?;
-                            trailing_separator = Some('_');
-                            continue;
-                        }
+                        && next.is_ascii_digit()
+                    {
+                        self.advance_char(ch, source)?;
+                        trailing_separator = Some('_');
+                        continue;
+                    }
                     return Err(LexError::UnexpectedChar(
                         '_',
                         self.position.line,
@@ -430,9 +428,10 @@ impl CharScanner {
                     }
                     let mut lookahead = 1;
                     if let Some(sign) = self.peek_char_offset(source, 1)
-                        && matches!(sign, '+' | '-') {
-                            lookahead += 1;
-                        }
+                        && matches!(sign, '+' | '-')
+                    {
+                        lookahead += 1;
+                    }
                     if self
                         .peek_char_offset(source, lookahead)
                         .map(|c| c.is_ascii_digit())
@@ -485,15 +484,16 @@ impl CharScanner {
 
     fn consume_numeric_suffix(&mut self, source: &str) -> Result<(), LexError> {
         if let Some(suffix) = self.peek_char_from(source)
-            && matches!(suffix, 'f' | 'F' | 'd' | 'D' | 'l' | 'L' | 's' | 'S') {
-                let next_is_ident = self
-                    .peek_char_offset(source, 1)
-                    .map(Self::is_identifier_continue)
-                    .unwrap_or(false);
-                if !next_is_ident {
-                    self.advance_char(suffix, source)?;
-                }
+            && matches!(suffix, 'f' | 'F' | 'd' | 'D' | 'l' | 'L' | 's' | 'S')
+        {
+            let next_is_ident = self
+                .peek_char_offset(source, 1)
+                .map(Self::is_identifier_continue)
+                .unwrap_or(false);
+            if !next_is_ident {
+                self.advance_char(suffix, source)?;
             }
+        }
         Ok(())
     }
 
@@ -1034,10 +1034,7 @@ impl CharScanner {
         Ok(self.take_slice(source, start, self.cursor))
     }
 
-    fn consume_trivia(
-        &mut self,
-        source: &str,
-    ) -> Result<Option<TokenTrivia>, LexError> {
+    fn consume_trivia(&mut self, source: &str) -> Result<Option<TokenTrivia>, LexError> {
         let mut saw_trivia = false;
         while let Some(ch) = self.peek_char_from(source) {
             match ch {

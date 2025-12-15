@@ -100,9 +100,10 @@ impl TerminationGuard {
             self.depth -= 1;
         }
         if let Some(node) = node
-            && let Some(position) = self.stack.iter().rposition(|candidate| *candidate == node) {
-                self.stack.remove(position);
-            }
+            && let Some(position) = self.stack.iter().rposition(|candidate| *candidate == node)
+        {
+            self.stack.remove(position);
+        }
     }
 
     /// Returns the current recursion depth (testing visibility only).

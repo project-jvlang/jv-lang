@@ -17,10 +17,7 @@ pub fn derive_type_name(type_decl: &str) -> Option<String> {
 
 fn clean_type_token(raw: &str) -> String {
     let trimmed = raw.trim_matches(|c: char| c == '{' || c == ';');
-    let split = trimmed
-        .split(['<', '('])
-        .next()
-        .unwrap_or(trimmed);
+    let split = trimmed.split(['<', '(']).next().unwrap_or(trimmed);
     split.trim().to_string()
 }
 

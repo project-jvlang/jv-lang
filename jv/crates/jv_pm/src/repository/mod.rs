@@ -214,9 +214,9 @@ impl RepositoryManager {
                 .global_mirrors
                 .iter()
                 .find(|mirror| matches_pattern(&repo.name, &mirror.mirror_of))
-            {
-                return Cow::Owned(mirror.url.clone());
-            }
+        {
+            return Cow::Owned(mirror.url.clone());
+        }
 
         Cow::Borrowed(&repo.url)
     }
@@ -251,9 +251,9 @@ impl RepositoryManager {
             && excludes
                 .iter()
                 .any(|pattern| matches_pattern(group_id, pattern))
-            {
-                return false;
-            }
+        {
+            return false;
+        }
 
         if let Some(includes) = &filter.include_groups {
             return includes

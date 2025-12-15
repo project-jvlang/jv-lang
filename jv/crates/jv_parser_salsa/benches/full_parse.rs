@@ -56,7 +56,6 @@ pub fn bench_full_parse(c: &mut Criterion) {
                 }
             });
         });
-
     }
 
     let (modules_path, jdk_modules) = load_jdk_modules_entries().unwrap_or_else(|err| {

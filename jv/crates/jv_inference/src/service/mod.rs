@@ -84,8 +84,7 @@ impl fmt::Display for TypeLevelValue {
 }
 
 /// Telemetry counters emitted by the TypeFacts service for `--telemetry`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct TypeFactsTelemetry {
     /// Number of kind checks performed during the inference pass.
     pub kind_checks_count: u64,
@@ -113,7 +112,6 @@ impl TypeFactsTelemetry {
         }
     }
 }
-
 
 /// Describes the read-only facts that the inference engine exposes once analysis completes.
 ///
@@ -796,10 +794,7 @@ impl TypeFactsBuilder {
         symbol: impl Into<String>,
         annotation: impl Into<String>,
     ) -> &mut Self {
-        let entry = self
-            .java_annotations
-            .entry(symbol.into())
-            .or_default();
+        let entry = self.java_annotations.entry(symbol.into()).or_default();
         entry.push(annotation.into());
         self
     }

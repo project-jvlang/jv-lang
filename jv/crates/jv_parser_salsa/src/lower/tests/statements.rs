@@ -93,3 +93,40 @@ fn skips_if_statement_and_reports_parser_error() {
         lowering.statements
     );
 }
+
+#[test]
+fn lowers_inline_test_dataset_rows_as_columns() {
+    let source = r#"
+        test "dataset addition" [
+            ["carry" 11 17 28]
+            ["negative" -5 3 -2]
+        ] (label: String, lhs: Int, rhs: Int, expected: Int) {
+            val sum = lhs + rhs
+            sum == expected
+        }
+    "#;
+    let result = lower_source(source);
+    assert!(
+        result.diagnostics.is_empty(),
+        "diagnostics: {:?}",
+        result.diagnostics
+    );
+    let stmt = result
+        .statements
+        .first()
+        .expect("should lower into a test statement");
+    match stmt {
+        Statement::TestDeclaration(decl) => {
+            let dataset = decl.dataset.as_ref().expect("dataset should be present");
+            match dataset {
+                jv_ast::statement::TestDataset::InlineArray { rows, .. } => {
+                    assert_eq!(rows.len(), 2);
+                    assert_eq!(rows[0].values.len(), 4, "row0: {:?}", rows[0].values);
+                    assert_eq!(rows[1].values.len(), 4, "row1: {:?}", rows[1].values);
+                }
+                other => panic!("expected InlineArray dataset, got {:?}", other),
+            }
+        }
+        other => panic!("expected TestDeclaration, got {:?}", other),
+    }
+}

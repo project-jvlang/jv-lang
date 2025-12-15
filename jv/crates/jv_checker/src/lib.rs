@@ -187,9 +187,10 @@ impl WhenBranchNullability {
                 .on_match()
                 .iter()
                 .find(|binding| binding.variable == subject)
-                && let Some(fallback) = self.fallback_nullability.as_mut() {
-                    *fallback = to_nullability_flag(binding.nullability);
-                }
+            && let Some(fallback) = self.fallback_nullability.as_mut()
+        {
+            *fallback = to_nullability_flag(binding.nullability);
+        }
     }
 }
 
@@ -661,7 +662,6 @@ impl TypeChecker {
 
     /// Check for forbidden Java syntax or patterns.
     pub fn check_forbidden_syntax(&self, _program: &Program) -> Vec<String> {
-        
         // This would check for patterns that shouldn't appear in jv code
         // For example: raw Java generics syntax, null checks without ?. operator, etc.
         Vec::new()

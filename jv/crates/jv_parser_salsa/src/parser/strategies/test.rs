@@ -17,25 +17,19 @@ impl StatementStrategy for TestStrategy {
     fn parse(&self, ctx: &mut ParserContext) -> bool {
         ctx.start_node(SyntaxKind::TestDeclaration);
         ctx.bump(); // test
-        if matches!(
-            ctx.peek_kind(),
-            Some(TokenKind::Identifier | TokenKind::String)
-        ) {
+        // Name / dataset / parameter list are lowered from tokens; here we only need to
+        // consume them up to the `{ ... }` block to avoid syntax errors.
+        while let Some(kind) = ctx.peek_kind() {
+            if matches!(kind, TokenKind::LeftBrace | TokenKind::Eof) {
+                break;
+            }
             ctx.bump();
         }
-        if matches!(
-            ctx.current(),
-            Some(tok) if tok.lexeme_eq("dataset")
-        ) {
-            ctx.bump(); // dataset
-            if matches!(
-                ctx.peek_kind(),
-                Some(TokenKind::Identifier | TokenKind::String)
-            ) {
-                ctx.bump();
-            }
+        if ctx.peek_kind() == Some(TokenKind::LeftBrace) {
+            parse_block(ctx);
+        } else {
+            ctx.error("テスト本体の `{}` ブロックが必要です");
         }
-        parse_block(ctx);
         ctx.finish_node();
         true
     }

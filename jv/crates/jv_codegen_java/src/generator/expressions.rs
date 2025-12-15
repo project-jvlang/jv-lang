@@ -76,14 +76,14 @@ impl JavaCodeGenerator {
                 // treating them as functional values with `.apply(...)`.
                 if effective_name == "apply"
                     && let Some(IrExpression::Identifier { name, .. }) = receiver.as_deref()
-                        && self.script_method_names.contains(name) {
-                            let rendered_args =
-                                self.render_arguments_with_style(args, *argument_style)?;
-                            if let Some(owner) = self.owner_for_unqualified_call(name) {
-                                return Ok(format!("{owner}.{name}({rendered_args})"));
-                            }
-                            return Ok(format!("{name}({rendered_args})"));
-                        }
+                    && self.script_method_names.contains(name)
+                {
+                    let rendered_args = self.render_arguments_with_style(args, *argument_style)?;
+                    if let Some(owner) = self.owner_for_unqualified_call(name) {
+                        return Ok(format!("{owner}.{name}({rendered_args})"));
+                    }
+                    return Ok(format!("{name}({rendered_args})"));
+                }
                 if let Some(shortcut) = self.try_render_collectors_to_list(
                     receiver.as_deref(),
                     effective_name,
@@ -180,10 +180,11 @@ impl JavaCodeGenerator {
             }
             IrExpression::Assignment { target, value, .. } => {
                 if let IrExpression::Identifier { name, .. } = target.as_ref()
-                    && self.mutable_captures.contains(name) {
-                        let value_expr = self.generate_expression(value)?;
-                        return Ok(format!("{}.set({})", name, value_expr));
-                    }
+                    && self.mutable_captures.contains(name)
+                {
+                    let value_expr = self.generate_expression(value)?;
+                    return Ok(format!("{}.set({})", name, value_expr));
+                }
                 Ok(format!(
                     "{} = {}",
                     self.generate_expression(target)?,
@@ -221,9 +222,10 @@ impl JavaCodeGenerator {
                 ..
             } => {
                 if *delimiter == SequenceDelimiter::Whitespace
-                    && let Some(values) = initializer {
-                        return self.render_whitespace_array(values);
-                    }
+                    && let Some(values) = initializer
+                {
+                    return self.render_whitespace_array(values);
+                }
 
                 let mut expr_str = format!("new {}", self.generate_type(element_type)?);
                 if let Some(values) = initializer {
@@ -514,10 +516,11 @@ impl JavaCodeGenerator {
 
         for slot_index in slot_indices.iter_mut() {
             if slot_index.is_none()
-                && let Some(index) = (0..elements.len()).find(|idx| !used_inputs[*idx]) {
-                    *slot_index = Some(index);
-                    used_inputs[index] = true;
-                }
+                && let Some(index) = (0..elements.len()).find(|idx| !used_inputs[*idx])
+            {
+                *slot_index = Some(index);
+                used_inputs[index] = true;
+            }
         }
 
         if let Some(missing_slot) = slot_indices.iter().position(|opt| opt.is_none()) {
@@ -608,14 +611,15 @@ impl JavaCodeGenerator {
                     .owner
                     .as_deref()
                     .is_some_and(|owner| owner == "java.util.stream.Collectors")
-                {
-                    return true;
-                }
+            {
+                return true;
+            }
 
             if let Some(rcv) = receiver
-                && let IrExpression::Identifier { name, .. } = &**rcv {
-                    return name == "Collectors";
-                }
+                && let IrExpression::Identifier { name, .. } = &**rcv
+            {
+                return name == "Collectors";
+            }
         }
         false
     }
@@ -724,9 +728,10 @@ impl JavaCodeGenerator {
             }
         }
         if let Some(implicit) = implicit_end
-            && let Some(rendered) = self.render_implicit_when_end_case(implicit, cases)? {
-                builder.push_line(&rendered);
-            }
+            && let Some(rendered) = self.render_implicit_when_end_case(implicit, cases)?
+        {
+            builder.push_line(&rendered);
+        }
         builder.dedent();
         builder.push_line("}");
         Ok(builder.build())
@@ -1762,9 +1767,10 @@ impl JavaCodeGenerator {
 
     fn infer_iterable_hint_from_expression(expr: &IrExpression) -> Option<JavaType> {
         if let Some(java_type) = Self::expression_java_type(expr)
-            && Self::is_java_iterable_type_from_type(java_type) {
-                return Some(java_type.clone());
-            }
+            && Self::is_java_iterable_type_from_type(java_type)
+        {
+            return Some(java_type.clone());
+        }
 
         match expr {
             IrExpression::MethodCall {
@@ -1780,19 +1786,20 @@ impl JavaCodeGenerator {
 
                 if let Some(target) = resolved_target
                     && let Some(owner) = target.owner.as_deref()
-                        && Self::is_java_iterable_type(owner)
-                            && Self::is_iterable_factory_method(owner, method_name)
-                        {
-                            return Some(Self::iterable_hint_from_owner(owner));
-                        }
+                    && Self::is_java_iterable_type(owner)
+                    && Self::is_iterable_factory_method(owner, method_name)
+                {
+                    return Some(Self::iterable_hint_from_owner(owner));
+                }
 
                 if let Some(recv_expr) = receiver
                     && let Some(recv_type) = Self::expression_java_type(recv_expr)
-                        && Self::is_java_iterable_type_from_type(recv_type)
-                            && let Some(owner) = Self::iterable_type_name(recv_type)
-                                && Self::is_iterable_factory_method(owner, method_name) {
-                                    return Some(Self::iterable_hint_from_owner(owner));
-                                }
+                    && Self::is_java_iterable_type_from_type(recv_type)
+                    && let Some(owner) = Self::iterable_type_name(recv_type)
+                    && Self::is_iterable_factory_method(owner, method_name)
+                {
+                    return Some(Self::iterable_hint_from_owner(owner));
+                }
 
                 None
             }
@@ -1903,9 +1910,10 @@ impl JavaCodeGenerator {
 
     fn owner_for_unqualified_call(&self, method_name: &str) -> Option<&str> {
         if let Some(owner) = self.script_class_simple_name.as_deref()
-            && self.script_method_names.contains(method_name) {
-                return Some(owner);
-            }
+            && self.script_method_names.contains(method_name)
+        {
+            return Some(owner);
+        }
         None
     }
 
@@ -1916,14 +1924,15 @@ impl JavaCodeGenerator {
 
         if let Some(index) = self.symbol_index()
             && let Some(JavaType::Reference { name, .. }) = Self::expression_java_type(receiver)
-                && let Some(entry) = index.lookup_type(name) {
-                    if entry.has_instance_method(field_name) {
-                        return true;
-                    }
-                    if entry.has_field(field_name) {
-                        return false;
-                    }
-                }
+            && let Some(entry) = index.lookup_type(name)
+        {
+            if entry.has_instance_method(field_name) {
+                return true;
+            }
+            if entry.has_field(field_name) {
+                return false;
+            }
+        }
 
         match field_name {
             "size" => Self::is_java_stream_expression(receiver),

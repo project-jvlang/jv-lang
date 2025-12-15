@@ -51,9 +51,7 @@ impl TuplePlanner {
                 initializer,
                 ..
             } => {
-                let descriptor = type_annotation
-                    .as_ref()
-                    .and_then(parse_tuple_descriptor);
+                let descriptor = type_annotation.as_ref().and_then(parse_tuple_descriptor);
                 let context = ExpressionContext::with_usage(
                     TupleUsageKind::BindingInitializer,
                     Some(name.clone()),
@@ -68,9 +66,7 @@ impl TuplePlanner {
                 ..
             } => {
                 if let Some(expr) = initializer {
-                    let descriptor = type_annotation
-                        .as_ref()
-                        .and_then(parse_tuple_descriptor);
+                    let descriptor = type_annotation.as_ref().and_then(parse_tuple_descriptor);
                     let context = ExpressionContext::with_usage(
                         TupleUsageKind::BindingInitializer,
                         Some(name.clone()),
@@ -85,9 +81,7 @@ impl TuplePlanner {
                 body,
                 ..
             } => {
-                let descriptor = return_type
-                    .as_ref()
-                    .and_then(parse_tuple_descriptor);
+                let descriptor = return_type.as_ref().and_then(parse_tuple_descriptor);
                 self.function_stack
                     .push(FunctionContext::new(name.clone(), descriptor));
                 self.visit_expression(body, &ExpressionContext::general());
@@ -430,9 +424,10 @@ impl TuplePlanner {
 
     fn visit_try_clause(&mut self, clause: &TryCatchClause) {
         if let Some(parameter) = &clause.parameter
-            && let Some(default) = &parameter.default_value {
-                self.visit_expression(default, &ExpressionContext::general());
-            }
+            && let Some(default) = &parameter.default_value
+        {
+            self.visit_expression(default, &ExpressionContext::general());
+        }
         self.visit_expression(&clause.body, &ExpressionContext::general());
     }
 
@@ -458,17 +453,19 @@ impl TuplePlanner {
             span: span.clone(),
         });
         if usage_kind == TupleUsageKind::FunctionReturn
-            && let Some(owner) = &context.owner {
-                accumulator.function_owners.insert(owner.clone());
-            }
+            && let Some(owner) = &context.owner
+        {
+            accumulator.function_owners.insert(owner.clone());
+        }
 
         if let Some(descriptor) = context.descriptor.as_ref()
-            && descriptor.arity() == arity {
-                for (index, element) in descriptor.elements.iter().enumerate() {
-                    let hint = annotation_hint(&element.ty);
-                    accumulator.update_type_hint(index, hint);
-                }
+            && descriptor.arity() == arity
+        {
+            for (index, element) in descriptor.elements.iter().enumerate() {
+                let hint = annotation_hint(&element.ty);
+                accumulator.update_type_hint(index, hint);
             }
+        }
     }
 
     fn into_plans(self) -> Vec<TupleRecordPlan> {

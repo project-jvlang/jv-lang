@@ -50,15 +50,17 @@ fn extract_log_plan(ir_program: &IrProgram) -> Option<&jv_ir::LogInvocationPlan>
             ..
         } = statement
             && name == "main"
-                && let IrExpression::Block { statements, .. } = body {
-                    return statements.iter().find_map(|stmt| {
-                        if let IrStatement::Expression { expr, .. } = stmt
-                            && let IrExpression::LogInvocation { plan, .. } = expr {
-                                return Some(plan.as_ref());
-                            }
-                        None
-                    });
+            && let IrExpression::Block { statements, .. } = body
+        {
+            return statements.iter().find_map(|stmt| {
+                if let IrStatement::Expression { expr, .. } = stmt
+                    && let IrExpression::LogInvocation { plan, .. } = expr
+                {
+                    return Some(plan.as_ref());
                 }
+                None
+            });
+        }
         None
     })
 }

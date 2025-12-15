@@ -2,9 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use jv_codegen_java::{JavaCodeGenConfig, JavaTarget, generate_java_source_with_config};
 use jv_ir::transform::transform_program_with_context_profiled;
 use jv_ir::{TransformContext, TransformProfiler};
-use jv_codegen_java::{generate_java_source_with_config, JavaCodeGenConfig, JavaTarget};
 use jv_parser::Parser;
 
 const ITERATIONS: usize = 6;
@@ -70,10 +70,7 @@ fn run_iterations(
     runs
 }
 
-fn measure_single_iteration(
-    source: &str,
-    config: &JavaCodeGenConfig,
-) -> PipelineRunMetrics {
+fn measure_single_iteration(source: &str, config: &JavaCodeGenConfig) -> PipelineRunMetrics {
     let parse_start = Instant::now();
     let program = Parser::parse(source)
         .expect("ベンチマークソースの解析に失敗しました")

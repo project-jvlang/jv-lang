@@ -41,8 +41,63 @@ impl StatementStrategy for UnitTypeDefStrategy {
             ctx.error("基底型を丸括弧で指定してください");
         }
 
+        // シンボル: `@ 温度(Double) ℃ { ... }` の `℃` のように、
+        // 基底型の後ろに単位シンボルが続くケースを許容する。
+        ctx.bump_while(|kind| {
+            matches!(
+                kind,
+                TokenKind::Whitespace
+                    | TokenKind::Newline
+                    | TokenKind::LayoutComma
+                    | TokenKind::FieldNameLabel
+                    | TokenKind::LineComment
+                    | TokenKind::BlockComment
+                    | TokenKind::JavaDocComment
+            )
+        });
+        while let Some(kind) = ctx.peek_kind() {
+            if kind == TokenKind::LeftBrace {
+                break;
+            }
+            if matches!(
+                kind,
+                TokenKind::Newline | TokenKind::Semicolon | TokenKind::Eof
+            ) {
+                break;
+            }
+            // 単位シンボル（例: `℃`）は Identifier としてトークナイズされないことがあるため、
+            // ブロック開始までのトークン列を許容して読み飛ばす。
+            ctx.bump();
+        }
+
         // 本体: { ... }
-        if !ctx.parse_block() {
+        // 単位定義ブロック内の詳細構文は DSL に委譲するため、ここでは波括弧の対応のみを取りながら
+        // トークンを消費して構文エラーを避ける。
+        if ctx.peek_kind() == Some(TokenKind::LeftBrace) {
+            ctx.start_node(SyntaxKind::Block);
+            let mut depth: usize = 0;
+            ctx.bump(); // {
+            while let Some(kind) = ctx.peek_kind() {
+                match kind {
+                    TokenKind::LeftBrace => {
+                        depth += 1;
+                        ctx.bump();
+                    }
+                    TokenKind::RightBrace => {
+                        ctx.bump();
+                        if depth == 0 {
+                            break;
+                        }
+                        depth = depth.saturating_sub(1);
+                    }
+                    TokenKind::Eof => break,
+                    _ => {
+                        ctx.bump();
+                    }
+                }
+            }
+            ctx.finish_node(); // Block
+        } else {
             ctx.error("単位定義の本体 `{` が必要です");
         }
 

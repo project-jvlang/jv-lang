@@ -199,14 +199,15 @@ impl WhenLoweringPlanner {
                 cases.clone(),
                 implicit_ir_end.clone(),
                 resolved_result_type.clone(),
-            ) {
-                let description = format!(
-                    "strategy=IfChain arms={} exhaustive={}",
-                    cases.len(),
-                    exhaustive
-                );
-                return Ok(WhenLoweringPlan { description, ir });
-            }
+            )
+        {
+            let description = format!(
+                "strategy=IfChain arms={} exhaustive={}",
+                cases.len(),
+                exhaustive
+            );
+            return Ok(WhenLoweringPlan { description, ir });
+        }
 
         let java_type = resolved_result_type;
         let strategy_label = if guard_count > 0 { "Hybrid" } else { "Switch" };
@@ -638,18 +639,10 @@ fn describe_exhaustiveness(summary: &PatternAnalysisSummary) -> String {
 }
 
 fn requires_boolean_if_chain(discriminant_type: &JavaType, cases: &[IrSwitchCase]) -> bool {
-    is_boolean_type(discriminant_type) && cases.iter().all(boolean_case_supported)
-}
-
-fn is_boolean_type(java_type: &JavaType) -> bool {
-    match java_type {
-        JavaType::Primitive(name) => name == "boolean",
-        JavaType::Reference { name, .. } => {
-            let simple = name.rsplit('.').next().unwrap_or(name);
-            simple == "Boolean"
-        }
-        _ => false,
-    }
+    let _ = discriminant_type;
+    // Prefer `?:` over `switch` when the arm labels are boolean literals.
+    // Even when type facts are missing, emitting a boolean `switch` would require preview features.
+    cases.iter().all(boolean_case_supported)
 }
 
 fn boolean_case_supported(case: &IrSwitchCase) -> bool {
@@ -680,6 +673,27 @@ fn build_boolean_if_chain(
             default_body = Some(case.body);
         } else {
             filtered_cases.push(case);
+        }
+    }
+
+    // `when (cond) { true -> A false -> B }` のような boolean 分岐は、else がなくても
+    // `cond ? A : B` に落とし込めるため、片方の分岐をフォールバックとして採用する。
+    if default_body.is_none() && implicit_end.is_none() {
+        if let Some((idx, _)) = filtered_cases.iter().enumerate().find(|(_, case)| {
+            case.guard.is_none()
+                && case.labels.len() == 1
+                && matches!(
+                    case.labels[0],
+                    IrCaseLabel::Literal(Literal::Boolean(false))
+                )
+        }) {
+            default_body = Some(filtered_cases.remove(idx).body);
+        } else if let Some((idx, _)) = filtered_cases.iter().enumerate().find(|(_, case)| {
+            case.guard.is_none()
+                && case.labels.len() == 1
+                && matches!(case.labels[0], IrCaseLabel::Literal(Literal::Boolean(true)))
+        }) {
+            default_body = Some(filtered_cases.remove(idx).body);
         }
     }
 

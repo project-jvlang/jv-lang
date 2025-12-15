@@ -279,7 +279,6 @@ fn test_nearest_conflict_resolver_depth_wins() {
             false,
         )],
     );
-    store_pom(cache.as_ref(), &reversed_root, &[]);
 
     let reversed_closure = reversed_resolver
         .resolve_closure_with_options(&[reversed_root], ClosureOptions::base())
