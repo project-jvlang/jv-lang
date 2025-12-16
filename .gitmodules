@@ -1,3 +1,7 @@
 [submodule ".spec-workflow"]
 	path = .spec-workflow
 	url = https://github.com/project-jvlang/jvlang-spec-workflow.git
+[submodule "docs"]
+	path = docs
+	url = https://github.com/project-jvlang/docs.git
+	branch = main
